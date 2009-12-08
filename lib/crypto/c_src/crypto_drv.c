@@ -543,15 +543,16 @@ static int crypto_control(ErlDrvData drv_data, unsigned int command, char *buf,
     {
 	/* buf = klen[4] key data */
 	int bf_direction;
+	const unsigned char *ukey;
 	const unsigned char *bf_dbuf; /* blowfish input data */
 	BF_KEY bf_key; /* blowfish key 8 */
 
 	klen = get_int32(buf);
-	key = buf + 4;
-	bf_dbuf = key + klen;
+	ukey = (unsigned char *) buf + 4;
+	bf_dbuf = ukey + klen;
 	dlen = len - 4 - klen;
 	if (dlen < 0) return -1;
-	BF_set_key(&bf_key, klen, key);
+	BF_set_key(&bf_key, klen, ukey);
 	bin = return_binary(rbuf,rlen,dlen);
 	if (bin==NULL) return -1;
 	bf_direction = command == DRV_BF_ECB_ENCRYPT ? BF_ENCRYPT : BF_DECRYPT;
@@ -563,19 +564,20 @@ static int crypto_control(ErlDrvData drv_data, unsigned int command, char *buf,
     case DRV_BF_CBC_DECRYPT:
     {
 	/* buf = klen[4] key ivec[8] data */
-	char* ivec;
+	unsigned char *ukey;
+	unsigned char* ivec;
 	unsigned char bf_tkey[8]; /* blowfish ivec */
 	int bf_direction;
 	const unsigned char *bf_dbuf; /* blowfish input data */
 	BF_KEY bf_key; /* blowfish key 8 */
 
 	klen = get_int32(buf);
-	key = buf + 4;
-	ivec = key + klen;
+	ukey = (unsigned char *)buf + 4;
+	ivec = ukey + klen;
 	bf_dbuf = ivec + 8;
 	dlen = len - 4 - klen - 8;
 	if (dlen < 0) return -1;
-	BF_set_key(&bf_key, klen, key);
+	BF_set_key(&bf_key, klen, ukey);
 	memcpy(bf_tkey, ivec, 8);
 	bin = return_binary(rbuf,rlen,dlen);
 	if (bin==NULL) return -1;
@@ -587,19 +589,20 @@ static int crypto_control(ErlDrvData drv_data, unsigned int command, char *buf,
     case DRV_BF_OFB64_ENCRYPT:
     {
 	/* buf = klen[4] key ivec[8] data */
-	char* ivec;
+	unsigned char *ukey;
+	unsigned char* ivec;
 	unsigned char bf_tkey[8]; /* blowfish ivec */
 	int bf_n; /* blowfish ivec pos */
 	const unsigned char *bf_dbuf; /* blowfish input data */
 	BF_KEY bf_key; /* blowfish key 8 */
 
 	klen = get_int32(buf);
-	key = buf + 4;
-	ivec = key + klen;
+	ukey = (unsigned char *)buf + 4;
+	ivec = ukey + klen;
 	bf_dbuf = ivec + 8;
 	dlen = len - 4 - klen - 8;
 	if (dlen < 0) return -1;
-	BF_set_key(&bf_key, klen, key);
+	BF_set_key(&bf_key, klen, ukey);
 	memcpy(bf_tkey, ivec, 8);
 	bin = return_binary(rbuf,rlen,dlen);
 	if (bin==NULL) return -1;
