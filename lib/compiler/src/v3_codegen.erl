@@ -1739,7 +1739,7 @@ load_arg_regs([], [{var,V}|As], I) -> [{I,V}|load_arg_regs([], As, I+1)];
 load_arg_regs([], [A|As], I) -> [{I,A}|load_arg_regs([], As, I+1)];
 load_arg_regs(Rs, [], _) -> Rs.
 
-%% Returns the variables must be saved and are currently in the
+%% Returns the variables that must be saved and are currently in the
 %% x registers that are about to be overwritten by the arguments.
 
 unsaved_registers(Regs, Stk, Fb, Lf, Vdb) ->
@@ -1888,7 +1888,7 @@ adjust_stack(Bef, Fb, Lf, Vdb) ->
     {saves(Saves, Bef#sr.reg, Stk1),
      Bef#sr{stk=Stk1}}.
 
-%% save_stack(Stack, FirstBefore, LastFrom, Vdb) -> {[SaveVar],NewStack}.
+%% save_stack(Stack, FirstBefore, LastFrom, Vdb) -> {NewStack, [SaveVar]}.
 %%  Save variables which are used past current point and which are not
 %%  already on the stack.
 
