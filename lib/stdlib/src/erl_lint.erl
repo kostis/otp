@@ -320,6 +320,11 @@ format_error(spec_wrong_arity) ->
 format_error({imported_predefined_type, Name}) ->
     io_lib:format("referring to built-in type ~w as a remote type; "
 		  "please take out the module name", [Name]);
+%% --- User defined guards ---
+format_error({user_defined_guard, {F, A}}) ->
+    io_lib:format("user defined guard ~p/~B", [F, A]);
+format_error({user_defined_guard, {M, F, A}}) ->
+    io_lib:format("user defined guard ~p:~p/~B", [M, F, A]);
 %% --- obsolete? unused? ---
 format_error({format_error, {Fmt, Args}}) ->
     io_lib:format(Fmt, Args);
@@ -1735,15 +1740,25 @@ gexpr({call,Line,{atom,_La,F},As}, Vt, St0) ->
 		true -> {Asvt,St1};
 		false -> {Asvt,add_error(Line, {explicit_export,F,A}, St1)}
 	    end;
-        false -> {Asvt,add_error(Line, illegal_guard_expr, St1)}
+        false -> %{Asvt,add_error(Line, illegal_guard_expr, St1)}
+                St2 = add_warning(Line, {user_defined_guard, {F,A}}, St1),
+                St3 = call_function(Line, F, A, St2),
+                {Asvt,St3}
     end;
 gexpr({call,Line,{remote,_Lr,{atom,_Lm,erlang},{atom,_Lf,F}},As}, Vt, St0) ->
     {Asvt,St1} = gexpr_list(As, Vt, St0),
     A = length(As),
     case erl_internal:guard_bif(F, A) orelse is_gexpr_op(F, A) of
         true -> {Asvt,St1};
-        false -> {Asvt,add_error(Line, illegal_guard_expr, St1)}
+        false -> %{Asvt,add_error(Line, illegal_guard_expr, St1)}
+                St2 = add_warning(Line, {user_defined_guard, {F,A}}, St1),
+                St3 = call_function(Line, F, A, St1),
+                {Asvt,St3}
     end;
+gexpr({call,Line,{remote,_Lr,{atom,_Lm,Module},{atom,_Lf,F}},As}, Vt, St0) ->
+    %% Support for user defined guards [remote function calls].
+    St1 = add_warning(Line, {user_defined_guard, {Module,F,length(As)}}, St0),
+    gexpr_list(As, Vt, St1);
 gexpr({call,L,{tuple,Lt,[{atom,Lm,erlang},{atom,Lf,F}]},As}, Vt, St) ->
     gexpr({call,L,{remote,Lt,{atom,Lm,erlang},{atom,Lf,F}},As}, Vt, St);
 gexpr({op,Line,Op,A}, Vt, St0) ->
@@ -1762,6 +1777,8 @@ gexpr({op,Line,Op,L,R}, Vt, St0) ->
 %% better error diagnostics.
 gexpr(E, _Vt, St) ->
     {[],add_error(element(2, E), illegal_guard_expr, St)}.
+%% TODO: Support for higher order functions ({call, _, {var, _, V}, [Args]}).
+
 
 %% gexpr_list(Expressions, VarTable, State) ->
 %%      {UsedVarTable,State'}

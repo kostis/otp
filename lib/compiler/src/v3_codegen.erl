@@ -273,7 +273,19 @@ match_cg(Le, Fail, Bef, St) ->
 match_cg({alt,F,S}, _Le, Fail, Bef, St0) ->
     {Tf,St1} = new_label(St0),
     {Fis,Faft,St2} = match_cg(F, Tf, Bef, St1),
-    {Sis,Saft,St3} = match_cg(S, Fail, Bef, St2),
+    %% Try to generate appropriate move instructions at the fail label,
+    %% by removing any registers whose values are also in the stack.
+    %% TODO: Use St instead of the process dictionary.
+    Int = case get(guard_stack) of
+        [Label|Tail] when Label =:= Tf ->
+            put(guard_stack, Tail), % pop
+            Stk = sets:from_list([V || {V} <- Bef#sr.stk]),
+            Reg = [R || {_, V} = R <- Bef#sr.reg, not sets:is_element(V, Stk)],
+            Bef#sr{reg = Reg};
+        _ ->
+            Bef
+    end,
+    {Sis,Saft,St3} = match_cg(S, Fail, Int, St2),
     Aft = sr_merge(Faft, Saft),
     {Fis ++ [{label,Tf}] ++ Sis,Aft,St3};
 match_cg({select,{var,Vname}=V,Scs0}, #l{a=Anno}, Fail, Bef, St) ->
@@ -969,7 +981,17 @@ guard_cg(#l{ke={block,Ts},i=I,vdb=Bdb}, Fail, _Vdb, Bef, St) ->
     guard_cg_list(Ts, Fail, I, Bdb, Bef, St);
 guard_cg(#l{ke={test,Test,As},i=I,vdb=_Tdb}, Fail, Vdb, Bef, St) ->
     test_cg(Test, As, Fail, I, Vdb, Bef, St);
-guard_cg(G, _Fail, Vdb, Bef, St) ->
+guard_cg(G, Fail, Vdb, Bef, St) ->
+    %% Keep track of user defined guards, grouped by their fail label.
+    %% TODO: Use St instead of the process dictionary.
+    case G of
+        #l{ke = {call, _, _, _}} ->
+            put(guard_stack, % push
+                [Fail|case get(guard_stack) of
+                      undefined -> []; T when is_list(T) -> T end]);
+        _ ->
+            ok
+    end,
     %%ok = io:fwrite("cg ~w: ~p~n", [?LINE,{G,Fail,Vdb,Bef}]),
     {Gis,Aft,St1} = cg(G, Vdb, Bef, St),
     %%ok = io:fwrite("cg ~w: ~p~n", [?LINE,{Aft}]),
@@ -1065,7 +1087,8 @@ call_cg({remote,Mod,Name}, As, Rs, Le, Vdb, Bef, St0)
     {Sis ++ Frees ++ [Call],Aft,St};
 call_cg(Func, As, Rs, Le, Vdb, Bef, St0) ->
     case St0 of
-	#cg{bfail=Fail} when Fail =/= 0 ->
+        #cg{bfail=Fail} when Fail =/= 0,
+                             {remote,{atom,erlang},{atom,error}} =:= Func ->
 	    %% Inside a guard. The only allowed function call is to
 	    %% erlang:error/1,2. We will generate the following code:
 	    %%
