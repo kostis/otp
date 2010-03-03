@@ -1752,7 +1752,7 @@ gexpr({call,Line,{remote,_Lr,{atom,_Lm,erlang},{atom,_Lf,F}},As}, Vt, St0) ->
         true -> {Asvt,St1};
         false -> %{Asvt,add_error(Line, illegal_guard_expr, St1)}
                 St2 = add_warning(Line, {user_defined_guard, {F,A}}, St1),
-                St3 = call_function(Line, F, A, St1),
+                St3 = call_function(Line, F, A, St2),
                 {Asvt,St3}
     end;
 gexpr({call,Line,{remote,_Lr,{atom,_Lm,Module},{atom,_Lf,F}},As}, Vt, St0) ->
