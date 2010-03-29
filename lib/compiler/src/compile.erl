@@ -657,6 +657,10 @@ binary_passes() ->
 %% Analyses the module for side effects and reports impure guards.
 -spec core_purity(#compile{}) -> {ok, #compile{}} | {error, #compile{}}.
 core_purity(#compile{code = Core, options = Opts} = St) ->
+    case proplists:get_value(all_pure, Opts) of
+        true ->
+            {ok, St};
+        _ ->
     PltFile = proplists:get_value(plt, Opts, purity_plt:get_default_path()),
     Plt = case purity_plt:load(PltFile) of
         {ok, Data} ->
@@ -667,7 +671,7 @@ core_purity(#compile{code = Core, options = Opts} = St) ->
     end,
     Table = purity:module(Core, Opts, Plt),
     Final = purity:specialize(Table, Opts),
-    find_impure_guards(Final, St).
+    find_impure_guards(Final, St) end.
 
 %% Converts warnings of user defined guards to errors, depending
 %% on their purity.
