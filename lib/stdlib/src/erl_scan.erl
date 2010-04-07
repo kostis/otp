@@ -1304,4 +1304,5 @@ reserved_word('bsr') -> true;
 reserved_word('or') -> true;
 reserved_word('xor') -> true;
 reserved_word('spec') -> true;
+reserved_word('callback') -> true;
 reserved_word(_) -> false.
