@@ -108,8 +108,10 @@ lattribute({attribute,_Line,type,Type}, Hook) ->
     [typeattr(type, Type, Hook),leaf(".\n")];
 lattribute({attribute,_Line,opaque,Type}, Hook) ->
     [typeattr(opaque, Type, Hook),leaf(".\n")];
-lattribute({attribute,_Line,spec,Arg}, _Hook) ->
-    [specattr(Arg),leaf(".\n")];
+lattribute({attribute,_Line,spec,Arg}, _Hook) -> %% TODO: Who removes the []?
+    [specattr("-spec ",Arg),leaf(".\n")];
+lattribute({attribute,_Line,callback,[Arg]}, _Hook) ->
+    [specattr("-callback ",Arg),leaf(".\n")];
 lattribute({attribute,_Line,Name,Arg}, Hook) ->
     [lattribute(Name, Arg, Hook),leaf(".\n")].
 
@@ -203,14 +205,14 @@ union_elem(T) ->
 tuple_type(Ts, F) ->
     {seq,${,$},[$,],ltypes(Ts, F)}.
 
-specattr({FuncSpec,TypeSpecs}) ->
+specattr(Tag,{FuncSpec,TypeSpecs}) ->
     Func = case FuncSpec of
                {F,_A} ->
                    format("~w", [F]);
                {M,F,_A} ->
                    format("~w:~w", [M, F])
            end,
-    {first,leaf("-spec "),
+    {first,leaf(Tag),
      {list,[{first,leaf(Func),spec_clauses(TypeSpecs)}]}}.
 
 spec_clauses(TypeSpecs) ->
