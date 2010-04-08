@@ -681,6 +681,8 @@ attribute_state({attribute,L,opaque,{TypeName,TypeDef,Args}}, St) ->
     type_def(opaque, L, TypeName, TypeDef, Args, St);
 attribute_state({attribute,L,spec,{Fun,Types}}, St) ->
     spec_decl(L, Fun, Types, St);
+attribute_state({attribute,_L,callback,{_Fun,_Types}}, St) -> %%TODO: Check?
+    St;
 attribute_state({attribute,L,on_load,Val}, St) ->
     on_load(L, Val, St);
 attribute_state({attribute,_L,_Other,_Val}, St) -> % Ignore others
@@ -701,6 +703,8 @@ function_state({attribute,L,opaque,{TypeName,TypeDef,Args}}, St) ->
     type_def(opaque, L, TypeName, TypeDef, Args, St);
 function_state({attribute,L,spec,{Fun,Types}}, St) ->
     spec_decl(L, Fun, Types, St);
+function_state({attribute,_L,callback,{_Fun,_Types}}, St) -> %%TODO: Remove
+    St;
 function_state({attribute,La,Attr,_Val}, St) ->
     add_error(La, {attribute,Attr}, St);
 function_state({function,L,N,A,Cs}, St) ->
