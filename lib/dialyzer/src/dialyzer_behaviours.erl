@@ -178,7 +178,8 @@ parse_spec(String, Records) ->
       case erl_parse:parse(Tokens) of
 	{ok, Form} ->
 	  case Form of
-	    {attribute, _, 'spec', {{Fun, _}, [TypeForm|_Constraint]}} ->
+	    {attribute, _, Name, {{Fun, _}, [TypeForm|_Constraint]}} 
+	    when (Name =:= 'spec') or (Name =:= 'callback') ->
 	      MaybeRemoteType = erl_types:t_from_form(TypeForm),
 	      try
 		Type = erl_types:t_solve_remote(MaybeRemoteType, Records),
