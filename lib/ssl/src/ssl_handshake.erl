@@ -32,7 +32,7 @@
 -include_lib("public_key/include/public_key.hrl").
 
 -export([master_secret/4, client_hello/4, server_hello/3, hello/2,
-	 hello_request/0, certify/5, certificate/3, 
+	 hello_request/0, certify/7, certificate/3, 
 	 client_certificate_verify/6, 
 	 certificate_verify/6, certificate_request/2,
 	 key_exchange/2, server_key_exchange_hash/2,  finished/4,
@@ -161,10 +161,25 @@ hello(#client_hello{client_version = ClientVersion, random = Random} = Hello,
 %% Description: Handles a certificate handshake message
 %%--------------------------------------------------------------------
 certify(#certificate{asn1_certificates = ASN1Certs}, CertDbRef, 
-	MaxPathLen, Verify, VerifyFun) -> 
+	MaxPathLen, Verify, VerifyFun, ValidateFun, Role) -> 
     [PeerCert | _] = ASN1Certs,
     VerifyBool =  verify_bool(Verify),
-  
+      
+    ValidateExtensionFun = 
+	case ValidateFun of
+	    undefined ->
+		fun(Extensions, ValidationState, Verify0, AccError) ->
+			ssl_certificate:validate_extensions(Extensions, ValidationState,
+							   [], Verify0, AccError, Role)
+		end;
+	    Fun ->
+		fun(Extensions, ValidationState, Verify0, AccError) ->
+		 {NewExtensions, NewValidationState, NewAccError} 
+			    = ssl_certificate:validate_extensions(Extensions, ValidationState,
+								  [], Verify0, AccError, Role),
+			Fun(NewExtensions, NewValidationState, Verify0, NewAccError)
+		end
+	end,
     try
 	%% Allow missing root_cert and check that with VerifyFun
 	ssl_certificate:trusted_cert_and_path(ASN1Certs, CertDbRef, false) of
@@ -174,6 +189,8 @@ certify(#certificate{asn1_certificates = ASN1Certs}, CertDbRef,
 						     [{max_path_length, 
 						       MaxPathLen},
 						      {verify, VerifyBool},
+						      {validate_extensions_fun, 
+						       ValidateExtensionFun},
 						      {acc_errors, 
 						       VerifyErrors}]),
 	    case Result of
@@ -455,7 +472,7 @@ get_tls_handshake_aux(<<?BYTE(Type), ?UINT24(Length),
 		       Body:Length/binary,Rest/binary>>, KeyAlg, 
 		      Version, Acc) ->
     Raw = <<?BYTE(Type), ?UINT24(Length), Body/binary>>,
-    H = dec_hs(Type, Body, key_excahange_alg(KeyAlg), Version),
+    H = dec_hs(Type, Body, key_exchange_alg(KeyAlg), Version),
     get_tls_handshake_aux(Rest, KeyAlg, Version, [{H,Raw} | Acc]);
 get_tls_handshake_aux(Data, _KeyAlg, _Version, Acc) ->
     {lists:reverse(Acc), Data}.
@@ -960,10 +977,10 @@ sig_alg(Alg) when Alg == dh_dss; Alg == dhe_dss ->
 sig_alg(_) ->
     ?NULL.
 
-key_excahange_alg(rsa) ->
+key_exchange_alg(rsa) ->
     ?KEY_EXCHANGE_RSA;
-key_excahange_alg(Alg) when Alg == dhe_rsa; Alg == dhe_dss;
+key_exchange_alg(Alg) when Alg == dhe_rsa; Alg == dhe_dss;
 			    Alg == dh_dss; Alg == dh_rsa; Alg == dh_anon ->
     ?KEY_EXCHANGE_DIFFIE_HELLMAN;
-key_excahange_alg(_) ->
+key_exchange_alg(_) ->
     ?NULL.

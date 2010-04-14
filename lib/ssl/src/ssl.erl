@@ -154,17 +154,21 @@ transport_accept(#sslsocket{pid = {ListenSocket, #config{cb=CbInfo, ssl=SslOpts}
     EmOptions = emulated_options(),
     {ok, InetValues} = inet:getopts(ListenSocket, EmOptions),
     {CbModule,_,_} = CbInfo,
-    {ok, Socket} = CbModule:accept(ListenSocket, Timeout),
-    inet:setopts(Socket, internal_inet_values()),
-    {ok, Port} = inet:port(Socket),
-    case ssl_connection_sup:start_child([server, "localhost", Port, Socket,
-                                         {SslOpts, socket_options(InetValues)}, self(),
-                                         CbInfo]) of
-        {ok, Pid} ->
-            CbModule:controlling_process(Socket, Pid),
-            {ok, SslSocket#sslsocket{pid = Pid}};
-        {error, Reason} ->
-            {error, Reason}
+    case CbModule:accept(ListenSocket, Timeout) of
+	{ok, Socket} ->
+	    inet:setopts(Socket, internal_inet_values()),
+	    {ok, Port} = inet:port(Socket),
+	    ConnArgs = [server, "localhost", Port, Socket,
+			{SslOpts, socket_options(InetValues)}, self(), CbInfo],
+	    case ssl_connection_sup:start_child(ConnArgs) of
+		{ok, Pid} ->
+		    CbModule:controlling_process(Socket, Pid),
+		    {ok, SslSocket#sslsocket{pid = Pid}};
+		{error, Reason} ->
+		    {error, Reason}
+	    end;
+	{error, Reason} ->
+	    {error, Reason}
     end;
 
 transport_accept(#sslsocket{} = ListenSocket, Timeout) ->
@@ -543,6 +547,7 @@ handle_options(Opts0, Role) ->
       fail_if_no_peer_cert = validate_option(fail_if_no_peer_cert, 
 					     FailIfNoPeerCert),
       verify_client_once =  handle_option(verify_client_once, Opts, false),
+      validate_extensions_fun = handle_option(validate_extensions_fun, Opts, undefined),
       depth      = handle_option(depth,  Opts, 1),
       certfile   = CertFile,
       keyfile    = handle_option(keyfile,  Opts, CertFile),
@@ -559,11 +564,12 @@ handle_options(Opts0, Role) ->
      },
 
     CbInfo  = proplists:get_value(cb_info, Opts, {gen_tcp, tcp, tcp_closed}),    
-    SslOptions = [versions, verify, verify_fun, 
+    SslOptions = [versions, verify, verify_fun, validate_extensions_fun, 
+		  fail_if_no_peer_cert, verify_client_once,
 		  depth, certfile, keyfile,
 		  key, password, cacertfile, dhfile, ciphers,
 		  debug, reuse_session, reuse_sessions, ssl_imp,
-		  cd_info, renegotiate_at],
+		  cb_info, renegotiate_at],
     
     SockOpts = lists:foldl(fun(Key, PropList) -> 
 				   proplists:delete(Key, PropList)
@@ -592,6 +598,9 @@ validate_option(fail_if_no_peer_cert, Value)
     Value;
 validate_option(verify_client_once, Value) 
   when Value == true; Value == false ->
+    Value;
+
+validate_option(validate_extensions_fun, Value) when Value == undefined; is_function(Value) ->
     Value;
 validate_option(depth, Value) when is_integer(Value), 
                                    Value >= 0, Value =< 255->
