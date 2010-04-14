@@ -91,7 +91,7 @@ module(Fs0, Opts0) ->
     %% Generate all functions from stored info.
     {Ats,St3} = module_attrs(St2#expand{exports = Exports}),
     {Mfs,St4} = module_predef_funcs(St3),
-    {St4#expand.module, St4#expand.exports, Ats ++ Efs ++ Mfs,
+    {ok, St4#expand.module, St4#expand.exports, Ats ++ Efs ++ Mfs,
      St4#expand.compile}.
 
 compiler_options(Forms) ->

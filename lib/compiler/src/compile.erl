@@ -899,9 +899,14 @@ core_lint_module(St) ->
 %%  Do the common preprocessing of the input forms.
 
 expand_module(#compile{code=Code,options=Opts0}=St0) ->
-    {Mod,Exp,Forms,Opts1} = sys_pre_expand:module(Code, Opts0),
-    Opts = expand_opts(Opts1),
-    {ok,St0#compile{module=Mod,options=Opts,code={Mod,Exp,Forms}}}.
+    case sys_pre_expand:module(Code, Opts0) of
+	{ok,Mod,Exp,Forms,Opts1} ->
+	    Opts = expand_opts(Opts1),
+	    {ok,St0#compile{module=Mod,options=Opts,code={Mod,Exp,Forms}}};
+	{error,Es,Ws} ->
+	    {error,St0#compile{warnings=St0#compile.warnings ++ Ws,
+			      errors=St0#compile.errors ++ Es}}
+    end.
 
 core_module(#compile{code=Code0,options=Opts}=St) ->
     case v3_core:module(Code0, Opts) of
