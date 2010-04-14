@@ -179,10 +179,11 @@ define_functions(Forms, #expand{defined=Predef}=St) ->
     St#expand{defined=ordsets:from_list(Fs)}.
 
 module_attrs(St) ->
-    {Callbacks,Rest} = 	lists:partition(fun({N,_,_}) -> N =:= callback end,
-					St#expand.attributes),
-    {[{attribute,Line,Name,Val} || {Name,Line,Val} <- Rest],
-     St#expand{callbacks=Callbacks}}.
+    Attrs = [{attribute,Line,Name,Val} || 
+	       {Name,Line,Val} <- St#expand.attributes],
+    {Callbacks,Rest} = lists:partition(fun({_,_,N,_}) -> N =:= callback end,
+					Attrs),
+    {Rest, St#expand{callbacks=Callbacks}}.
 
 module_predef_funcs(St) ->
     PreDef0 = [{module_info,0},{module_info,1}],
@@ -202,16 +203,14 @@ module_predef_funcs(St) ->
 	    Return = ok;	
 	Callbacks ->
 	    case lists:member({behaviour_info,1},St#expand.defined) of
-		false -> PreDef = PreDef0,
-			 PreForms = PreForms0,
-			 Return = ok;
 		true -> PreDef = [],
 			PreForms = [],
-			GenError =
-			    {St#expand.filename,
-			     [{L,sys_pre_expand,callback} || 
-			      {_,L,_} <- Callbacks]},
-			Return = {error,[GenError]}
+			Return = {error,[{St#expand.filename,
+					  [{L,sys_pre_expand,callback} || 
+					      {_,L,_,_} <- Callbacks]}]};
+		false -> PreDef = [{behaviour_info,1}|PreDef0],
+			 PreForms = [gen_beh_info(Callbacks)|PreForms0],
+			 Return = ok
 	    end
     end,
     case Return of
@@ -722,3 +721,19 @@ imported(F, A, St) ->
 
 format_error(callback) ->
     "cannot define callback attrs when behaviour_info is defined".
+
+gen_beh_info(Callbacks) ->
+    List = make_list(Callbacks),
+    {function,0,behaviour_info,1,
+     [{clause,0,[{atom,0,callbacks}],[],
+       [List]}]}.
+
+make_list([]) -> {nil,0};
+make_list([{_,_,_,[{{Name,Arity},_}]}=Form|Rest]) ->
+    {cons,0,
+     {tuple,0,
+      [{atom,0,Name},
+       {integer,0,Arity},
+       {string,0,lists:flatten(erl_pp:form(Form))}]},
+     make_list(Rest)}.
+
