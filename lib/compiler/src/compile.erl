@@ -898,14 +898,13 @@ core_lint_module(St) ->
 %% expand_module(State) -> State'
 %%  Do the common preprocessing of the input forms.
 
-expand_module(#compile{code=Code,options=Opts0}=St0) ->
-    case sys_pre_expand:module(Code, Opts0) of
+expand_module(#compile{code=Code,options=Opts0,ifile=Filename}=St0) ->
+    case sys_pre_expand:module(Code, Filename, Opts0) of
 	{ok,Mod,Exp,Forms,Opts1} ->
 	    Opts = expand_opts(Opts1),
 	    {ok,St0#compile{module=Mod,options=Opts,code={Mod,Exp,Forms}}};
-	{error,Es,Ws} ->
-	    {error,St0#compile{warnings=St0#compile.warnings ++ Ws,
-			      errors=St0#compile.errors ++ Es}}
+	{error,Es} ->
+	    {error,St0#compile{errors=St0#compile.errors ++ Es}}
     end.
 
 core_module(#compile{code=Code0,options=Opts}=St) ->
