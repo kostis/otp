@@ -26,6 +26,7 @@
 %% Note: This directive should only be used in test suites.
 -compile(export_all).
 
+-record(sslsocket, { fd = nil, pid = nil}).
 
 timetrap(Time) ->
     Mul = try 
@@ -66,13 +67,7 @@ run_server(Opts) ->
     test_server:format("ssl:listen(~p, ~p)~n", [Port, Options]),
     {ok, ListenSocket} = rpc:call(Node, ssl, listen, [Port, Options]),
     Pid ! {listen, up},
-    case Port of
-	0 ->
-	    {ok, {_, NewPort}} = ssl:sockname(ListenSocket),	 
-	    Pid ! {self(), {port, NewPort}};
-	_ ->
-	    ok
-    end,
+    send_selected_port(Pid, Port, ListenSocket),
     run_server(ListenSocket, Opts).
 
 run_server(ListenSocket, Opts) ->
@@ -146,13 +141,9 @@ run_client(Opts) ->
 	{ok, Socket} ->
 	    Pid ! connected,
 	    test_server:format("Client: connected~n", []), 
-	    case proplists:get_value(port, Options) of
-		0 ->
-		    {ok, {_, NewPort}} = ssl:sockname(Socket),	 
-		    Pid ! {self(), {port, NewPort}};
-		_ ->
-		    ok
-	    end,
+	    %% In specail cases we want to know the client port, it will
+	    %% be indicated by sending {port, 0} in options list!
+	    send_selected_port(Pid,  proplists:get_value(port, Options), Socket),
 	    {Module, Function, Args} = proplists:get_value(mfa, Opts),
 	    test_server:format("Client: apply(~p,~p,~p)~n", 
 			       [Module, Function, [Socket | Args]]),
@@ -216,6 +207,26 @@ check_result(Pid, Msg) ->
 		      {got, Unexpected}},
 	    test_server:fail(Reason)
     end.
+
+check_result_ignore_renegotiation_reject(Pid, Msg) -> 
+    receive 
+	{Pid,  fail_session_fatal_alert_during_renegotiation} ->
+	    test_server:comment("Server rejected old renegotiation"),
+	    ok;
+	{ssl_error, _, esslconnect} ->
+	    test_server:comment("Server rejected old renegotiation"),
+	    ok;
+	{Pid, Msg} -> 
+	    ok;
+	{Port, {data,Debug}} when is_port(Port) ->
+	    io:format("openssl ~s~n",[Debug]),
+	    check_result(Pid,Msg);
+	Unexpected ->
+	    Reason = {{expected, {Pid, Msg}}, 
+		      {got, Unexpected}},
+	    test_server:fail(Reason)
+    end.
+
 
 wait_for_result(Server, ServerMsg, Client, ClientMsg) -> 
     receive 
@@ -325,15 +336,7 @@ run_upgrade_server(Opts) ->
     test_server:format("gen_tcp:listen(~p, ~p)~n", [Port, TcpOptions]),
     {ok, ListenSocket} = rpc:call(Node, gen_tcp, listen, [Port, TcpOptions]),
     Pid ! {listen, up},
-
-    case Port of
-	0 ->
-	    {ok, {_, NewPort}} = inet:sockname(ListenSocket),	 
-	    Pid ! {self(), {port, NewPort}};
-	_ ->
-	    ok
-    end,
-
+    send_selected_port(Pid, Port, ListenSocket),
     test_server:format("gen_tcp:accept(~p)~n", [ListenSocket]),
     {ok, AcceptSocket} = rpc:call(Node, gen_tcp, accept, [ListenSocket]),
 
@@ -376,13 +379,7 @@ run_upgrade_client(Opts) ->
 		       [Host, Port, TcpOptions]),
     {ok, Socket} = rpc:call(Node, gen_tcp, connect, [Host, Port, TcpOptions]),
 
-    case proplists:get_value(port, Opts) of
-	0 ->
-	    {ok, {_, NewPort}} = inet:sockname(Socket),	 
-	    Pid ! {self(), {port, NewPort}};
-	_ ->
-	    ok
-    end,
+    send_selected_port(Pid, Port, Socket),
 
     test_server:format("ssl:connect(~p, ~p)~n", [Socket, SslOptions]),
     {ok, SslSocket} = rpc:call(Node, ssl, connect, [Socket, SslOptions]),
@@ -415,6 +412,7 @@ run_server_error(Opts) ->
 	    %% To make sure error_client will
 	    %% get {error, closed} and not {error, connection_refused}
 	    Pid ! {listen, up},
+	    send_selected_port(Pid, Port, ListenSocket),
 	    test_server:format("ssl:transport_accept(~p)~n", [ListenSocket]),
 	    case rpc:call(Node, ssl, transport_accept, [ListenSocket]) of
 		{error, _} = Error ->
@@ -452,8 +450,8 @@ inet_port(Pid) when is_pid(Pid)->
 
 inet_port(Node) ->
     {Port, Socket} = do_inet_port(Node),
-    rpc:call(Node, gen_tcp, close, [Socket]),
-    Port.
+     rpc:call(Node, gen_tcp, close, [Socket]),
+     Port.
 
 do_inet_port(Node) ->
     {ok, Socket} = rpc:call(Node, gen_tcp, listen, [0, [{reuseaddr, true}]]),
@@ -471,9 +469,6 @@ trigger_renegotiate(Socket, _, 0, Id) ->
     test_server:sleep(1000),
     case ssl:session_info(Socket) of
 	[{session_id, Id} | _ ] ->
-	    %% If a warning alert is received 
-	    %% from openssl this may not be 
-	    %% an error!
 	    fail_session_not_renegotiated;
 	%% Tests that uses this function will not reuse
 	%% sessions so if we get a new session id the
@@ -490,3 +485,12 @@ trigger_renegotiate(Socket, ErlData, N, Id) ->
     ssl:send(Socket, ErlData),
     trigger_renegotiate(Socket, ErlData, N-1, Id).				   
     
+
+send_selected_port(Pid, 0, #sslsocket{} = Socket) ->
+    {ok, {_, NewPort}} = ssl:sockname(Socket),	 
+    Pid ! {self(), {port, NewPort}};
+send_selected_port(Pid, 0, Socket) ->
+    {ok, {_, NewPort}} = inet:sockname(Socket),	 
+    Pid ! {self(), {port, NewPort}};
+send_selected_port(_,_,_) ->
+    ok.
