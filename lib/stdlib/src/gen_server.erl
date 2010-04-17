@@ -94,8 +94,6 @@
 	 multi_call/2, multi_call/3, multi_call/4,
 	 enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/5]).
 
--export([behaviour_info/1]).
-
 %% System exports
 -export([system_continue/3,
 	 system_terminate/4,
@@ -111,13 +109,26 @@
 %%%  API
 %%%=========================================================================
 
--spec behaviour_info(atom()) -> 'undefined' | [{atom(), arity()}].
-
-behaviour_info(callbacks) ->
-    [{init,1},{handle_call,3},{handle_cast,2},{handle_info,2},
-     {terminate,2},{code_change,3}];
-behaviour_info(_Other) ->
-    undefined.
+-callback init(Args) ->
+    {ok, State} | {ok, State, timeout()} | {ok, State, hibernate} |
+    {stop, Reason} | ignore.
+-callback handle_call(Request, From :: {pid(), Tag}, State) ->
+    {reply, Reply, NewState} | {reply, Reply, NewState, timeout()} |
+    {reply, Reply, NewState, hibernate} | {noreply, NewState} |
+    {noreply, NewState, timeout()} | {noreply, NewState, hibernate} |
+    {stop, Reason, Reply, NewState} | {stop, Reason, NewState}.
+-callback handle_cast(Request, State) ->
+    {noreply, NewState} | {noreply, NewState, timeout()} |
+    {noreply, NewState, hibernate} |
+    {stop, Reason, NewState}.
+-callback handle_info(Info :: timeout() | term(), State) ->
+    {noreply, NewState} | {noreply, NewState, timeout()} |
+    {noreply, NewState, hibernate} |
+    {stop, Reason, NewState}.
+-callback terminate(Reason :: normal | shutdown | {shutdown, term()} | 
+		    term(), State) -> term().
+-callback code_change(OldVsn :: Vsn | {down, Vsn}, State, Extra) ->
+    {ok, NewState}.
 
 %%%  -----------------------------------------------------------------
 %%% Starts a generic server.
