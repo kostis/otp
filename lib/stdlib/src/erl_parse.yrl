@@ -79,8 +79,9 @@ attribute -> '-' atom '(' typed_attr_val ')' : build_typed_attribute('$2','$4').
 attribute -> '-' 'spec' type_spec            : build_type_spec('$2', '$3').
 attribute -> '-' 'callback' type_spec        : build_type_spec('$2', '$3').
    
-atom1 -> 'spec' : {atom, ?line('$1'), 'spec'}.
-atom1 -> atom   : '$1'.
+atom1 -> 'spec'     : {atom, ?line('$1'), 'spec'}.
+atom1 -> 'callback' : {atom, ?line('$1'), 'callback'}.
+atom1 -> atom       : '$1'.
 
 type_spec -> spec_fun type_sigs : {'$1', '$2'}.
 type_spec -> '(' spec_fun type_sigs ')' : {'$2', '$3'}.
