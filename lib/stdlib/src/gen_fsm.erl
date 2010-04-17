@@ -113,8 +113,6 @@
 	 start_timer/2,send_event_after/2,cancel_timer/1,
 	 enter_loop/4, enter_loop/5, enter_loop/6, wake_hib/6]).
 
--export([behaviour_info/1]).
-
 %% Internal exports
 -export([init_it/6,
 	 system_continue/3,
@@ -128,13 +126,36 @@
 %%% Interface functions.
 %%% ---------------------------------------------------
 
--spec behaviour_info(atom()) -> 'undefined' | [{atom(), arity()}].
-
-behaviour_info(callbacks) ->
-    [{init,1},{handle_event,3},{handle_sync_event,4},{handle_info,3},
-     {terminate,3},{code_change,4}];
-behaviour_info(_Other) ->
-    undefined.
+-callback init(Args) ->
+    {ok, StateName :: atom(), StateData} |
+    {ok, StateName :: atom(), StateData, timeout()} |
+    {ok, StateName :: atom(), StateData, hibernate} | 
+    {stop, Reason} | ignore.
+-callback handle_event(Event, StateName :: atom(), StateData) -> 
+    {next_state, NextStateName :: atom(), NewStateData} |
+    {next_state, NextStateName :: atom(), NewStateData, timeout()} |
+    {next_state, NextStateName :: atom(), NewStateData, hibernate} |
+    {stop, Reason, NewStateData}.
+-callback handle_sync_event(Event, From :: {pid(), Tag}, StateName :: atom(),
+			    StateData) ->
+    {reply, Reply, NextStateName :: atom(), NewStateData} |
+    {reply, Reply, NextStateName :: atom(), NewStateData, timeout()} |
+    {reply, Reply, NextStateName :: atom(), NewStateData, hibernate} |
+    {next_state, NextStateName :: atom(), NewStateData} |
+    {next_state, NextStateName :: atom(), NewStateData, timeout()} |
+    {next_state, NextStateName :: atom(), NewStateData, hibernate} |
+    {stop, Reason, Reply, NewStateData} | {stop, Reason, NewStateData}.
+-callback handle_info(Info, StateName :: atom(), StateData) ->
+    {next_state, NextStateName :: atom(), NewStateData} |
+    {next_state, NextStateName :: atom(), NewStateData, timeout()} |
+    {next_state, NextStateName :: atom(), NewStateData, hibernate} |
+    {stop, Reason :: normal | term(), NewStateData}.
+-callback terminate(Reason :: normal | shutdown | {shutdown, term()} 
+		    | term(), StateName :: atom(), StateData) -> 
+    term().
+-callback code_change(OldVsn :: Vsn | {down, Vsn}, StateName :: atom(), 
+		      StateData, Extra) -> 
+    {ok, NextStateName :: atom(), NewStateData}.
 
 %%% ---------------------------------------------------
 %%% Starts a generic state machine.
