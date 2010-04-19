@@ -175,7 +175,7 @@ check_all_callbacks(Module, Behaviour, [{Fun, Arity}|Rest], State, Acc) ->
 parse_spec(String, Records) ->
   case erl_scan:string(String) of
     {ok, Tokens, _} ->
-      case erl_parse:parse(Tokens) of
+      case erl_parse:parse_form(Tokens) of
 	{ok, Form} ->
 	  case Form of
 	    {attribute, _, Name, {{Fun, _}, [TypeForm|_Constraint]}} 
