@@ -1,7 +1,7 @@
-#
+#-*-makefile-*-   ; force emacs to enter makefile-mode
 # %CopyrightBegin%
 #
-# Copyright Ericsson AB 2009-2010. All Rights Reserved.
+# Copyright Ericsson AB 2010. All Rights Reserved.
 #
 # The contents of this file are subject to the Erlang Public License,
 # Version 1.1, (the "License"); you may not use this file except in
@@ -15,16 +15,18 @@
 # under the License.
 #
 # %CopyrightEnd%
-#
-TUTORIAL_CHAPTER_FILES = \
-	introduction.xml\
-	cnode.xml\
-	c_port.xml\
-	erl_interface.xml \
-	c_portdriver.xml \
-	example.xml\
-	overview.xml\
-	nif.xml
-#	appendix.xml
-#	distribution.xml  (to be part of tutorial later)
 
+MODULES = \
+	reltool \
+	reltool_app_win \
+	reltool_fgraph \
+	reltool_fgraph_win \
+	reltool_mod_win \
+	reltool_sys_win \
+	reltool_server \
+	reltool_target \
+	reltool_utils
+
+HRL_FILES =
+
+INTERNAL_HRL_FILES = reltool.hrl reltool_fgraph.hrl
