@@ -31,7 +31,7 @@
 -module(dialyzer_behaviours).
 
 -export([check_callbacks/4, get_behaviours/2, get_behaviour_apis/1,
-	 translate_behaviour_api_call/6, translatable_behaviours/1,
+	 translate_behaviour_api_call/5, translatable_behaviours/1,
 	 translate_callgraph/3]).
 
 %%--------------------------------------------------------------------
@@ -81,54 +81,61 @@ translatable_behaviours(Tree) ->
 get_behaviour_apis(Behaviours) ->
   get_behaviour_apis(Behaviours, []).
 
--spec translate_behaviour_api_call(mfa(), _, _, _, [_], [{atom(),atom()}]) ->
+-spec translate_behaviour_api_call(mfa(), _, _, [_], [{atom(),atom()}]) ->
   {_,_}.
 
-translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _Module, [],
-			     _CallbackAssocs) ->
+translate_behaviour_api_call(_Fun, _ArgTypes, _Args, [], _CallbackAssocs) ->
   plain_call;
 translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
-			     DefaultCallback, BehApiInfo, CallbackAssocs) ->
+			     BehApiInfo, CallbackAssocs) ->
+  CA = CallbackAssocs,
+  Query =
   case lists:keyfind(Module, 1, BehApiInfo) of
     false -> plain_call;
     {Module, Calls} ->
       case lists:keyfind({Fun, Arity}, 1, Calls) of
 	false -> plain_call;
-	{{Fun, Arity}, {CFun, CArity, COrder}, Directive} ->
-	  DC = DefaultCallback,
-	  CA = CallbackAssocs,
-	  {Callback, NewCallbackAssocs} =
-	    case Directive of
-	      {create, no, _} -> {DC, CA};
-	      {create,  N, M} ->
-		case cerl:concrete(nth_or_0(M, Args, foo)) of
-		  CallbackModule when is_atom(CallbackModule) ->
-		    CM = CallbackModule,
-		    case cerl:concrete(nth_or_0(N, Args, foo)) of
-		      {_,Name} when is_atom(Name) -> {CM,[{Name,CM}|CA]};
-		      Name when is_atom(Name)     -> {CM,[{Name,CM}|CA]};
-		      _                           -> {DC, CA}
-		    end;
-		  _ -> {DC, CA}
-		end;
-	      {refer, N} ->
-		case cerl:concrete(nth_or_0(N, Args, foo)) of
-		  Name when is_atom(Name) ->
-		    case lists:keyfind(Name,1,CA) of
-		      {_,CallbackModule} -> {CallbackModule, CA};
-		      false              -> {DC, CA}
-		    end;
-		  _ -> {DC, CA}
-		end;
-	      _Any -> {DC, CA}
-	    end,	  
-	  Call = {{Callback, CFun, CArity},
-		  [nth_or_0(N, ArgTypes, erl_types:t_any()) || N <-COrder],
-		  [nth_or_0(N, Args, bypassed) || N <-COrder]},
-	  {Call, NewCallbackAssocs}
+	{{Fun, Arity}, TranslationInfo, Directive} ->
+	  TI = TranslationInfo,
+	  case Directive of
+	    {create, no, _} -> plain_call;
+	    {create,  N, M} ->
+	      case cerl:concrete(nth_or_0(M, Args, foo)) of	      
+		CallbackModule when is_atom(CallbackModule) ->
+		  CM = CallbackModule,
+		  case cerl:concrete(nth_or_0(N, Args, foo)) of
+		    {_,Name} when is_atom(Name) -> {CM, TI, [{Name,CM}|CA]};
+		    Name when is_atom(Name)     -> {CM, TI, [{Name,CM}|CA]};
+		    _                           -> plain_call
+		  end;
+		_ -> plain_call
+	      end;
+	    {refer, N} ->
+	      case CA of
+		[] -> plain_call;
+		 _ ->
+		  case cerl:concrete(nth_or_0(N, Args, foo)) of
+		    Name when is_atom(Name) ->
+		      case lists:keyfind(Name,1,CA) of
+			{_,CM} -> {CM, TI, CA};
+			false  -> plain_call
+		      end;
+		    _ -> plain_call
+		  end
+	      end;
+	    _Any -> plain_call
+	  end
       end
+  end,
+  case Query of
+    plain_call -> Query;
+    {Callback, {CFun, CArity, COrder}, NewCallbackAssocs} ->
+      Call = {{Callback, CFun, CArity},
+	      [nth_or_0(N, ArgTypes, erl_types:t_any()) || N <-COrder],
+	      [nth_or_0(N, Args, bypassed) || N <-COrder]},
+      {Call, NewCallbackAssocs}
   end;
-translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _Module, _BehApiInfo,
+translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
 			     _CallbackAssocs) ->
   plain_call.
 

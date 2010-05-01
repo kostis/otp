@@ -677,14 +677,12 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	%% EXPERIMENTAL: Turn a behaviour's API call into a call to the
 	%%               respective callback module's function.
 
-	Module = State#state.module,
 	BehApiInfo = State#state.behaviour_api_info,
 	CallbackAssocs = State#state.callback_assocs,
 	{RealFun, RealArgTypes, RealArgs, State0} =
 	  case 
 	    dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
-							     Args, Module,
-							     BehApiInfo,
+							     Args, BehApiInfo,
 							     CallbackAssocs) of
 	    plain_call -> 
 	      {Fun, ArgTypes, Args, State};
