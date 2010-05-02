@@ -57,8 +57,12 @@
 
 start(Parent, LegalWarnings, Analysis) ->
   RacesOn = ordsets:is_element(?WARN_RACE_CONDITION, LegalWarnings),
+  DeadsOn = ordsets:is_element(?WARN_DEADLOCK, LegalWarnings),
+  MsgsOn = ordsets:is_element(?WARN_MESSAGE, LegalWarnings),
   BehavOn = ordsets:is_element(?WARN_BEHAVIOUR, LegalWarnings),
   Analysis0 = Analysis#analysis{race_detection = RacesOn,
+                                deadlock_detection = DeadsOn,
+                                msg_analysis = MsgsOn,
 				behaviours_chk = BehavOn},
   Analysis1 = expand_files(Analysis0),
   Analysis2 = run_analysis(Analysis1),
@@ -165,12 +169,32 @@ analysis_start(Parent, Analysis) ->
   AllNodes = dialyzer_callgraph:all_nodes(Callgraph),
   Plt1 = dialyzer_plt:delete_list(NewPlt1, AllNodes),
   Exports = dialyzer_codeserver:get_exports(NewCServer),
-  NewCallgraph =
-    case Analysis#analysis.race_detection of
+  RaceDetection = Analysis#analysis.race_detection,
+  MsgAnalysis = Analysis#analysis.msg_analysis,
+  Callgraph1 =
+    case RaceDetection of
       true -> dialyzer_callgraph:put_race_detection(true, Callgraph);
       false -> Callgraph
     end,
-  State3 = analyze_callgraph(NewCallgraph, State2#analysis_state{plt = Plt1}),
+  Callgraph2 =
+    case Analysis#analysis.deadlock_detection of
+      true -> dialyzer_callgraph:put_deadlock_detection(true, Callgraph1);
+      false -> Callgraph1
+    end,
+  Callgraph3 =
+    case MsgAnalysis of
+      true -> dialyzer_callgraph:put_msg_analysis(true, Callgraph2);
+      false -> Callgraph2
+    end,
+  case RaceDetection orelse MsgAnalysis of
+    true -> ets:new(cfgs, [named_table]);
+    false -> ok
+  end,
+  State3 = analyze_callgraph(Callgraph3, State2#analysis_state{plt = Plt1}),
+  case RaceDetection orelse MsgAnalysis of
+    true -> ets:delete(cfgs);
+    false -> ok
+  end,
   rcv_and_send_ext_types(Parent),
   NonExports = sets:subtract(sets:from_list(AllNodes), Exports),
   NonExportsList = sets:to_list(NonExports),

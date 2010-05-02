@@ -131,7 +131,7 @@ get_warnings_from_modules([M|Ms], State, DocPlt,
   %% Check if there are contracts for functions that do not exist
   Warnings1 = 
     dialyzer_contracts:contracts_without_fun(Contracts, AllFuns, Callgraph),
-  {Warnings2, FunTypes, RaceCode, PublicTables, NamedTables} =
+  {Warnings2, FunTypes, PublicTables, NamedTables, DLs, Msgs} =
     dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph, Records, NoWarnUnused),
   Attrs = cerl:module_attrs(ModCode),
   Warnings3 = if BehavioursChk ->
@@ -141,8 +141,8 @@ get_warnings_from_modules([M|Ms], State, DocPlt,
 	      end,
   NewDocPlt = insert_into_doc_plt(FunTypes, Callgraph, DocPlt),
   NewCallgraph =
-    dialyzer_callgraph:renew_race_info(Callgraph, RaceCode, PublicTables,
-                                       NamedTables),
+    dialyzer_callgraph:renew_heisen_info(Callgraph, PublicTables,
+                                         NamedTables, DLs, Msgs),
   State1 = st__renew_state_calls(NewCallgraph, State),
   get_warnings_from_modules(Ms, State1, NewDocPlt, BehavioursChk,
 			    [Warnings1, Warnings2, Warnings3|Acc]);
@@ -178,11 +178,11 @@ refine_one_module(M, State) ->
   AllFuns = collect_fun_info([ModCode]),
   FunTypes = get_fun_types_from_plt(AllFuns, State),
   Records = dialyzer_codeserver:lookup_mod_records(M, CodeServer),
-  {NewFunTypes, RaceCode, PublicTables, NamedTables} =
+  {NewFunTypes, PublicTables, NamedTables, DLs, Msgs} =
     dialyzer_dataflow:get_fun_types(ModCode, PLT, Callgraph, Records),
   NewCallgraph =
-    dialyzer_callgraph:renew_race_info(Callgraph, RaceCode, PublicTables,
-                                       NamedTables),
+    dialyzer_callgraph:renew_heisen_info(Callgraph, PublicTables,
+                                         NamedTables, DLs, Msgs),
   case reached_fixpoint(FunTypes, NewFunTypes) of
     true ->
       State1 = st__renew_state_calls(NewCallgraph, State),

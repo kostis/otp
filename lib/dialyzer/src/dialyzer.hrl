@@ -55,6 +55,9 @@
 -define(WARN_CALLGRAPH, warn_callgraph).
 -define(WARN_UNMATCHED_RETURN, warn_umatched_return).
 -define(WARN_RACE_CONDITION, warn_race_condition).
+-define(WARN_DEADLOCK, warn_deadlock).
+-define(WARN_MESSAGE, warn_message).
+-define(WARN_HEISENBUG, warn_heisenbug).
 -define(WARN_BEHAVIOUR,warn_behaviour).
 
 %%
@@ -70,7 +73,7 @@
                        | ?WARN_CONTRACT_NOT_EQUAL | ?WARN_CONTRACT_SUBTYPE
                        | ?WARN_CONTRACT_SUPERTYPE | ?WARN_CALLGRAPH
                        | ?WARN_UNMATCHED_RETURN | ?WARN_RACE_CONDITION
-                       | ?WARN_BEHAVIOUR.
+                       | ?WARN_DEADLOCK | ?WARN_MESSAGE | ?WARN_BEHAVIOUR.
 
 %%
 %% This is the representation of each warning as they will be returned
@@ -106,22 +109,26 @@
 -type rep_mode()      :: 'quiet' | 'normal' | 'verbose'.
 -type start_from()    :: 'byte_code' | 'src_code'.
 
+-type mfa_or_funlbl() :: label() | mfa().
+
 %%--------------------------------------------------------------------
 %% Record declarations used by various files
 %%--------------------------------------------------------------------
 
--record(analysis, {analysis_pid			   :: pid(),
-		   type		  = succ_typings   :: anal_type(),
-		   defines	  = []		   :: [dial_define()],
-		   doc_plt                         :: dialyzer_plt:plt(),
-		   files          = []		   :: [file:filename()],
-		   include_dirs	  = []		   :: [file:filename()],
-		   start_from     = byte_code	   :: start_from(),
-		   plt                             :: dialyzer_plt:plt(),
-		   use_contracts  = true           :: boolean(),
-		   race_detection = false	   :: boolean(),
-		   behaviours_chk = false          :: boolean(),
-		   callgraph_file = ""             :: file:filename()}).
+-record(analysis, {analysis_pid                      :: pid(),
+		   type	              = succ_typings :: anal_type(),
+		   defines            = []           :: [dial_define()],
+		   doc_plt                           :: dialyzer_plt:plt(),
+		   files              = []           :: [file:filename()],
+		   include_dirs	      = []           :: [file:filename()],
+		   start_from         = byte_code    :: start_from(),
+		   plt                               :: dialyzer_plt:plt(),
+		   use_contracts      = true         :: boolean(),
+		   race_detection     = false        :: boolean(),
+                   deadlock_detection = false        :: boolean(),
+                   msg_analysis       = false        :: boolean(),
+		   behaviours_chk     = false        :: boolean(),
+		   callgraph_file     = ""           :: file:filename()}).
 
 -record(options, {files           = []		   :: [file:filename()],
 		  files_rec       = []		   :: [file:filename()],

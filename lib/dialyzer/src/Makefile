@@ -55,10 +55,12 @@ MODULES =  \
 	dialyzer_codeserver \
 	dialyzer_contracts \
 	dialyzer_dataflow \
+	dialyzer_deadlocks \
 	dialyzer_dep \
 	dialyzer_explanation \
 	dialyzer_gui \
 	dialyzer_gui_wx \
+	dialyzer_messages \
 	dialyzer_options \
 	dialyzer_plt \
 	dialyzer_races \
@@ -135,13 +137,15 @@ $(EBIN)/dialyzer_cl_parse.beam: dialyzer.hrl
 $(EBIN)/dialyzer_codeserver.beam: dialyzer.hrl
 $(EBIN)/dialyzer_contracts.beam: dialyzer.hrl
 $(EBIN)/dialyzer_dataflow.beam: dialyzer.hrl
+$(EBIN)/dialyzer_deadlocks.beam: dialyzer.hrl
 $(EBIN)/dialyzer_dep.beam: dialyzer.hrl
 $(EBIN)/dialyzer_explanation.beam: dialyzer.hrl
 $(EBIN)/dialyzer_gui.beam: dialyzer.hrl
 $(EBIN)/dialyzer_gui_wx.beam: dialyzer.hrl dialyzer_gui_wx.hrl
+$(EBIN)/dialyzer_messages.beam: dialyzer.hrl dialyzer_heisenbugs.hrl
 $(EBIN)/dialyzer_options.beam: dialyzer.hrl
 $(EBIN)/dialyzer_plt.beam: dialyzer.hrl
-$(EBIN)/dialyzer_races.beam: dialyzer.hrl
+$(EBIN)/dialyzer_races.beam: dialyzer.hrl dialyzer_heisenbugs.hrl
 $(EBIN)/dialyzer_succ_typings.beam: dialyzer.hrl
 $(EBIN)/dialyzer_typesig.beam: dialyzer.hrl
 $(EBIN)/dialyzer_utils.beam: dialyzer.hrl

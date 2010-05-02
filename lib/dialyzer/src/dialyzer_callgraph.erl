@@ -44,7 +44,7 @@
 	 module_postorder_from_funs/2,
 	 new/0,
 	 in_neighbours/2,
-	 renew_race_info/4,
+	 renew_heisen_info/5,
 	 reset_from_funs/2,
 	 scan_core_tree/2,
 	 strip_module_deps/2,
@@ -53,11 +53,14 @@
 	 to_dot/2,
 	 to_ps/3]).
 
--export([cleanup/1, get_digraph/1, get_named_tables/1, get_public_tables/1,
-         get_race_code/1, get_race_detection/1, race_code_new/1,
-         put_digraph/2, put_race_code/2, put_race_detection/2,
-         put_named_tables/2, put_public_tables/2, put_behaviour_api_calls/2,
-	 get_behaviour_api_calls/1]).
+-export([cleanup/1, get_digraph/1, get_deadlock_detection/1,
+         get_deadlocks/1, get_msg_analysis/1, get_msgs/1,
+         get_named_tables/1, get_public_tables/1,
+         get_race_detection/1, put_deadlock_detection/2,
+         put_deadlocks/2, put_digraph/2, put_msg_analysis/2,
+         put_msgs/2, put_named_tables/2, put_public_tables/2,
+         put_race_detection/2,
+         put_behaviour_api_calls/2, get_behaviour_api_calls/1]).
 
 -export_type([callgraph/0]).
 
@@ -65,7 +68,6 @@
 
 %%----------------------------------------------------------------------
 
--type mfa_or_funlbl() :: label() | mfa().
 -type scc()	      :: [mfa_or_funlbl()].
 -type mfa_calls()     :: [{mfa_or_funlbl(), mfa_or_funlbl()}].
 
@@ -90,19 +92,22 @@
 %%		   whenever applicable.
 %%-----------------------------------------------------------------------------
 
--record(callgraph, {digraph        = digraph:new() :: digraph(),
-                    esc	           = sets:new()    :: set(),
-                    name_map	   = dict:new()    :: dict(),
-                    rev_name_map   = dict:new()    :: dict(),
-                    postorder      = []	           :: [scc()],
-                    rec_var_map    = dict:new()    :: dict(),
-                    self_rec	   = sets:new()    :: set(),
-                    calls          = dict:new()    :: dict(),
-                    race_code      = dict:new()    :: dict(),
-                    public_tables  = []            :: [label()],
-                    named_tables   = []            :: [string()],
-                    race_detection = false         :: boolean(),
-		    beh_api_calls  = []            :: [{mfa(), mfa()}]}).
+-record(callgraph, {digraph        = digraph:new()           :: digraph(),
+                    esc	           = sets:new()              :: set(),
+                    name_map	   = dict:new()              :: dict(),
+                    rev_name_map   = dict:new()              :: dict(),
+                    postorder      = []	                     :: [scc()],
+                    rec_var_map    = dict:new()              :: dict(),
+                    self_rec	   = sets:new()              :: set(),
+                    calls          = dict:new()              :: dict(),
+                    public_tables  = []                      :: [label()],
+                    named_tables   = []                      :: [string()],
+                    deadlocks      = []                      :: dialyzer_deadlocks:dls(),
+                    msgs           = dialyzer_messages:new() :: dialyzer_messages:msgs(),
+                    race_detection = false                   :: boolean(),
+                    dl_detection   = false                   :: boolean(),
+                    msg_analysis   = false                   :: boolean(),
+		    beh_api_calls  = []                      :: [{mfa(), mfa()}]}).
 
 %% Exported Types
 
@@ -221,13 +226,15 @@ find_non_local_calls([{Label1, Label2}|Left], Set) when is_integer(Label1),
 find_non_local_calls([], Set) ->
   sets:to_list(Set).
 
--spec renew_race_info(callgraph(), dict(), [label()], [string()]) ->
-        callgraph().
+-spec renew_heisen_info(callgraph(), [label()], [string()],
+                        dialyzer_deadlocks:dls(), dialyzer_messages:msgs()) ->
+  callgraph().
 
-renew_race_info(CG, RaceCode, PublicTables, NamedTables) ->
-  CG#callgraph{race_code = RaceCode,
-               public_tables = PublicTables,
-               named_tables = NamedTables}.
+renew_heisen_info(CG, PublicTables, NamedTables, DLs, Msgs) ->
+  CG#callgraph{public_tables = PublicTables,
+               named_tables = NamedTables,
+               deadlocks = DLs,
+               msgs = Msgs}.
 
 %%----------------------------------------------------------------------
 %% Handling of modules & SCCs
@@ -613,23 +620,41 @@ digraph_reaching_subgraph(Funs, DG) ->
 
 -spec cleanup(callgraph()) -> callgraph().
 
-cleanup(#callgraph{digraph = Digraph,                                          
-                   name_map = NameMap,                                         
-                   rev_name_map = RevNameMap,                                  
-                   public_tables = PublicTables,                               
-                   named_tables = NamedTables,                                 
-                   race_code = RaceCode}) ->                                   
+cleanup(#callgraph{digraph = Digraph,
+                   name_map = NameMap,
+                   rev_name_map = RevNameMap,
+                   public_tables = PublicTables,
+                   named_tables = NamedTables}) ->
   #callgraph{digraph = Digraph,
-             name_map = NameMap,                                          
-             rev_name_map = RevNameMap,                                   
-             public_tables = PublicTables,                                
-             named_tables = NamedTables,                                  
-             race_code = RaceCode}.
+             name_map = NameMap,
+             rev_name_map = RevNameMap,
+             public_tables = PublicTables,
+             named_tables = NamedTables}.
+
+-spec get_deadlock_detection(callgraph()) -> boolean().
+
+get_deadlock_detection(#callgraph{dl_detection = DD}) ->
+  DD.
+
+-spec get_deadlocks(callgraph()) -> dialyzer_deadlocks:dls().
+
+get_deadlocks(#callgraph{deadlocks = Deadlocks}) ->
+  Deadlocks.
 
 -spec get_digraph(callgraph()) -> digraph().
 
 get_digraph(#callgraph{digraph = Digraph}) ->
   Digraph.
+
+-spec get_msg_analysis(callgraph()) -> boolean().
+
+get_msg_analysis(#callgraph{msg_analysis = MA}) ->
+  MA.
+
+-spec get_msgs(callgraph()) -> dialyzer_messages:msgs().
+
+get_msgs(#callgraph{msgs = Msgs}) ->
+  Msgs.
 
 -spec get_named_tables(callgraph()) -> [string()].
 
@@ -641,35 +666,35 @@ get_named_tables(#callgraph{named_tables = NamedTables}) ->
 get_public_tables(#callgraph{public_tables = PT}) ->
   PT.
 
--spec get_race_code(callgraph()) -> dict().
-
-get_race_code(#callgraph{race_code = RaceCode}) ->
-  RaceCode.
-
 -spec get_race_detection(callgraph()) -> boolean().
 
 get_race_detection(#callgraph{race_detection = RD}) ->
   RD.
 
--spec race_code_new(callgraph()) -> callgraph().
+-spec put_deadlock_detection(boolean(), callgraph()) -> callgraph().
 
-race_code_new(Callgraph) ->
-  Callgraph#callgraph{race_code = dict:new()}.
+put_deadlock_detection(DeadlockDetection, Callgraph) ->
+  Callgraph#callgraph{dl_detection = DeadlockDetection}.
+
+-spec put_deadlocks(dialyzer_deadlocks:dls(), callgraph()) -> callgraph().
+
+put_deadlocks(Deadlocks, Callgraph) ->
+  Callgraph#callgraph{deadlocks = Deadlocks}.
 
 -spec put_digraph(digraph(), callgraph()) -> callgraph().
 
 put_digraph(Digraph, Callgraph) ->
   Callgraph#callgraph{digraph = Digraph}.
 
--spec put_race_code(dict(), callgraph()) -> callgraph().
+-spec put_msg_analysis(boolean(), callgraph()) -> callgraph().
 
-put_race_code(RaceCode, Callgraph) ->
-  Callgraph#callgraph{race_code = RaceCode}.
+put_msg_analysis(MsgAnalysis, Callgraph) ->
+  Callgraph#callgraph{msg_analysis = MsgAnalysis}.
 
--spec put_race_detection(boolean(), callgraph()) -> callgraph().
+-spec put_msgs(dialyzer_messages:msgs(), callgraph()) -> callgraph().
 
-put_race_detection(RaceDetection, Callgraph) ->
-  Callgraph#callgraph{race_detection = RaceDetection}.
+put_msgs(Msgs, Callgraph) ->
+  Callgraph#callgraph{msgs = Msgs}.
 
 -spec put_named_tables([string()], callgraph()) -> callgraph().
 
@@ -680,6 +705,11 @@ put_named_tables(NamedTables, Callgraph) ->
 
 put_public_tables(PublicTables, Callgraph) ->
   Callgraph#callgraph{public_tables = PublicTables}.
+
+-spec put_race_detection(boolean(), callgraph()) -> callgraph().
+
+put_race_detection(RaceDetection, Callgraph) ->
+  Callgraph#callgraph{race_detection = RaceDetection}.
 
 %%=============================================================================
 %% Utilities for 'dot'

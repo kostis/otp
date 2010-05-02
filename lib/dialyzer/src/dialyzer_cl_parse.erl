@@ -451,6 +451,13 @@ warning_options_msg() ->
      Include warnings for functions that only return by means of an exception.
   -Wrace_conditions ***
      Include warnings for possible race conditions.
+  -Wdeadlocks ***
+     Include warnings for possible deadlocks.
+  -Wmessages ***
+     Include warnings for message passing.
+  -Wheisenbugs ***
+     Include warnings for heisenbugs (i.e. race conditions, deadlocks and
+     message passing).
   -Wbehaviours ***
      Include warnings about behaviour callbacks which drift from the published
      recommended interfaces.

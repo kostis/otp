@@ -252,6 +252,15 @@ build_warnings([Opt|Opts], Warnings) ->
 	ordsets:add_element(?WARN_RETURN_ONLY_EXIT, Warnings);
       race_conditions ->
 	ordsets:add_element(?WARN_RACE_CONDITION, Warnings);
+      deadlocks ->
+	ordsets:add_element(?WARN_DEADLOCK, Warnings);
+      messages ->
+	ordsets:add_element(?WARN_MESSAGE, Warnings);
+      heisenbugs ->
+        S = ordsets:from_list([?WARN_RACE_CONDITION, 
+			       ?WARN_DEADLOCK,
+                               ?WARN_MESSAGE]),
+	ordsets:union(S, Warnings);
       behaviours ->
 	ordsets:add_element(?WARN_BEHAVIOUR, Warnings);
       specdiffs ->

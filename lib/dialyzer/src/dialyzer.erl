@@ -404,6 +404,17 @@ message_to_string({opaque_type_test, [Fun, Opaque]}) ->
 %%----- Warnings for concurrency errors --------------------
 message_to_string({race_condition, [M, F, Args, Reason]}) ->
   io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
+message_to_string({deadlock, [M, F, Args, Reason]}) ->
+  io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
+message_to_string({message_unused_rcv_stmt_no_send, []}) ->
+  io_lib:format("The receive statement will block"
+                " because no messages are sent to"
+                " the process\n", []);
+message_to_string({message_unused_rcv_stmt_no_msg, []}) ->
+  io_lib:format("The receive statement will block"
+                " because no messages sent to the"
+                " process can match the expected "
+                "patterns\n", []);
 %%----- Warnings for behaviour errors --------------------
 message_to_string({callback_type_mismatch, [B, F, A, O]}) ->
   io_lib:format("The inferred return type of the ~w/~w callback includes the"

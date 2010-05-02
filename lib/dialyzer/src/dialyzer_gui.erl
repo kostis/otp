@@ -270,6 +270,18 @@ start(DialyzerOptions = #options{from = From, init_plt = InitPltFile,
 				      [{label,
                                         {text,"Possible race conditions"}},
                                        {itemtype, check}, {select, false}]),
+  MenuWarnDeadlock = gs:menuitem(MenuWarn,
+                                 [{label,
+                                   {text,"Possible deadlocks"}},
+                                  {itemtype, check}, {select, false}]),
+  MenuWarnMessage = gs:menuitem(MenuWarn,
+                                [{label,
+                                  {text,"Message passing"}},
+                                 {itemtype, check}, {select, false}]),
+  MenuWarnHeisenbug = gs:menuitem(MenuWarn,
+                                  [{label,
+                                    {text,"Heisenbugs"}},
+                                   {itemtype, check}, {select, false}]),
   MenuWarnContractTypes = gs:menuitem(MenuWarn,
 				      [{label, {text, "Wrong contracts"}},
 				       {itemtype, check}, {select, true}]),
@@ -310,7 +322,11 @@ start(DialyzerOptions = #options{from = From, init_plt = InitPltFile,
 	      {?WARN_OPAQUE, MenuWarnOpaque},
 	      {?WARN_FAILING_CALL, MenuWarnFailingCall},
 	      {?WARN_CALLGRAPH, MenuWarnCallNonExported},
+              %% For concurrency errors.
               {?WARN_RACE_CONDITION, MenuWarnRaceCondition},
+              {?WARN_DEADLOCK, MenuWarnDeadlock},
+              {?WARN_MESSAGE, MenuWarnMessage},
+              {?WARN_HEISENBUG, MenuWarnHeisenbug},
 	      %% For contracts. 
 	      {?WARN_CONTRACT_TYPES, MenuWarnContractTypes},
 	      {?WARN_CONTRACT_SYNTAX, MenuWarnContractSyntax}
@@ -1328,8 +1344,22 @@ run_analysis(State, Analysis) ->
   State#gui_state{backend_pid = BackendPid}.
 
 find_legal_warnings(#gui_state{menu = #menu{warnings = Warnings}}) ->
-  ordsets:from_list([Tag || {Tag, GSItem} <- Warnings, 
-			    gs:read(GSItem, select) =:= true]).
+  WarningsList = find_legal_warnings_list(Warnings),
+  ordsets:from_list(WarningsList).
+
+find_legal_warnings_list([]) -> [];
+find_legal_warnings_list([{Tag, GSItem}|Ws]) ->
+  RetTag = 
+    case gs:read(GSItem, select) of
+      true ->
+        case Tag of
+          ?WARN_HEISENBUG -> [?WARN_RACE_CONDITION,
+                              ?WARN_DEADLOCK];
+          _ -> [Tag]
+        end;
+      false -> []
+    end,
+  RetTag ++ find_legal_warnings_list(Ws).
 
 flush() ->
   receive

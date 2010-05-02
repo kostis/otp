@@ -248,7 +248,11 @@ create_window(Wx, DialyzerOptions) ->
 	      {?WARN_OPAQUE, ?menuID_WARN_OPAQUE},
 	      {?WARN_FAILING_CALL, ?menuID_WARN_FAIL_FUN_CALLS},
 	      {?WARN_CALLGRAPH, ?menuID_WARN_UNEXPORTED_FUN},
+              %% For concurrency errors.
               {?WARN_RACE_CONDITION, ?menuID_WARN_RACE_CONDITIONS},
+              {?WARN_DEADLOCK, ?menuID_WARN_DEADLOCKS},
+              {?WARN_MESSAGE, ?menuID_WARN_MESSAGES},
+              {?WARN_HEISENBUG, ?menuID_WARN_HEISENBUGS},
 	      %% For contracts.
 	      {?WARN_CONTRACT_TYPES,?menuID_WARN_WRONG_CONTRACTS},
 	      {?WARN_CONTRACT_SYNTAX, ?menuID_WARN_CONTRACT_SYNTAX}
@@ -339,6 +343,15 @@ createWarningsMenu() ->
   wxMenu:appendCheckItem(WarningsMenu,
 			 ?menuID_WARN_RACE_CONDITIONS,
 			 "Possible race conditions"),
+  wxMenu:appendCheckItem(WarningsMenu,
+                         ?menuID_WARN_DEADLOCKS,
+                         "Possible deadlocks"),
+  wxMenu:appendCheckItem(WarningsMenu,
+                         ?menuID_WARN_MESSAGES,
+                         "Message passing"),
+  wxMenu:appendCheckItem(WarningsMenu,
+                         ?menuID_WARN_HEISENBUGS,
+                         "Heisenbugs"),
   wxMenu:appendCheckItem(WarningsMenu,
 			 ?menuID_WARN_WRONG_CONTRACTS,
 			 "Wrong contracts"),
@@ -845,8 +858,23 @@ run_analysis(State, Analysis) ->
 
 find_legal_warnings(#gui_state{menu = #menu{warnings = MenuWarnings},
 			       wantedWarnings = Warnings }) ->
-  ordsets:from_list([Tag || {Tag, MenuItem} <- Warnings, 
-			    wxMenu:isChecked(MenuWarnings, MenuItem)]).
+  WarningsList = find_legal_warnings_list(Warnings, MenuWarnings),
+  ordsets:from_list(WarningsList).
+
+find_legal_warnings_list([], _) -> [];
+find_legal_warnings_list([{Tag, MenuItem}|Ws], MenuWarnings) ->
+  RetTag = 
+    case wxMenu:isChecked(MenuWarnings, MenuItem) of
+      true ->
+        case Tag of
+          ?WARN_HEISENBUG -> [?WARN_RACE_CONDITION,
+                              ?WARN_DEADLOCK,
+                              ?WARN_MESSAGE];
+          _ -> [Tag]
+        end;
+      false -> []
+    end,
+  RetTag ++ find_legal_warnings_list(Ws, MenuWarnings).
 
 update_editor(Editor, Msg) ->
   wxTextCtrl:appendText(Editor,Msg).
