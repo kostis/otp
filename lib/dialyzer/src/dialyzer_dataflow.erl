@@ -1115,9 +1115,11 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
           true ->
             case AddPid of
               {true, false} ->
-                dialyzer_messages:add_pid(cerl_trees:get_label(V), State1);
+                dialyzer_messages:add_pid('self', cerl_trees:get_label(V),
+                                          State1);
               {false, true} ->
-                dialyzer_messages:add_pid_tag(cerl_trees:get_label(V), State1);
+                dialyzer_messages:add_pid_tag('self', cerl_trees:get_label(V),
+                                              State1);
               {false, false} -> State1;
               false -> State1
             end;

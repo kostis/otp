@@ -33,7 +33,7 @@
 
 %% Record Interfaces
 
--export([add_msg/2, add_pid/2, add_pid_tag/2, create_pid_tag_for_self/2,
+-export([add_msg/2, add_pid/3, add_pid_tag/3, create_pid_tag_for_self/2,
          create_rcv_tag/2, create_send_tag/3, get_race_list_ret/3,
          get_rcv_tags/1, get_send_tags/1, new/0, put_rcv_tags/2,
          put_send_tags/2]).
@@ -55,7 +55,10 @@
 %%%
 %%% ===========================================================================
 
--record(pid_fun,  {pid = ?no_label :: label() | ?no_label,
+-type pid_kind() :: 'self'.
+
+-record(pid_fun,  {kind            :: pid_kind(),
+                   pid = ?no_label :: label() | ?no_label,
                    pid_mfas        :: [mfa_or_funlbl()], % funs that own the pid
                    fun_mfa         :: mfa_or_funlbl()}).
 
@@ -383,26 +386,31 @@ add_msg(RcvMsg, State) ->
   NewCallgraph = dialyzer_callgraph:put_msgs(NewMsgs, Callgraph),
   dialyzer_dataflow:state__put_callgraph(NewCallgraph, State).
 
--spec add_pid(non_neg_integer(), dialyzer_dataflow:state()) ->
+-spec add_pid(pid_kind(), non_neg_integer(), dialyzer_dataflow:state()) ->
       dialyzer_dataflow:state().
 
-add_pid(Label, State) ->
+add_pid(Kind, Label, State) ->
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
   [H|T] = PidTags,
-  NewPidTags = [H#pid_fun{pid = Label}|T],
-  dialyzer_dataflow:state__put_pid_tags(NewPidTags, State).
+  case H#pid_fun.kind =:= Kind of
+    true ->
+      NewPidTags = [H#pid_fun{pid = Label}|T],
+      dialyzer_dataflow:state__put_pid_tags(NewPidTags, State);
+    false -> State
+  end.  
 
--spec add_pid_tag(non_neg_integer(), dialyzer_dataflow:state()) ->
+-spec add_pid_tag(pid_kind(), non_neg_integer(), dialyzer_dataflow:state()) ->
       dialyzer_dataflow:state().
 
-add_pid_tag(Label, State) ->
+add_pid_tag(Kind, Label, State) ->
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
   Digraph = dialyzer_callgraph:get_digraph(Callgraph),
   Races = dialyzer_dataflow:state__get_races(State),
   CurrFun = dialyzer_races:get_curr_fun(Races),
   Dads = backward_msg_analysis(CurrFun, Digraph),
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
-  NewPidTag = #pid_fun{pid = Label, pid_mfas = Dads, fun_mfa = CurrFun},
+  NewPidTag = #pid_fun{kind = Kind, pid = Label, pid_mfas = Dads,
+                       fun_mfa = CurrFun},
   dialyzer_dataflow:state__put_pid_tags([NewPidTag|PidTags], State).
 
 -spec create_pid_tag_for_self(mfa_or_funlbl(), digraph()) ->
@@ -410,7 +418,7 @@ add_pid_tag(Label, State) ->
 
 create_pid_tag_for_self(CurrFun, Digraph) ->
   Dads = backward_msg_analysis(CurrFun, Digraph),
-  #pid_fun{pid_mfas = Dads, fun_mfa = CurrFun}.
+  #pid_fun{kind = 'self', pid_mfas = Dads, fun_mfa = CurrFun}.
 
 -spec create_rcv_tag(mfa_or_funlbl(), file_line()) -> #rcv_fun{}.
 
