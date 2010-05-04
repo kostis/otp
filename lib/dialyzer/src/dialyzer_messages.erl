@@ -92,42 +92,44 @@
 
 msg(State) ->
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
+  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
+  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+  PidTagGroups = group_pid_tags(PidTags, Digraph),
+  msg1(PidTagGroups, State).
+
+msg1(PidTagGroups, State) ->
   RetState =
-    case PidTags of
+    case PidTagGroups of
       [] -> State;
-      [#pid_fun{pid = Pid,
-                pid_mfas = PidMFAs,
-                fun_mfa = CurrFun}|T] ->
-        case Pid =:= ?no_label of
-          true -> msg(dialyzer_dataflow:state__put_pid_tags(T, State));
-          false ->
-            Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
-            Msgs = dialyzer_callgraph:get_msgs(Callgraph),
-            SendTags = lists:usort(Msgs#msgs.send_tags),
-            CFSendTags = find_control_flow_send_tags(CurrFun, SendTags,
-                                                     Digraph),
-            % Opou PidMFAs thelo to simeio pou ginetai i anoteri anathesi
-            PidSendTags = go_from_parents(PidMFAs, Pid, CFSendTags, Digraph),
-            RcvTags =  lists:usort(Msgs#msgs.rcv_tags),
-            CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
-            State1 = warn_unused_rcv_stmts(PidSendTags, CFRcvTags, State),
-            %% HERE
-            msg(dialyzer_dataflow:state__put_pid_tags(T, State1))
-        end
+      [H|T] ->
+        {Pids, PidMFAs, CurrFuns} = unzip_pid_tag_groups(H),
+        Callgraph = dialyzer_dataflow:state__get_callgraph(State),
+        Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+        Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+        SendTags = lists:usort(Msgs#msgs.send_tags),
+        CFSendTags = find_control_flow_send_tags(CurrFuns, SendTags, Digraph),
+        PidSendTags = go_from_pid_tags(CurrFuns, Pids, CFSendTags, Digraph),
+        RcvTags =  lists:usort(Msgs#msgs.rcv_tags),
+        UniquePidMFAs = lists:usort(PidMFAs),
+        FilteredPidMFAs = filter_parents(UniquePidMFAs, Digraph),
+        CFRcvTags = find_control_flow_rcv_tags(FilteredPidMFAs, RcvTags,
+                                               Digraph),
+        State1 = warn_unused_rcv_stmts(PidSendTags, CFRcvTags, State),
+        %% HERE
+        msg1(T, State1)
     end,
   dialyzer_dataflow:state__put_pid_tags([], RetState).
 
-go_from_parents([], _Pid, _SendTags, _Digraph) ->
+go_from_pid_tags([], [], _SendTags, _Digraph) ->
   [];
-go_from_parents([P|Parents], Pid, SendTags, Digraph) ->
+go_from_pid_tags([T|Tags], [P|Pids], SendTags, Digraph) ->
   Code =
-    case ets:lookup(cfgs, P) of
+    case ets:lookup(cfgs, T) of
       [] -> [];
-      [{P, _Args, _Ret, C}] -> C
+      [{T, _Args, _Ret, C}] -> C
     end,
-  PidSendTags = forward_msg_analysis(Pid, Code, SendTags, Digraph),
-  PidSendTags ++ go_from_parents(Parents, PidSendTags, SendTags, Digraph).
+  PidSendTags = forward_msg_analysis(P, Code, SendTags, Digraph),
+  PidSendTags ++ go_from_pid_tags(Tags, Pids, SendTags, Digraph).
 
 %%% ===========================================================================
 %%%
@@ -228,8 +230,11 @@ find_control_flow_rcv_tags(PidFun, [#rcv_fun{fun_mfa = RcvFun} = H|T],
     end,
   find_control_flow_rcv_tags(PidFun, T, NewAcc, Digraph).
 
-find_control_flow_send_tags(PidFun, SendTags, Digraph) ->
-  find_control_flow_send_tags(PidFun, SendTags, [], Digraph).
+find_control_flow_send_tags([], _SendTags, _Digraph) ->
+  [];
+find_control_flow_send_tags([PidFun|Tail], SendTags, Digraph) ->
+  CFSendTags = find_control_flow_send_tags(PidFun, SendTags, [], Digraph),
+  CFSendTags ++ find_control_flow_send_tags(Tail, SendTags, Digraph).
 
 find_control_flow_send_tags(_PidFun, [], Acc, _Digraph) ->
   Acc;
@@ -300,6 +305,54 @@ get_clause_ret(RaceList, State) ->
         _ -> []
       end
   end.
+
+%% XXX: Subsets, Exported groups
+group_pid_tags(Tags, Digraph) ->
+  group_pid_tags(Tags, Tags, Digraph).
+
+group_pid_tags([], _Tags, _Digraph) ->
+  [];
+group_pid_tags([#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
+               Tags, Digraph) ->
+  Group =
+    case Kind =/= 'self' of
+      true -> [[H]];
+      false ->
+        case Pid =:= ?no_label of
+          true -> [];
+          false ->
+            ReachableFrom = digraph_utils:reachable([CurrFun], Digraph),
+            ReachingTo = digraph_utils:reaching([CurrFun], Digraph),
+            [group_pid_tags(H, ReachableFrom, ReachingTo, Tags)]
+        end
+    end,
+  Group ++ group_pid_tags(T, Tags, Digraph).
+
+group_pid_tags(CurrTag, _ReachableFrom, _ReachingTo, []) ->
+  [CurrTag];
+group_pid_tags(CurrTag, ReachableFrom, ReachingTo,
+               [#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T]) ->
+  Member =
+    case Kind =/= 'self' orelse Pid =:= ?no_label orelse CurrTag =:= H of
+      true -> [];
+      false ->
+        case lists:member(CurrFun, ReachableFrom) orelse
+          lists:member(CurrFun, ReachingTo) of
+          true -> [H];
+          false -> []
+        end
+    end,
+  Member ++ group_pid_tags(CurrTag, ReachableFrom, ReachingTo, T).
+
+unzip_pid_tag_groups(Ts) -> unzip_pid_tag_groups(Ts, [], [], []).
+
+unzip_pid_tag_groups([#pid_fun{pid = X,
+                               pid_mfas = Y,
+                               fun_mfa = Z}|
+                      Ts], Xs, Ys, Zs) ->
+  unzip_pid_tag_groups(Ts, [X|Xs], Y ++ Ys, [Z|Zs]);
+unzip_pid_tag_groups([], Xs, Ys, Zs) ->
+  {Xs, Ys, Zs}.
 
 -spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type(),
                         dialyzer_dataflow:state()) ->
