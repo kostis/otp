@@ -306,9 +306,11 @@ get_clause_ret(RaceList, State) ->
       end
   end.
 
-%% XXX: Subsets, Exported groups
+%% XXX: Exported groups
+%% Groups self tags that refer to the same process
 group_pid_tags(Tags, Digraph) ->
-  group_pid_tags(Tags, Tags, Digraph).
+  Groups = group_pid_tags(Tags, Tags, Digraph),
+  keep_subsets(Groups).
 
 group_pid_tags([], _Tags, _Digraph) ->
   [];
@@ -343,6 +345,33 @@ group_pid_tags(CurrTag, ReachableFrom, ReachingTo,
         end
     end,
   Member ++ group_pid_tags(CurrTag, ReachableFrom, ReachingTo, T).
+
+keep_subsets(Groups) ->
+  keep_subsets(Groups, Groups, []).
+
+keep_subsets([], Groups, Acc) ->
+  Groups -- Acc;
+keep_subsets([H|T], Groups, Acc) ->
+  NewAcc = 
+    case lists:member(H, Acc) of
+      true -> Acc;
+      false -> keep_subsets1(H, Groups, Acc)
+    end,
+  keep_subsets(T, Groups, NewAcc).
+
+keep_subsets1(_G, [], Acc) ->
+  Acc;
+keep_subsets1(G, [H|T], Acc) ->
+  NewAcc = 
+    case G =:= H of
+      true -> Acc;
+      false ->
+        case G -- H of
+          [] -> [H|Acc];
+          _ -> Acc
+        end
+    end,
+  keep_subsets1(G, T, NewAcc).
 
 unzip_pid_tag_groups(Ts) -> unzip_pid_tag_groups(Ts, [], [], []).
 
