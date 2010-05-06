@@ -28,7 +28,7 @@
  */
 
 #ifndef UNIX
-#if !defined(__WIN32__) && !defined(_OSE_) && !defined(VXWORKS)
+#if !defined(__WIN32__) && !defined(VXWORKS)
 #define UNIX 1
 #endif
 #endif
@@ -127,7 +127,7 @@ static int control(ErlDrvData drv_data,
 		   char **rbuf, int rlen)
 {
     PeekNonXQDrvData *dp = (PeekNonXQDrvData *) drv_data;
-    unsigned long key = 0;
+    unsigned int key = 0;
     char *res_str = "ok";
     ErlDrvSysInfo si;
     driver_system_info(&si, sizeof(ErlDrvSysInfo));
