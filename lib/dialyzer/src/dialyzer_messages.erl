@@ -33,10 +33,11 @@
 
 %% Record Interfaces
 
--export([add_msg/2, add_pid/3, add_pid_tag/3, create_pid_tag_for_self/2,
-         create_rcv_tag/2, create_send_tag/3, get_race_list_ret/3,
-         get_rcv_tags/1, get_send_tags/1, new/0, put_rcv_tags/2,
-         put_send_tags/2]).
+-export([add_msg/2, add_pid/3, add_pid_tag/3, add_pid_tags/2,
+         create_pid_tag_for_self/2, create_rcv_tag/2,
+         create_send_tag/3, get_race_list_ret/3,
+         get_rcv_tags/1, get_send_tags/1, new/0,
+         put_rcv_tags/2, put_send_tags/2]).
 
 -export_type([msgs/0, pid_fun/0]).
 
@@ -62,7 +63,7 @@
                    pid_mfas        :: [mfa_or_funlbl()], % funs that own the pid
                    fun_mfa         :: mfa_or_funlbl()}).
 
--record(rcv_fun,  {msgs      = []  :: [erl_types:erl_type()],
+-record(rcv_fun,  {msgs = []       :: [erl_types:erl_type()],
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
 
@@ -70,7 +71,9 @@
                    msg             :: erl_types:erl_type(),
                    fun_mfa         :: mfa_or_funlbl()}).
 
--record(msgs,     {rcv_tags  = []  :: [#rcv_fun{}],
+-record(msgs,     {old_mfas  = []  :: [mfa_or_funlbl()], % already analyzed pids
+                   pid_tags  = []  :: [#pid_fun{}],
+                   rcv_tags  = []  :: [#rcv_fun{}],
                    send_tags = []  :: [#send_fun{}]}).
 
 %%% ===========================================================================
@@ -94,8 +97,18 @@ msg(State) ->
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
   Digraph = dialyzer_callgraph:get_digraph(Callgraph),
-  PidTagGroups = group_pid_tags(PidTags, Digraph),
-  msg1(PidTagGroups, State).
+  Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+  AllPidTags = Msgs#msgs.pid_tags,
+  OldPidMFAs = Msgs#msgs.old_mfas,
+  PidTagGroups = group_pid_tags(PidTags, AllPidTags, OldPidMFAs, Digraph),
+  PidTagGroups1 = keep_subsets(PidTagGroups),
+  %% XXX: Exported groups 
+  State1 = msg1(PidTagGroups1, State),
+  Callgraph1 = dialyzer_dataflow:state__get_callgraph(State1),
+  Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
+  Msgs2 = add_analyzed_pid_mfas(PidTagGroups1, Msgs1),
+  Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
+  dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
 
 msg1(PidTagGroups, State) ->
   RetState =
@@ -199,6 +212,21 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
 %%%  Utilities
 %%%
 %%% ===========================================================================
+
+add_analyzed_pid_mfas(PidTagGroups, Msgs) ->
+  PidTags = lists:flatten(PidTagGroups),
+  add_analyzed_pid_mfas1(PidTags, Msgs, []).
+
+add_analyzed_pid_mfas1([], #msgs{old_mfas = OldMFAs} = Msgs, Acc) ->
+  Msgs#msgs{old_mfas = lists:usort(Acc ++ OldMFAs)};
+add_analyzed_pid_mfas1([#pid_fun{kind = Kind, fun_mfa = CurrFun}|T],
+                       Msgs, Acc) ->
+  NewAcc =
+    case Kind =/= 'self' of
+      true -> Acc;
+      false -> [CurrFun|Acc]
+    end,
+  add_analyzed_pid_mfas1(T, Msgs, NewAcc).
 
 backward_msg_analysis(CurrFun, Digraph) ->
   Calls = digraph:edges(Digraph),
@@ -306,34 +334,29 @@ get_clause_ret(RaceList, State) ->
       end
   end.
 
-%% XXX: Exported groups
 %% Groups self tags that refer to the same process
-group_pid_tags(Tags, Digraph) ->
-  Groups = group_pid_tags(Tags, Tags, Digraph),
-  keep_subsets(Groups).
-
-group_pid_tags([], _Tags, _Digraph) ->
+group_pid_tags([], _Tags, _OldMFAs, _Digraph) ->
   [];
 group_pid_tags([#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
-               Tags, Digraph) ->
+               Tags, OldMFAs, Digraph) ->
   Group =
     case Kind =/= 'self' of
       true -> [[H]];
       false ->
-        case Pid =:= ?no_label of
+        case Pid =:= ?no_label orelse lists:member(CurrFun, OldMFAs) of
           true -> [];
           false ->
             ReachableFrom = digraph_utils:reachable([CurrFun], Digraph),
             ReachingTo = digraph_utils:reaching([CurrFun], Digraph),
-            [group_pid_tags(H, ReachableFrom, ReachingTo, Tags)]
+            [group_pid_tags1(H, ReachableFrom, ReachingTo, Tags)]
         end
     end,
-  Group ++ group_pid_tags(T, Tags, Digraph).
+  Group ++ group_pid_tags(T, Tags, OldMFAs, Digraph).
 
-group_pid_tags(CurrTag, _ReachableFrom, _ReachingTo, []) ->
+group_pid_tags1(CurrTag, _ReachableFrom, _ReachingTo, []) ->
   [CurrTag];
-group_pid_tags(CurrTag, ReachableFrom, ReachingTo,
-               [#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T]) ->
+group_pid_tags1(CurrTag, ReachableFrom, ReachingTo,
+                [#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T]) ->
   Member =
     case Kind =/= 'self' orelse Pid =:= ?no_label orelse CurrTag =:= H of
       true -> [];
@@ -344,7 +367,7 @@ group_pid_tags(CurrTag, ReachableFrom, ReachingTo,
           false -> []
         end
     end,
-  Member ++ group_pid_tags(CurrTag, ReachableFrom, ReachingTo, T).
+  Member ++ group_pid_tags1(CurrTag, ReachableFrom, ReachingTo, T).
 
 keep_subsets(Groups) ->
   keep_subsets(Groups, Groups, []).
@@ -494,6 +517,11 @@ add_pid_tag(Kind, Label, State) ->
   NewPidTag = #pid_fun{kind = Kind, pid = Label, pid_mfas = Dads,
                        fun_mfa = CurrFun},
   dialyzer_dataflow:state__put_pid_tags([NewPidTag|PidTags], State).
+
+-spec add_pid_tags([pid_fun()], msgs()) -> msgs().
+
+add_pid_tags(PidTags, #msgs{pid_tags = PT} = Msgs) ->
+  Msgs#msgs{pid_tags = PidTags ++ PT}.
 
 -spec create_pid_tag_for_self(mfa_or_funlbl(), digraph()) ->
       pid_fun().

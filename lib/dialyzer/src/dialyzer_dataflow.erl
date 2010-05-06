@@ -89,7 +89,7 @@
 -record(state, {callgraph            :: dialyzer_callgraph:callgraph(),
 		envs                 :: dict(),
 		fun_tab		     :: dict(),
-                pid_tags             :: [dialyzer_messages:pid_fun()],
+                pid_tags = []        :: [dialyzer_messages:pid_fun()],
 		plt		     :: dialyzer_plt:plt(),
 		opaques              :: [erl_types:erl_type()],
 		races                :: dialyzer_races:races(),
@@ -134,11 +134,14 @@ get_warnings(Tree, Plt, Callgraph, Records, NoWarnUnused) ->
 get_fun_types(Tree, Plt, Callgraph, Records) ->
   State = analyze_module(Tree, Plt, Callgraph, Records, false),
   Callgraph1 = State#state.callgraph,
+  Msgs = dialyzer_callgraph:get_msgs(Callgraph1),
+  PidTags = State#state.pid_tags,
+  Msgs1 = dialyzer_messages:add_pid_tags(PidTags, Msgs),
   {state__all_fun_types(State),
    dialyzer_callgraph:get_public_tables(Callgraph1),
    dialyzer_callgraph:get_named_tables(Callgraph1),
    dialyzer_callgraph:get_deadlocks(Callgraph1),
-   dialyzer_callgraph:get_msgs(Callgraph1)}.
+   Msgs1}.
 
 %%--------------------------------------------------------------------
 
