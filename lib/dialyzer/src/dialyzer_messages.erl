@@ -213,20 +213,19 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
 %%%
 %%% ===========================================================================
 
-add_analyzed_pid_mfas(PidTagGroups, Msgs) ->
+add_analyzed_pid_mfas(PidTagGroups, #msgs{old_mfas = OldMFAs} = Msgs) ->
   PidTags = lists:flatten(PidTagGroups),
-  add_analyzed_pid_mfas1(PidTags, Msgs, []).
+  Msgs#msgs{old_mfas = lists:usort(add_analyzed_pid_mfas(PidTags) ++ OldMFAs)}.
 
-add_analyzed_pid_mfas1([], #msgs{old_mfas = OldMFAs} = Msgs, Acc) ->
-  Msgs#msgs{old_mfas = lists:usort(Acc ++ OldMFAs)};
-add_analyzed_pid_mfas1([#pid_fun{kind = Kind, fun_mfa = CurrFun}|T],
-                       Msgs, Acc) ->
-  NewAcc =
+add_analyzed_pid_mfas([]) ->
+  [];
+add_analyzed_pid_mfas([#pid_fun{kind = Kind, fun_mfa = CurrFun}|T]) ->
+  NewHead =
     case Kind =/= 'self' of
-      true -> Acc;
-      false -> [CurrFun|Acc]
+      true -> [];
+      false -> [CurrFun]
     end,
-  add_analyzed_pid_mfas1(T, Msgs, NewAcc).
+  NewHead ++ add_analyzed_pid_mfas(T).
 
 backward_msg_analysis(CurrFun, Digraph) ->
   Calls = digraph:edges(Digraph),
