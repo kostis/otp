@@ -350,7 +350,7 @@ keep_subsets(Groups) ->
   keep_subsets(Groups, Groups, []).
 
 keep_subsets([], Groups, Acc) ->
-  Groups -- Acc;
+  lists:usort(Groups -- Acc);
 keep_subsets([H|T], Groups, Acc) ->
   NewAcc = 
     case lists:member(H, Acc) of
