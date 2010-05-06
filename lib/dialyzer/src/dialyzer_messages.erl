@@ -520,7 +520,7 @@ add_pid_tag(Kind, Label, State) ->
 -spec add_pid_tags([pid_fun()], msgs()) -> msgs().
 
 add_pid_tags(PidTags, #msgs{pid_tags = PT} = Msgs) ->
-  Msgs#msgs{pid_tags = PidTags ++ PT}.
+  Msgs#msgs{pid_tags = lists:usort(PidTags ++ PT)}.
 
 -spec create_pid_tag_for_self(mfa_or_funlbl(), digraph()) ->
       pid_fun().
