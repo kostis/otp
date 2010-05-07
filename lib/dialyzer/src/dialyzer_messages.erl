@@ -102,7 +102,6 @@ msg(State) ->
   OldPidMFAs = Msgs#msgs.old_mfas,
   PidTagGroups = group_pid_tags(PidTags, AllPidTags, OldPidMFAs, Digraph),
   PidTagGroups1 = keep_subsets(PidTagGroups),
-  %% XXX: Exported groups 
   State1 = msg1(PidTagGroups1, State),
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
