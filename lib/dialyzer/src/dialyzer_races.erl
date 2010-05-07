@@ -1143,7 +1143,7 @@ fixup_race_forward_helper(CurrFun, CurrFunLabel, Fun, FunLabel,
 
 -spec fixup_race_backward(mfa_or_funlbl(), [{mfa_or_funlbl(), mfa_or_funlbl()}],
                          [{mfa_or_funlbl(), mfa_or_funlbl()}], [mfa()],
-                         ?local) ->
+                          0..?local) ->
       [mfa()].
 
 fixup_race_backward(CurrFun, Calls, CallsToAnalyze, Parents, Height) ->
