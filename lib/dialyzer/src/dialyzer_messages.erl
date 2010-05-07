@@ -170,7 +170,7 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
             PidSendTags = 
               case follow_call(Callee, SendMFAs, Digraph) of
                 true ->
-                  case lists:member({Caller, Callee} ,Calls) of
+                  case lists:member({Caller, Callee}, Calls) of
                     true -> [];
                     false ->
                       [{Callee, DefVars, _DefRet, CalleeCode}] =
