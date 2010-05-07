@@ -92,8 +92,8 @@
                 pid_tags = []        :: [dialyzer_messages:pid_fun()],
 		plt		     :: dialyzer_plt:plt(),
 		opaques              :: [erl_types:erl_type()],
-		races                :: dialyzer_races:races(),
-		records              :: dict(),
+		races = dialyzer_races:new() :: dialyzer_races:races(),
+		records = dict:new() :: dict(),
 		tree_map	     :: dict(),
                 var_fun_tab          :: dict(),
 		warning_mode = false :: boolean(),
@@ -636,9 +636,9 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	end
     end,
   ArgModeMask = [case lists:member(Arg, Opaques) of
-	       true -> opaque;
-	       false -> structured
-	     end || Arg <- ArgTypes],
+                   true -> opaque;
+                   false -> structured
+                 end || Arg <- ArgTypes],
   NewArgsSig = t_inf_lists_masked(SigArgs, ArgTypes, ArgModeMask),
   NewArgsContract = t_inf_lists_masked(CArgs, ArgTypes, ArgModeMask),
   NewArgsBif = t_inf_lists_masked(BifArgs, ArgTypes, ArgModeMask),
@@ -646,7 +646,7 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
   NewArgTypes = t_inf_lists_masked(NewArgTypes0, NewArgsBif, ArgModeMask),
   BifRet = BifRange(NewArgTypes),
   {TmpArgTypes, TmpArgsContract} =
-    case (TypeOfApply == remote) andalso (not IsBIF) of
+    case (TypeOfApply =:= remote) andalso (not IsBIF) of
       true ->
 	List1 = lists:zip(CArgs, NewArgTypes),
 	List2 = lists:zip(CArgs, NewArgsContract),
@@ -657,10 +657,11 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
       false  -> {NewArgTypes, NewArgsContract}
     end,
   ContrRet = CRange(TmpArgTypes),
-  RetMode = case t_contains_opaque(ContrRet) orelse t_contains_opaque(BifRet) of
-	   true  -> opaque;
-	   false -> structured
-	 end,
+  RetMode =
+    case t_contains_opaque(ContrRet) orelse t_contains_opaque(BifRet) of
+      true  -> opaque;
+      false -> structured
+    end,
   RetWithoutLocal = t_inf(t_inf(ContrRet, BifRet, RetMode), SigRange, RetMode),
   ?debug("--------------------------------------------------------\n", []),
   ?debug("Fun: ~p\n", [Fun]),
@@ -2876,9 +2877,11 @@ determine_mode(Type, Opaques) ->
 %%% ===========================================================================
 
 state__new(Callgraph, Tree, Plt, Module, Records, BehaviourTranslations) ->
+  Opaques = erl_types:module_builtin_opaques(Module) ++
+    erl_types:t_opaque_from_records(Records),
   TreeMap = build_tree_map(Tree),
   Funs = dict:fetch_keys(TreeMap),
-  FunTab = init_fun_tab(Funs, dict:new(), TreeMap, Callgraph, Plt),
+  FunTab = init_fun_tab(Funs, dict:new(), TreeMap, Callgraph, Plt, Opaques),
   Work = init_work([get_label(Tree)]),
   Env = dict:store(top, map__new(), dict:new()),
   Opaques = erl_types:module_builtin_opaques(Module) ++
@@ -3086,15 +3089,29 @@ build_tree_map(Tree) ->
     end,
   cerl_trees:fold(Fun, dict:new(), Tree).
 
-init_fun_tab([top|Left], Dict, TreeMap, Callgraph, Plt) ->
+init_fun_tab([top|Left], Dict, TreeMap, Callgraph, Plt, Opaques) ->
   NewDict = dict:store(top, {not_handled, {[], t_none()}}, Dict),
-  init_fun_tab(Left, NewDict, TreeMap, Callgraph, Plt);
-init_fun_tab([Fun|Left], Dict, TreeMap, Callgraph, Plt) ->
+  init_fun_tab(Left, NewDict, TreeMap, Callgraph, Plt, Opaques);
+init_fun_tab([Fun|Left], Dict, TreeMap, Callgraph, Plt, Opaques) ->
   Arity = cerl:fun_arity(dict:fetch(Fun, TreeMap)),
   FunEntry =
     case dialyzer_callgraph:is_escaping(Fun, Callgraph) of
       true ->
-	Args = lists:duplicate(Arity, t_any()),
+        Args =
+          case dialyzer_callgraph:lookup_name(Fun, Callgraph) of
+            error -> lists:duplicate(Arity, t_any());
+            {ok, MFA} ->
+              case dialyzer_plt:lookup_contract(Plt, MFA) of
+                none -> lists:duplicate(Arity, t_any());
+                {value, #contract{args = Arguments}} ->
+                  [begin
+                     case erl_types:t_unopaque(A, Opaques) of
+                       A -> A;
+                       UnopaqueA -> t_sup(A, UnopaqueA)
+                     end
+                   end || A <- Arguments]
+              end
+          end,
 	case lookup_fun_sig(Fun, Callgraph, Plt) of
 	  none -> {Args, t_unit()};
 	  {value, {RetType, _}} ->
@@ -3106,8 +3123,8 @@ init_fun_tab([Fun|Left], Dict, TreeMap, Callgraph, Plt) ->
       false -> {lists:duplicate(Arity, t_none()), t_unit()}
     end,
   NewDict = dict:store(Fun, {not_handled, FunEntry}, Dict),
-  init_fun_tab(Left, NewDict, TreeMap, Callgraph, Plt);
-init_fun_tab([], Dict, _TreeMap, _Callgraph, _Plt) ->
+  init_fun_tab(Left, NewDict, TreeMap, Callgraph, Plt, Opaques);
+init_fun_tab([], Dict, _TreeMap, _Callgraph, _Plt, _Opaques) ->
   Dict.
 
 state__update_fun_env(Tree, Map, #state{envs = Envs} = State) ->
