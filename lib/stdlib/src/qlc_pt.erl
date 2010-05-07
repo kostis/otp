@@ -872,8 +872,7 @@ column_fun(Columns, QualifierNumber, LcL) ->
                                    (fun(F, A) -> {cons,0,{integer,0,F},A} 
                                     end, {nil,0}, Fils)]},
              Tag = case ordsets:to_list(qlc:vars(Vs1)) of
-                       Imp when length(Imp) > 0, % imported vars
-                                length(Vs0) > 1 ->
+                       [_|_] when length(Vs0) > 1 ->
                            usort_needed;
                        _ ->
                            values

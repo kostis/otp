@@ -1511,7 +1511,8 @@ get_bif_constr({erlang, '==', 2}, Dst, [Arg1, Arg2] = Args, _State) ->
   mk_conj_constraint_list([mk_constraint(Dst, sub, DstV),
 			   mk_constraint(Arg1, sub, ArgV1),
 			   mk_constraint(Arg2, sub, ArgV2)]);
-get_bif_constr({erlang, element, 2} = _BIF, Dst, Args, State) ->
+get_bif_constr({erlang, element, 2} = _BIF, Dst, Args,
+               #state{cs = Constrs} = State) ->
   GenType = erl_bif_types:type(erlang, element, 2),
   case t_is_none(GenType) of
     true -> ?debug("Bif: ~w failed\n", [_BIF]), throw(error);
@@ -1527,7 +1528,12 @@ get_bif_constr({erlang, element, 2} = _BIF, Dst, Args, State) ->
       ReturnType = mk_fun_var(Fun, Args),
       ArgTypes = erl_bif_types:arg_types(erlang, element, 2),      
       Cs = mk_constraints(Args, sub, ArgTypes),
-      mk_conj_constraint_list([mk_constraint(Dst, sub, ReturnType)|Cs])
+      NewCs =
+        case find_element(Args, Constrs) of
+          'unknown' -> Cs;
+          Elem -> [mk_constraint(Dst, eq, Elem)|Cs]
+        end,
+      mk_conj_constraint_list([mk_constraint(Dst, sub, ReturnType)|NewCs])
   end;
 get_bif_constr({M, F, A} = _BIF, Dst, Args, State) ->
   GenType = erl_bif_types:type(M, F, A),
@@ -2612,6 +2618,41 @@ is_singleton_type(Type) ->
 	  t_is_nil(Type)
       end
   end.
+
+find_element(Args, Cs) ->
+  [Pos, Tuple] = Args,
+  case erl_types:t_is_number(Pos) of
+    true ->
+      case erl_types:t_number_vals(Pos) of
+        'unknown' -> 'unknown';
+        [I] ->
+          case find_constraint(Tuple, Cs) of
+            'unknown' -> 'unknown';
+            #constraint{lhs = ExTuple} ->
+              case erl_types:t_is_tuple(ExTuple) of
+                true ->
+                  Elems = erl_types:t_tuple_args(ExTuple),
+                  Elem = lists:nth(I, Elems),
+                  case erl_types:t_is_var(Elem) of
+                    true -> Elem;
+                    false -> 'unknown'
+                  end;
+                false -> 'unknown'
+              end
+          end;
+        _ -> 'unknown'
+      end;
+    false -> 'unknown'
+  end.
+
+find_constraint(_Tuple, []) ->
+  'unknown';
+find_constraint(Tuple, [#constraint{op = 'eq', rhs = Tuple} = C|_]) ->
+  C;
+find_constraint(Tuple, [#constraint_list{list = List}|Cs]) ->
+  find_constraint(Tuple, List ++ Cs);
+find_constraint(Tuple, [_|Cs]) ->
+  find_constraint(Tuple, Cs).
 
 %% ============================================================================
 %%
