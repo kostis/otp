@@ -78,10 +78,10 @@ yeccpars0(Tokens, MFA) ->
                 {missing_in_goto_table=Tag, Symbol, State} ->
                     Desc = {Symbol, State, Tag},
                     erlang:raise(error, {yecc_bug, ?CODE_VERSION, Desc},
-                                Stacktrace)
+				 Stacktrace)
             catch _:_ -> erlang:raise(error, Error, Stacktrace)
-            end;
-        throw: {error, {_Line, ?MODULE, _M}} = Error -> 
+							   end;
+	  throw: {error, {_Line, ?MODULE, _M}} = Error -> 
             Error % probably from return_error/2
     end.
 

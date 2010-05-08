@@ -1734,6 +1734,7 @@ do_config_change([{App, _Id} | Apps], EnvBefore, Errors) ->
     end.
 
 
+    
 %%-----------------------------------------------------------------
 %% Check if the configuration is changed in anyway.
 %%-----------------------------------------------------------------

@@ -560,11 +560,15 @@ encrypt(Data, PrivProtocol, PrivKey, SecLevel) ->
 	    ?vtrace("encrypt -> 3.1.4a",[]),
 	    case (catch try_encrypt(PrivProtocol, PrivKey, Data)) of
 		{ok, ScopedPduData, MsgPrivParams} ->
-		    ?vtrace("encrypt -> encode tag",[]),
+		    ?vtrace("encrypt -> encrypted - now encode tag",[]),
 		    {snmp_pdus:enc_oct_str_tag(ScopedPduData), MsgPrivParams};
                 {error, Reason} ->
+		    ?vtrace("encrypt -> error: "
+			    "~n   Reason: ~p", [Reason]),
                     error(Reason);
- 		_Error ->
+ 		Error ->
+		    ?vtrace("encrypt -> other: "
+			    "~n   Error: ~p", [Error]),
 		    error(encryptionError)
 	    end
     end.
@@ -715,14 +719,19 @@ set_engine_latest_time(SnmpEngineID, EngineTime) ->
 %%-----------------------------------------------------------------
 %% Utility functions
 %%-----------------------------------------------------------------
+-spec error(term()) -> no_return().
 error(Reason) ->
     throw({error, Reason}).
 
+-spec error(term(), term()) -> no_return().
 error(Reason, ErrorInfo) ->
     throw({error, Reason, ErrorInfo}).
 
+-spec error(term(), term(), term()) -> no_return().
 error(Variable, Oid, SecName) ->
     error(Variable, Oid, SecName, []).
+
+-spec error(term(), term(), term(), [term()]) -> no_return().
 error(Variable, Oid, SecName, Opts) ->
     Val = inc(Variable),
     ErrorInfo = {#varbind{oid = Oid,
@@ -734,7 +743,6 @@ error(Variable, Oid, SecName, Opts) ->
 
 inc(Name) -> ets:update_counter(snmp_agent_table, Name, 1).
 
-
 get_counter(Name) ->
     case (catch ets:lookup(snmp_agent_table, Name)) of
 	[{_, Val}] ->
@@ -742,8 +750,3 @@ get_counter(Name) ->
 	_ ->
 	    0
     end.
-
-
-
-
-

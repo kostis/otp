@@ -38,23 +38,47 @@
 %%-----------------------------------------------------------------
 %% System messages
 %%-----------------------------------------------------------------
+
+-spec suspend(name()) -> 'ok'.
 suspend(Name) -> send_system_msg(Name, suspend).
+
+-spec suspend(name(), timeout()) -> 'ok'.
 suspend(Name, Timeout) -> send_system_msg(Name, suspend, Timeout).
 
+-spec resume(name()) -> 'ok'.
 resume(Name) -> send_system_msg(Name, resume).
+
+-spec resume(name(), timeout()) -> 'ok'.
 resume(Name, Timeout) -> send_system_msg(Name, resume, Timeout).
 
+-type status_ret() :: {'status', pid(), {'module', module()}, [_]}.
+
+-spec get_status(name()) -> status_ret().
 get_status(Name) -> send_system_msg(Name, get_status).
+
+-spec get_status(name(), timeout()) -> status_ret().
 get_status(Name, Timeout) -> send_system_msg(Name, get_status, Timeout).
 
+-spec change_code(name(), module(), term(), term()) -> 'ok' | {'error', term()}.
 change_code(Name, Mod, Vsn, Extra) ->
     send_system_msg(Name, {change_code, Mod, Vsn, Extra}).
+
+-spec change_code(name(), module(), term(), term(), timeout()) ->
+        'ok' | {'error', term()}.
 change_code(Name, Mod, Vsn, Extra, Timeout) ->
     send_system_msg(Name, {change_code, Mod, Vsn, Extra}, Timeout).
 
 %%-----------------------------------------------------------------
 %% Debug commands
 %%-----------------------------------------------------------------
+
+-type dbg_func() :: fun((term(), system_event(), term()) -> term()).
+-type opt()      :: 'log' | {'log', pos_integer()}
+                  | {'log_to_file', file:filename()}
+                  | {'install', {dbg_func(), term()}}
+                  | 'statistics' | 'trace'.
+-type dbg_tag()  :: 'log' | 'log_to_file' | 'statistics' | 'trace'.
+-type dbg_opt()  :: {dbg_tag() | dbg_func(), term()}.
 
 -type log_flag() :: 'true' | {'true',pos_integer()} | 'false' | 'get' | 'print'.
 
@@ -84,8 +108,18 @@ log_to_file(Name, FileName) ->
 log_to_file(Name, FileName, Timeout) ->
     send_system_msg(Name, {debug, {log_to_file, FileName}}, Timeout).
 
+-type stat_flag() :: 'true' | 'false' | 'get'.
+-type statistic() :: {'start_time', file:date_time()}
+                   | {'current_time', file:date_time()}
+                   | {'reductions', non_neg_integer()}
+                   | {'messages_in', non_neg_integer()}
+                   | {'messages_out', non_neg_integer()}.
+
+-spec statistics(name(), stat_flag()) -> 'ok' | {'ok', [statistic()]}.
 statistics(Name, Flag) ->
     send_system_msg(Name, {debug, {statistics, Flag}}).
+
+-spec statistics(name(), stat_flag(), timeout()) -> 'ok' | {'ok', [statistic()]}.
 statistics(Name, Flag, Timeout) ->
     send_system_msg(Name, {debug, {statistics, Flag}}, Timeout).
 
@@ -95,13 +129,19 @@ no_debug(Name) -> send_system_msg(Name, {debug, no_debug}).
 -spec no_debug(name(), timeout()) -> 'ok'.
 no_debug(Name, Timeout) -> send_system_msg(Name, {debug, no_debug}, Timeout).
 
+-spec install(name(), {dbg_func(), term()}) -> term().
 install(Name, {Func, FuncState}) ->
     send_system_msg(Name, {debug, {install, {Func, FuncState}}}).
+
+-spec install(name(), {dbg_func(), term()}, timeout()) -> term().
 install(Name, {Func, FuncState}, Timeout) ->
     send_system_msg(Name, {debug, {install, {Func, FuncState}}}, Timeout).
 
+-spec remove(name(), dbg_func()) -> 'ok'.
 remove(Name, Func) ->
     send_system_msg(Name, {debug, {remove, Func}}).
+
+-spec remove(name(), dbg_func(), timeout()) -> 'ok'.
 remove(Name, Func, Timeout) ->
     send_system_msg(Name, {debug, {remove, Func}}, Timeout).
 
@@ -137,7 +177,7 @@ mfa(Name, Req, Timeout) ->
 %%       From   ::= {pid(),Ref} but don't count on that
 %%       Parent ::= pid()
 %%       Module ::= atom()
-%%       Debug  ::= [debug_opts()]
+%%       Debug  ::= [dbg_opt()]
 %%       Misc   ::= term()
 %% Purpose: Used by a process module that wishes to take care of
 %%          system messages.  The process receives a {system, From,
@@ -145,14 +185,18 @@ mfa(Name, Req, Timeout) ->
 %% Returns: This function *never* returns! It calls the function
 %%          Module:system_continue(Parent, NDebug, Misc)
 %%          there the process continues the execution or
-%%          Module:system_terminate(Raeson, Parent, Debug, Misc) if
+%%          Module:system_terminate(Reason, Parent, Debug, Misc) if
 %%          the process should terminate.
 %%          The Module must export system_continue/3, system_terminate/4
 %%          and format_status/2 for status information.
 %%-----------------------------------------------------------------
+-spec handle_system_msg(term(), {pid(), term()}, pid(), module(),
+			[dbg_opt()], term()) -> no_return().
 handle_system_msg(Msg, From, Parent, Module, Debug, Misc) ->
     handle_system_msg(running, Msg, From, Parent, Module, Debug, Misc, false).
 
+-spec handle_system_msg(term(), {pid(), term()}, pid(), module(),
+			[dbg_opt()], term(), boolean()) -> no_return().
 handle_system_msg(Msg, From, Parent, Mod, Debug, Misc, Hib) ->
    handle_system_msg(running, Msg, From, Parent, Mod, Debug, Misc, Hib).
 
@@ -168,14 +212,16 @@ handle_system_msg(SysState, Msg, From, Parent, Mod, Debug, Misc, Hib) ->
 
 %%-----------------------------------------------------------------
 %% Func: handle_debug/4
-%% Args: Debug ::= [debug_opts()]
+%% Args: Debug ::= [dbg_opt()]
 %%       Func  ::= {M,F} | fun()  arity 3
 %%       State ::= term()
 %%       Event ::= {in, Msg} | {in, Msg, From} | {out, Msg, To} | term()
 %% Purpose: Called by a process that wishes to debug an event.
 %%          Func is a formatting function, called as Func(Device, Event).
-%% Returns: [debug_opts()]
+%% Returns: [dbg_opt()]
 %%-----------------------------------------------------------------
+-spec handle_debug([dbg_opt()], fun((_,_,_) -> _), term(), term()) ->
+        [dbg_opt()].
 handle_debug([{trace, true} | T], FormFunc, State, Event) ->
     print_event({Event, State, FormFunc}),
     [{trace, true} | handle_debug(T, FormFunc, State, Event)];
@@ -345,18 +391,21 @@ install_debug(Item, Data, Debug) ->
 	undefined -> [{Item, Data} | Debug];
 	_ -> Debug
     end.
+
 remove_debug(Item, Debug) -> lists:keydelete(Item, 1, Debug).
+
+-spec get_debug(dbg_tag(), [dbg_opt()], term()) -> term().
 get_debug(Item, Debug, Default) -> 
-    case lists:keysearch(Item, 1, Debug) of
-	{value, {Item, Data}} -> Data;
+    case lists:keyfind(Item, 1, Debug) of
+	{Item, Data} -> Data;
 	_ -> Default
     end.
 
+-spec print_log([dbg_opt()]) -> 'ok'.
 print_log(Debug) ->
     {_N, Logs} = get_debug(log, Debug, {0, []}),
-    lists:foreach(fun print_event/1,
-		  lists:reverse(Logs)).
-    
+    lists:foreach(fun print_event/1, lists:reverse(Logs)).
+
 close_log_file(Debug) ->
     case get_debug(log_to_file, Debug, []) of
 	[] ->
@@ -373,10 +422,12 @@ close_log_file(Debug) ->
 %% Purpose: Initiate a debug structure.  Called by a process that
 %%          wishes to initiate the debug structure without the
 %%          system messages.
-%% Returns: [debug_opts()]
+%% Returns: [dbg_opt()]
 %%-----------------------------------------------------------------
+-spec debug_options([opt()]) -> [dbg_opt()].
 debug_options(Options) ->
     debug_options(Options, []).
+
 debug_options([trace | T], Debug) ->
     debug_options(T, install_debug(trace, true, Debug));
 debug_options([log | T], Debug) ->
