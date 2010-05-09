@@ -54,7 +54,7 @@ build(Opts) ->
   DefaultOpts = #options{},
   DefaultOpts1 = DefaultOpts#options{legal_warnings = DefaultWarns1,
 				      init_plt = InitPlt},
-  try 
+  try
     NewOpts = build_options(Opts, DefaultOpts1),
     postprocess_opts(NewOpts)
   catch
@@ -135,6 +135,8 @@ build_options([{OptionName, Value} = Term|Rest], Options) ->
       build_options(Rest, NewOptions);
     check_plt when is_boolean(Value) ->
       build_options(Rest, Options#options{check_plt = Value});
+    fast_plt when is_boolean(Value) ->
+      build_options(Rest, Options#options{fast_plt = Value});
     defines ->
       assert_defines(Term, Value),
       OldVal = Options#options.defines,
@@ -211,7 +213,7 @@ assert_output_format(formatted) ->
 assert_output_format(Term) ->
   bad_option("Illegal value for output_format", Term).
 
-assert_plt_op(#options{analysis_type = OldVal}, 
+assert_plt_op(#options{analysis_type = OldVal},
 	      #options{analysis_type = NewVal}) ->
   case is_plt_mode(OldVal) andalso is_plt_mode(NewVal) of
     true -> bad_option("Options cannot be combined", [OldVal, NewVal]);
@@ -255,7 +257,7 @@ build_warnings([Opt|Opts], Warnings) ->
       behaviours ->
 	ordsets:add_element(?WARN_BEHAVIOUR, Warnings);
       specdiffs ->
-	S = ordsets:from_list([?WARN_CONTRACT_SUBTYPE, 
+	S = ordsets:from_list([?WARN_CONTRACT_SUBTYPE,
 			       ?WARN_CONTRACT_SUPERTYPE,
 			       ?WARN_CONTRACT_NOT_EQUAL]),
 	ordsets:union(S, Warnings);

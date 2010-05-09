@@ -21,7 +21,7 @@
 %%%-------------------------------------------------------------------
 %%% File    : dialyzer_analysis_callgraph.erl
 %%% Author  : Tobias Lindahl <tobiasl@it.uu.se>
-%%% Description : 
+%%% Description :
 %%%
 %%% Created :  5 Apr 2005 by Tobias Lindahl <tobiasl@it.uu.se>
 %%%-------------------------------------------------------------------
@@ -32,7 +32,7 @@
 
 -include("dialyzer.hrl").
 
--record(analysis_state, 
+-record(analysis_state,
 	{
 	  codeserver                    :: dialyzer_codeserver:codeserver(),
 	  analysis_type  = succ_typings :: anal_type(),
@@ -42,9 +42,12 @@
 	  no_warn_unused                :: set(),
 	  parent                        :: pid(),
 	  plt                           :: dialyzer_plt:plt(),
+	  old_plt                       :: dialyzer_plt:plt(),
 	  start_from     = byte_code    :: start_from(),
 	  use_contracts  = true         :: boolean(),
-	  behaviours = {false,[]}   :: {boolean(),[atom()]}
+	  behaviours     = {false, []}  :: {boolean(), [atom()]},
+	  diff_mods      = []           :: [atom()],
+	  fast_plt       = true         :: boolean()
 	 }).
 
 -record(server_state, {parent :: pid(), legal_warnings :: [dial_warn_tag()]}).
@@ -83,10 +86,10 @@ loop(#server_state{parent = Parent, legal_warnings = LegalWarnings} = State,
 	  send_warnings(Parent, SendWarnings)
       end,
       loop(State, Analysis, ExtCalls);
-    {AnalPid, cserver, CServer, Plt} -> 
+    {AnalPid, cserver, CServer, Plt} ->
       send_codeserver_plt(Parent, CServer, Plt),
       loop(State, Analysis, ExtCalls);
-    {AnalPid, done, Plt, DocPlt} ->      
+    {AnalPid, done, Plt, DocPlt} ->
       case ExtCalls =:= none of
 	true ->
 	  send_analysis_done(Parent, Plt, DocPlt);
@@ -126,8 +129,9 @@ analysis_start(Parent, Analysis) ->
 			  parent = Parent,
 			  start_from = Analysis#analysis.start_from,
 			  use_contracts = Analysis#analysis.use_contracts,
-			  behaviours = {Analysis#analysis.behaviours_chk, []}
-			 },
+			  behaviours = {Analysis#analysis.behaviours_chk, []},
+			  diff_mods = Analysis#analysis.diff_mods,
+			  fast_plt = Analysis#analysis.fast_plt},
   Files = ordsets:from_list(Analysis#analysis.files),
   {Callgraph, NoWarn, TmpCServer0} = compile_and_store(Files, State),
   %% Remote type postprocessing
@@ -157,7 +161,7 @@ analysis_start(Parent, Analysis) ->
   NewPlt0 = dialyzer_plt:insert_types(Plt, dialyzer_codeserver:get_records(NewCServer)),
   ExpTypes =  dialyzer_codeserver:get_exported_types(NewCServer),
   NewPlt1 = dialyzer_plt:insert_exported_types(NewPlt0, ExpTypes),
-  State0 = State#analysis_state{plt = NewPlt1},
+  State0 = State#analysis_state{plt = NewPlt1, old_plt = NewPlt1},
   dump_callgraph(Callgraph, State0, Analysis),
   State1 = State0#analysis_state{codeserver = NewCServer},
   State2 = State1#analysis_state{no_warn_unused = NoWarn},
@@ -176,31 +180,37 @@ analysis_start(Parent, Analysis) ->
   NonExportsList = sets:to_list(NonExports),
   Plt3 = dialyzer_plt:delete_list(State3#analysis_state.plt, NonExportsList),
   Plt4 = dialyzer_plt:delete_contract_list(Plt3, NonExportsList),
-  send_codeserver_plt(Parent, CServer, State3#analysis_state.plt), 
+  send_codeserver_plt(Parent, CServer, State3#analysis_state.plt),
   send_analysis_done(Parent, Plt4, State3#analysis_state.doc_plt).
 
-analyze_callgraph(Callgraph, State) ->
-  Plt = State#analysis_state.plt,
-  Codeserver = State#analysis_state.codeserver,
-  Parent = State#analysis_state.parent,
-  case State#analysis_state.analysis_type of
+analyze_callgraph(Callgraph, #analysis_state{codeserver = CodeServer,
+					     analysis_type = Type,
+					     plt = Plt,
+					     old_plt = OldPlt,
+					     doc_plt = DocPlt,
+					     parent = Parent,
+					     fast_plt = Fast,
+					     diff_mods = DiffMods} = State) ->
+  case Type of
     plt_build ->
-      Callgraph1 = dialyzer_callgraph:finalize(Callgraph),
-      NewPlt = dialyzer_succ_typings:analyze_callgraph(Callgraph1, Plt, 
-						       Codeserver, Parent),
+      Callgraph0 = dialyzer_callgraph:put_diff_mods(DiffMods, Callgraph),
+      Callgraph1 = dialyzer_callgraph:put_fast_plt(Fast, Callgraph0),
+      Callgraph2 = dialyzer_callgraph:finalize(Callgraph1),
+      NewPlt = dialyzer_succ_typings:analyze_callgraph(Callgraph2, Plt, OldPlt,
+						       CodeServer, Parent),
       dialyzer_callgraph:delete(Callgraph1),
       State#analysis_state{plt = NewPlt};
     succ_typings ->
       NoWarn = State#analysis_state.no_warn_unused,
       {BehavioursChk, _Known} = State#analysis_state.behaviours,
-      DocPlt = State#analysis_state.doc_plt,
-      Callgraph1 = dialyzer_callgraph:finalize(Callgraph),
-      {Warnings, NewPlt, NewDocPlt} = 
+      Callgraph0 = dialyzer_callgraph:put_fast_plt(false, Callgraph),
+      Callgraph1 = dialyzer_callgraph:finalize(Callgraph0),
+      {Warnings, NewPlt, NewDocPlt} =
 	dialyzer_succ_typings:get_warnings(Callgraph1, Plt, DocPlt,
-					   Codeserver, NoWarn, Parent,
+					   CodeServer, NoWarn, Parent,
 					   BehavioursChk),
       dialyzer_callgraph:delete(Callgraph1),
-      send_warnings(State#analysis_state.parent, Warnings),
+      send_warnings(Parent, Warnings),
       State#analysis_state{plt = NewPlt, doc_plt = NewDocPlt}
   end.
 
@@ -229,24 +239,24 @@ compile_and_store(Files, #analysis_state{codeserver = CServer,
 		  {error, Reason} ->
 		    {TmpCG, TmpCServer, [{File, Reason}|TmpFailed], TmpNoWarn,
                      TmpMods};
-		  {ok, NewCG, NoWarn, NewCServer, Mod} -> 
+		  {ok, NewCG, NoWarn, NewCServer, Mod} ->
 		    {NewCG, NewCServer, TmpFailed, NoWarn++TmpNoWarn,
                      [Mod|TmpMods]}
 		end
 	    end;
 	  byte_code ->
-	    fun(File, {TmpCG, TmpCServer, TmpFailed, TmpNoWarn, TmpMods}) -> 
+	    fun(File, {TmpCG, TmpCServer, TmpFailed, TmpNoWarn, TmpMods}) ->
 		case compile_byte(File, TmpCG, TmpCServer, UseContracts) of
 		  {error, Reason} ->
 		    {TmpCG, TmpCServer, [{File, Reason}|TmpFailed], TmpNoWarn,
                      TmpMods};
-		  {ok, NewCG, NoWarn, NewCServer, Mod} -> 
+		  {ok, NewCG, NoWarn, NewCServer, Mod} ->
 		    {NewCG, NewCServer, TmpFailed, NoWarn++TmpNoWarn,
                      [Mod|TmpMods]}
 		end
 	    end
 	end,
-  {NewCallgraph1, NewCServer, Failed, NoWarn, Modules} = 
+  {NewCallgraph1, NewCServer, Failed, NoWarn, Modules} =
     lists:foldl(Fun, {Callgraph, CServer, [], [], []}, Files),
   case Failed =:= [] of
     true ->
@@ -255,7 +265,7 @@ compile_and_store(Files, #analysis_state{codeserver = CServer,
         lists:foldl(fun({Mod, F}, Dict) -> dict:append(Mod, F, Dict) end,
                     dict:new(), NewFiles),
       check_for_duplicate_modules(ModDict);
-    false -> 
+    false ->
       Msg = io_lib:format("Could not scan the following file(s): ~p",
 			  [lists:flatten(Failed)]),
       exit({error, Msg})
@@ -268,14 +278,14 @@ compile_and_store(Files, #analysis_state{codeserver = CServer,
   if UnknownBehaviours =:= [] -> ok;
      true -> send_unknown_behaviours(Parent, UnknownBehaviours)
   end,
-  State1 = State#analysis_state{behaviours = {BehChk,KnownBehaviours}},
+  State1 = State#analysis_state{behaviours = {BehChk, KnownBehaviours}},
   NewCallgraph2 = cleanup_callgraph(State1, NewCServer, NewCallgraph1, Modules),
   {T3, _} = statistics(runtime),
   Msg2 = io_lib:format("done in ~.2f secs\n", [(T3-T2)/1000]),
-  send_log(Parent, Msg2),  
+  send_log(Parent, Msg2),
   {NewCallgraph2, sets:from_list(NoWarn), NewCServer}.
 
-cleanup_callgraph(#analysis_state{plt = InitPlt, parent = Parent, 
+cleanup_callgraph(#analysis_state{plt = InitPlt, parent = Parent,
 				  codeserver = CodeServer,
 				  behaviours = {BehChk, KnownBehaviours}
 				 },
@@ -298,9 +308,9 @@ cleanup_callgraph(#analysis_state{plt = InitPlt, parent = Parent,
 		       not dialyzer_plt:contains_mfa(InitPlt, To)],
   {BadCalls1, RealExtCalls} =
     if ExtCalls1 =:= [] -> {[], []};
-       true -> 
+       true ->
 	ModuleSet = sets:from_list(Modules),
-	lists:partition(fun({_From, {M, _F, _A}}) -> 
+	lists:partition(fun({_From, {M, _F, _A}}) ->
 			    sets:is_element(M, ModuleSet) orelse
 			      dialyzer_plt:contains_module(InitPlt, M)
 			end, ExtCalls1)
@@ -367,14 +377,14 @@ compile_byte(File, Callgraph, CServer, UseContracts) ->
 	  case dialyzer_utils:get_record_and_type_info(AbstrCode) of
 	    {error, _} = Error -> Error;
 	    {ok, RecInfo} ->
-	      CServer1 = 
+	      CServer1 =
 		dialyzer_codeserver:store_temp_records(Mod, RecInfo, CServer),
 	      case UseContracts of
 		true ->
 		  case dialyzer_utils:get_spec_info(Mod, AbstrCode, RecInfo) of
 		    {error, _} = Error -> Error;
 		    {ok, SpecInfo} ->
-		      CServer2 = 
+		      CServer2 =
 			dialyzer_codeserver:store_temp_contracts(Mod, SpecInfo,
 								 CServer1),
 		      store_core(Mod, Core, NoWarn, Callgraph, CServer2)
@@ -398,7 +408,7 @@ store_core(Mod, Core, NoWarn, Callgraph, CServer) ->
   store_code_and_build_callgraph(Mod, LabeledCore, Callgraph, CServer3, NoWarn).
 
 abs_get_nowarn(Abs, M) ->
-  [{M, F, A} 
+  [{M, F, A}
    || {attribute, _, compile, {nowarn_unused_function, {F, A}}} <- Abs].
 
 get_exported_types_from_core(Core) ->
@@ -421,7 +431,7 @@ label_core(Core, CServer) ->
   NextLabel = dialyzer_codeserver:get_next_core_label(CServer),
   CoreTree = cerl:from_records(Core),
   {LabeledTree, NewNextLabel} = cerl_trees:label(CoreTree, NextLabel),
-  {cerl:to_records(LabeledTree), 
+  {cerl:to_records(LabeledTree),
    dialyzer_codeserver:set_next_core_label(NewNextLabel, CServer)}.
 
 store_code_and_build_callgraph(Mod, Core, Callgraph, CServer, NoWarn) ->
@@ -489,7 +499,8 @@ rcv_and_send_ext_types(Parent) ->
   Self = self(),
   Self ! {Self, done},
   ExtTypes = rcv_ext_types(Self, []),
-  Parent ! {Self, ext_types, ExtTypes}.
+  Parent ! {Self, ext_types, ExtTypes},
+  ok.
 
 rcv_ext_types(Self, ExtTypes) ->
   receive
@@ -515,7 +526,7 @@ filter_warnings(LegalWarnings, Warnings) ->
 send_analysis_done(Parent, Plt, DocPlt) ->
   Parent ! {self(), done, Plt, DocPlt},
   ok.
-  
+
 send_ext_calls(Parent, ExtCalls) ->
   Parent ! {self(), ext_calls, ExtCalls},
   ok.
@@ -539,7 +550,7 @@ send_mod_deps(Parent, ModuleDeps) ->
   Parent ! {self(), mod_deps, ModuleDeps},
   ok.
 
-format_bad_calls([{{_, _, _}, {_, module_info, A}}|Left], CodeServer, Acc) 
+format_bad_calls([{{_, _, _}, {_, module_info, A}}|Left], CodeServer, Acc)
   when A =:= 0; A =:= 1 ->
   format_bad_calls(Left, CodeServer, Acc);
 format_bad_calls([{FromMFA, {M, F, A} = To}|Left], CodeServer, Acc) ->
@@ -552,7 +563,7 @@ format_bad_calls([], _CodeServer, Acc) ->
   Acc.
 
 find_call_file_and_line(Tree, MFA) ->
-  Fun = 
+  Fun =
     fun(SubTree, Acc) ->
 	case cerl:is_c_call(SubTree) of
 	  true ->
