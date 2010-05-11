@@ -396,7 +396,7 @@ load_little_4(Dst, Base, Offset, Signedness) ->
   end.
 
 load_4_directly(Dst, Base, Offset, Signedness) ->
-  [hipe_rtl:mk_load(Dst, Base, Offset, word, Signedness),
+  [hipe_rtl:mk_load(Dst, Base, Offset, int32, Signedness),
    hipe_rtl:mk_alu(Offset, Offset, add, hipe_rtl:mk_imm(4))].
 
 load_big_4_in_pieces(Dst, Base, Offset, Signedness) ->
