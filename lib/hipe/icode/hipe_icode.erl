@@ -1578,27 +1578,19 @@ redirect_jmp(Jmp, ToOld, ToNew) ->
 	  _ -> Jmp
 	end
     end,
-  simplify_branch(NewI).
-
-%%
-%% @doc Turns a branch into a goto if it has only one successor and it
-%%      is safe to do so.
-%%
-
--spec simplify_branch(icode_instr()) -> icode_instr().
-
-simplify_branch(I) ->
-  case ordsets:from_list(successors(I)) of
+  %% Turn a branch into a goto if it has only one successor and it is
+  %% safe to do so.
+  case ordsets:from_list(successors(NewI)) of
     [Label] ->
       Goto = mk_goto(Label),
-      case I of
-	#icode_type{} -> Goto;
+      case NewI of
 	#icode_if{} -> Goto;
 	#icode_switch_tuple_arity{} -> Goto;
 	#icode_switch_val{} -> Goto;
-	_ -> I
+	#icode_type{} -> Goto;
+	_ -> NewI
       end;
-    _ -> I
+    _ -> NewI
   end.
 
 %%
