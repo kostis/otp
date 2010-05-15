@@ -329,9 +329,9 @@ message_to_string({no_return, [Type|Name]}) ->
     only_normal -> NameString ++ "has no local return\n";
     both -> NameString ++ "has no local return\n"
   end;
-message_to_string({record_constr, [Types, Name]}) ->
+message_to_string({record_constr, [RecConstr, FieldDiffs]}) ->
   io_lib:format("Record construction ~s violates the"
-		" declared type for #~w{}\n", [Types, Name]);
+		" declared type of field ~s\n", [RecConstr, FieldDiffs]);
 message_to_string({record_constr, [Name, Field, Type]}) ->
   io_lib:format("Record construction violates the declared type for #~w{}"
 		" since ~s cannot be of type ~s\n", [Name, Field, Type]);
