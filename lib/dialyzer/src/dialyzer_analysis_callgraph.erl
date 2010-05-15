@@ -194,7 +194,11 @@ analyze_callgraph(Callgraph, #analysis_state{codeserver = CodeServer,
   case Type of
     plt_build ->
       Callgraph0 = dialyzer_callgraph:put_diff_mods(DiffMods, Callgraph),
-      Callgraph1 = dialyzer_callgraph:put_fast_plt(Fast, Callgraph0),
+      Fast1 = case DiffMods of
+		[] -> false;
+		_  -> Fast
+	      end,
+      Callgraph1 = dialyzer_callgraph:put_fast_plt(Fast1, Callgraph0),
       Callgraph2 = dialyzer_callgraph:finalize(Callgraph1),
       NewPlt = dialyzer_succ_typings:analyze_callgraph(Callgraph2, Plt, OldPlt,
 						       CodeServer, Parent),

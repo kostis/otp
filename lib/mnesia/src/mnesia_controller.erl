@@ -1840,7 +1840,7 @@ reply(ReplyTo, Reply) ->
 add_worker(#dump_log{initiated_by = InitBy,
 		     opt_reply_to = OptReplyTo} = Worker, State) ->
     Queue = State#state.dumper_queue,
-    case lists:keymember(InitBy, InitBy, Queue) of
+    case lists:keymember(InitBy, #dump_log.initiated_by, Queue) of
 	true when OptReplyTo =:= undefined ->
 	    %% The same threshold has been exceeded again,
 	    %% before we have had the possibility to

@@ -46,9 +46,9 @@
 	 output_plt      = none           :: 'none' | file:filename(),
 	 plt_info        = none           :: 'none' | dialyzer_plt:plt_info(),
 	 report_mode     = normal         :: rep_mode(),
-	 return_status= ?RET_NOTHING_SUSPICIOUS	:: dial_ret(),
+	 return_status   = ?RET_NOTHING_SUSPICIOUS :: dial_ret(),
 	 stored_warnings = []             :: [dial_warning()],
-	 unknown_behaviours = []          :: [atom()]
+	 unknown_behaviours = []          :: [dialyzer_behaviours:behaviour()]
 	}).
 
 %%--------------------------------------------------------------------
@@ -68,7 +68,7 @@ start(#options{analysis_type = AnalysisType} = Options) ->
 %%--------------------------------------------------------------------
 
 build_plt(Opts) ->
-  Opts1 = init_opts_for_build(Opts#options{fast_plt = false}),
+  Opts1 = init_opts_for_build(Opts),
   Files = get_files_from_opts(Opts1),
   Md5 = dialyzer_plt:compute_md5_from_files(Files),
   PltInfo = {Md5, dict:new()},
@@ -580,7 +580,7 @@ format_log_cache(LogCache) ->
 store_warnings(#cl_state{stored_warnings = StoredWarnings} = St, Warnings) ->
   St#cl_state{stored_warnings = StoredWarnings ++ Warnings}.
 
--spec store_unknown_behaviours(#cl_state{}, [_]) -> #cl_state{}.
+-spec store_unknown_behaviours(#cl_state{}, [dialyzer_behaviours:behaviour()]) -> #cl_state{}.
 
 store_unknown_behaviours(#cl_state{unknown_behaviours = Behs} = St, Beh) ->
   St#cl_state{unknown_behaviours = Beh ++ Behs}.

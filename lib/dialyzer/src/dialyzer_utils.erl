@@ -74,12 +74,11 @@ print_types1([{record, _Name} = Key|T], RecDict) ->
 -define(debug(D_), ok).
 -endif.
 
-%%
-%%  Types that need to be imported from somewhere else
-%%
+%% ----------------------------------------------------------------------------
 
--type abstract_code() :: [tuple()]. %% XXX: refine
--type comp_options()  :: [atom()].  %% XXX: a restricted set of options is used
+-type abstract_code() :: [tuple()]. %% XXX: import from somewhere
+-type comp_options()  :: [compile:option()].
+-type mod_or_fname()  :: atom() | file:filename().
 
 %% ============================================================================
 %%
@@ -87,13 +86,13 @@ print_types1([{record, _Name} = Key|T], RecDict) ->
 %%
 %% ============================================================================
 
--spec get_abstract_code_from_src(atom() | file:filename()) ->
+-spec get_abstract_code_from_src(mod_or_fname()) ->
 	{'ok', abstract_code()} | {'error', [string()]}.
 
 get_abstract_code_from_src(File) ->
   get_abstract_code_from_src(File, src_compiler_opts()).
 
--spec get_abstract_code_from_src(atom() | file:filename(), comp_options()) ->
+-spec get_abstract_code_from_src(mod_or_fname(), comp_options()) ->
 	{'ok', abstract_code()} | {'error', [string()]}.
 
 get_abstract_code_from_src(File, Opts) ->
@@ -313,7 +312,7 @@ merge_records(NewRecords, OldRecords) ->
 %%
 %% ============================================================================
 
--spec get_spec_info(module(), abstract_code(), dict()) ->
+-spec get_spec_info(atom(), abstract_code(), dict()) ->
         {'ok', dict()} | {'error', string()}.
 
 get_spec_info(ModName, AbstractCode, RecordsDict) ->
@@ -376,7 +375,7 @@ sets_filter([Mod|Mods], ExpTypes) ->
 %%
 %% ============================================================================
 
--spec src_compiler_opts() -> comp_options().
+-spec src_compiler_opts() -> [compile:option(),...].
 
 src_compiler_opts() ->
   [no_copt, to_core, binary, return_errors,

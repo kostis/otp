@@ -101,7 +101,7 @@
 new() ->
   #plt{}.
 
--spec delete_module(plt(), module()) -> plt().
+-spec delete_module(plt(), atom()) -> plt().
 
 delete_module(#plt{info = Info, types = Types, contracts = Contracts,
                    exported_types = ExpTypes}, Mod) ->
@@ -177,12 +177,12 @@ get_exported_types(#plt{exported_types = ExpTypes}) ->
 
 -type mfa_types() :: {mfa(), erl_types:erl_type(), [erl_types:erl_type()]}.
 
--spec lookup_module(plt(), module()) -> 'none' | {'value', [mfa_types()]}.
+-spec lookup_module(plt(), atom()) -> 'none' | {'value', [mfa_types()]}.
 
 lookup_module(#plt{info = Info}, M) when is_atom(M) ->
   table_lookup_module(Info, M).
 
--spec contains_module(plt(), module()) -> boolean().
+-spec contains_module(plt(), atom()) -> boolean().
 
 contains_module(#plt{info = Info, contracts = Cs}, M) when is_atom(M) ->
   table_contains_module(Info, M) orelse table_contains_module(Cs, M).
@@ -450,7 +450,7 @@ get_specs(#plt{info = Info}) ->
 beam_file_to_module(Filename) ->
   list_to_atom(filename:basename(Filename, ".beam")).
 
--spec get_specs(plt(), module(), atom(), arity_patt()) -> 'none' | string().
+-spec get_specs(plt(), atom(), atom(), arity_patt()) -> 'none' | string().
 
 get_specs(#plt{info = Info}, M, F, A) when is_atom(M), is_atom(F) ->
   MFA = {M, F, A},
@@ -592,7 +592,7 @@ pp_non_returning() ->
 			      [M, F, dialyzer_utils:format_sig(Type)])
 		end, lists:sort(None)).
 
--spec pp_mod(module()) -> 'ok'.
+-spec pp_mod(atom()) -> 'ok'.
 
 pp_mod(Mod) when is_atom(Mod) ->
   PltFile = get_default_plt(),

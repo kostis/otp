@@ -86,7 +86,7 @@ new() ->
 delete(#codeserver{table_pid = TablePid}) ->
   table__delete(TablePid).
 
--spec insert(module(), cerl:c_module(), codeserver()) -> codeserver().
+-spec insert(atom(), cerl:c_module(), codeserver()) -> codeserver().
 
 insert(Mod, ModCode, CS) ->
   NewTablePid = table__insert(CS#codeserver.table_pid, Mod, ModCode),
@@ -129,7 +129,7 @@ get_exports(#codeserver{exports = Exports}) ->
 finalize_exported_types(Set, CS) ->
   CS#codeserver{exported_types = Set, temp_exported_types = sets:new()}.
 
--spec lookup_mod_code(module(), codeserver()) -> cerl:c_module().
+-spec lookup_mod_code(atom(), codeserver()) -> cerl:c_module().
 
 lookup_mod_code(Mod, CS) when is_atom(Mod) ->
   table__lookup(CS#codeserver.table_pid, Mod).
@@ -149,7 +149,7 @@ get_next_core_label(#codeserver{next_core_label = NCL}) ->
 set_next_core_label(NCL, CS) ->
   CS#codeserver{next_core_label = NCL}.
 
--spec store_records(module(), dict(), codeserver()) -> codeserver().
+-spec store_records(atom(), dict(), codeserver()) -> codeserver().
 
 store_records(Mod, Dict, #codeserver{records = RecDict} = CS)
   when is_atom(Mod) ->
@@ -158,7 +158,7 @@ store_records(Mod, Dict, #codeserver{records = RecDict} = CS)
     false -> CS#codeserver{records = dict:store(Mod, Dict, RecDict)}
   end.
 
--spec lookup_mod_records(module(), codeserver()) -> dict().
+-spec lookup_mod_records(atom(), codeserver()) -> dict().
 
 lookup_mod_records(Mod, #codeserver{records = RecDict})
   when is_atom(Mod) ->
@@ -172,7 +172,7 @@ lookup_mod_records(Mod, #codeserver{records = RecDict})
 get_records(#codeserver{records = RecDict}) ->
   RecDict.
 
--spec store_temp_records(module(), dict(), codeserver()) -> codeserver().
+-spec store_temp_records(atom(), dict(), codeserver()) -> codeserver().
 
 store_temp_records(Mod, Dict, #codeserver{temp_records = TempRecDict} = CS)
   when is_atom(Mod) ->
@@ -196,7 +196,7 @@ set_temp_records(Dict, CS) ->
 finalize_records(Dict, CS) ->
   CS#codeserver{records = Dict, temp_records = dict:new()}.
 
--spec store_contracts(module(), dict(), codeserver()) -> codeserver().
+-spec store_contracts(atom(), dict(), codeserver()) -> codeserver().
 
 store_contracts(Mod, Dict, #codeserver{contracts = C} = CS) when is_atom(Mod) ->
   case dict:size(Dict) =:= 0 of
@@ -204,7 +204,7 @@ store_contracts(Mod, Dict, #codeserver{contracts = C} = CS) when is_atom(Mod) ->
     false -> CS#codeserver{contracts = dict:store(Mod, Dict, C)}
   end.
 
--spec lookup_mod_contracts(module(), codeserver()) -> dict().
+-spec lookup_mod_contracts(atom(), codeserver()) -> dict().
 
 lookup_mod_contracts(Mod, #codeserver{contracts = ContDict})
   when is_atom(Mod) ->
@@ -227,7 +227,7 @@ lookup_mfa_contract({M,_F,_A} = MFA, #codeserver{contracts = ContDict}) ->
 get_contracts(#codeserver{contracts = ContDict}) ->
   ContDict.
 
--spec store_temp_contracts(module(), dict(), codeserver()) -> codeserver().
+-spec store_temp_contracts(atom(), dict(), codeserver()) -> codeserver().
 
 store_temp_contracts(Mod, Dict, #codeserver{temp_contracts = C} = CS)
   when is_atom(Mod) ->

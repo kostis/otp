@@ -1227,22 +1227,20 @@ handle_tuple(Tree, Map, State) ->
 		_ ->
 		  case state__lookup_record(TagVal, length(Left), State1) of
 		    error -> {State1, Map1, TupleType};
-		    {ok, Prototype} ->
-		      %% io:format("In handle_tuple:\n  Prototype = ~p\n", [Prototype]),
-		      InfTupleType = t_inf(Prototype, TupleType),
-		      %% io:format("  TupleType = ~p,\n  Inf = ~p\n", [TupleType, InfTupleType]),
+		    {ok, RecType} ->
+		      InfTupleType = t_inf(RecType, TupleType),
 		      case t_is_none(InfTupleType) of
 			true ->
-			  Msg = {record_constr,
-				 [format_type(TupleType, State1), TagVal]},
+			  RecC = format_type(TupleType, State1),
+			  FieldDiffs = format_field_diffs(TupleType, State1),
+			  Msg = {record_constr, [RecC, FieldDiffs]},
 			  State2 = state__add_warning(State1, ?WARN_MATCHING,
 						      Tree, Msg),
 			  {State2, Map1, t_none()};
 			false ->
-			  case bind_pat_vars(Elements, t_tuple_args(Prototype),
+			  case bind_pat_vars(Elements, t_tuple_args(RecType),
 					     [], Map1, State1) of
 			    {error, bind, ErrorPat, ErrorType, _} ->
-			      %% io:format("error\n", []),
 			      Msg = {record_constr,
 				     [TagVal, format_patterns(ErrorPat),
 				      format_type(ErrorType, State1)]},
@@ -3267,16 +3265,13 @@ get_file([_|Tail]) -> get_file(Tail).
 is_compiler_generated(Ann) ->
   lists:member(compiler_generated, Ann) orelse (get_line(Ann) < 1).
 
--spec format_args([term()], [erl_types:erl_type()], state()) ->
+-spec format_args([cerl:cerl()], [erl_types:erl_type()], state()) ->
   nonempty_string().
 
 format_args([], [], _State) ->
   "()";
 format_args(ArgList, TypeList, State) ->
   "(" ++ format_args_1(ArgList, TypeList, State) ++ ")".
-
--spec format_args_1([term(),...], [erl_types:erl_type(),...], state()) ->
-  string().
 
 format_args_1([Arg], [Type], State) ->
   format_arg(Arg) ++ format_type(Type, State);
@@ -3309,6 +3304,11 @@ format_arg(Arg) ->
 
 format_type(Type, #state{records = R}) ->
   t_to_string(Type, R).
+
+-spec format_field_diffs(erl_types:erl_type(), state()) -> string().
+
+format_field_diffs(RecConstruction, #state{records = R}) ->
+  erl_types:record_field_diffs_to_string(RecConstruction, R).
 
 -spec format_sig_args(erl_types:erl_type(), state()) -> string().
 

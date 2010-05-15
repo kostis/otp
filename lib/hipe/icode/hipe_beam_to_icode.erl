@@ -1,28 +1,26 @@
 %% -*- erlang-indent-level: 2 -*-
 %%
 %% %CopyrightBegin%
-%% 
-%% Copyright Ericsson AB 2001-2009. All Rights Reserved.
-%% 
+%%
+%% Copyright Ericsson AB 2001-2010. All Rights Reserved.
+%%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
 %% compliance with the License. You should have received a copy of the
 %% Erlang Public License along with this software. If not, it can be
 %% retrieved online at http://www.erlang.org/.
-%% 
+%%
 %% Software distributed under the License is distributed on an "AS IS"
 %% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
 %% the License for the specific language governing rights and limitations
 %% under the License.
-%% 
+%%
 %% %CopyrightEnd%
 %%
 %%=======================================================================
 %% File        : hipe_beam_to_icode.erl
 %% Author      : Kostis Sagonas
 %% Description : Translates symbolic BEAM code to Icode
-%%=======================================================================
-%% $Id$
 %%=======================================================================
 %% @doc
 %%    This file translates symbolic BEAM code to Icode which is HiPE's
@@ -431,6 +429,11 @@ trans_fun([{wait_timeout,{_,Lbl},Reg}|Instructions], Env) ->
   SuspTmout = hipe_icode:mk_if(suspend_msg_timeout,[],
 			       map_label(Lbl),hipe_icode:label_name(DoneLbl)),
   Movs ++ [SetTmout, SuspTmout, DoneLbl | trans_fun(Instructions,Env1)];
+%%--- recv_mark/1 & recv_set/1 ---  XXX: Handle better??
+trans_fun([{recv_mark,{f,_}}|Instructions], Env) ->
+  trans_fun(Instructions,Env);
+trans_fun([{recv_set,{f,_}}|Instructions], Env) ->
+  trans_fun(Instructions,Env);
 %%--------------------------------------------------------------------
 %%--- Translation of arithmetics {bif,ArithOp, ...} ---
 %%--------------------------------------------------------------------
