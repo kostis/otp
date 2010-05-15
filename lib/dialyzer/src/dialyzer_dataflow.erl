@@ -268,8 +268,9 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
   debug_pp(Tree, false),
   Module = cerl:atom_val(cerl:module_name(Tree)),
   RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
+  BehTranslation = dialyzer_callgraph:get_behaviour_translation(Callgraph),
   BehaviourTranslations =
-    case RaceDetection of
+    case RaceDetection andalso BehTranslation of
       true -> dialyzer_behaviours:translatable_behaviours(Tree);
       false -> []
     end,
