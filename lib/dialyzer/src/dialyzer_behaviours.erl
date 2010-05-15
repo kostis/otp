@@ -34,7 +34,7 @@
 	 translate_behaviour_api_call/5, translatable_behaviours/1,
 	 translate_callgraph/3]).
 
--export_type([behaviour/0, behaviour_api_info/0]).
+-export_type([behaviour/0, behaviour_api_dict/0]).
 
 %%--------------------------------------------------------------------
 
@@ -75,8 +75,7 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
       [add_tag_file_line(Module, W, State) || W <- Warnings]
   end.
 
--spec translatable_behaviours(cerl:c_module()) -> 
-				 [{behaviour(), behaviour_api_info()}].
+-spec translatable_behaviours(cerl:c_module()) -> behaviour_api_dict().
 
 translatable_behaviours(Tree) ->
   Attrs = cerl:module_attrs(Tree),
@@ -91,7 +90,7 @@ get_behaviour_apis(Behaviours) ->
 -spec translate_behaviour_api_call(dialyzer_races:mfa_or_funlbl(), 
 				   [erl_types:erl_type()], 
 				   [dialyzer_races:core_vars()],
-				   [{behaviour(), behaviour_api_info()}],
+				   behaviour_api_dict(),
 				   [{atom(), module()}]) -> 
 				      {{dialyzer_races:mfa_or_funlbl(), 
 					[erl_types:erl_type()], 
@@ -153,7 +152,7 @@ translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
 			     _CallbackAssocs) ->
   plain_call.
 
--spec translate_callgraph([{behaviour(), behaviour_api_info()}], atom(), 
+-spec translate_callgraph(behaviour_api_dict(), atom(),
 			  dialyzer_callgraph:callgraph()) -> 
 			     dialyzer_callgraph:callgraph().
 
@@ -364,6 +363,7 @@ nth_or_0(N, List, _Zero) ->
 
 %------------------------------------------------------------------------------
 
+-type behaviour_api_dict()::[{behaviour(), behaviour_api_info()}].
 -type behaviour_api_info()::[{original_fun(), replacement_fun(), directive()}].
 -type original_fun()::{atom(), arity()}.
 -type replacement_fun()::{atom(), arity(), arg_list()}.
