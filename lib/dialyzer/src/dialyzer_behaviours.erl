@@ -34,7 +34,7 @@
 	 translate_behaviour_api_call/5, translatable_behaviours/1,
 	 translate_callgraph/3]).
 
--export_type([behaviour/0]).
+-export_type([behaviour/0, behaviour_api_info/0]).
 
 %%--------------------------------------------------------------------
 
@@ -75,7 +75,8 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
       [add_tag_file_line(Module, W, State) || W <- Warnings]
   end.
 
--spec translatable_behaviours(cerl:c_module()) -> [{behaviour(), [_]}].
+-spec translatable_behaviours(cerl:c_module()) -> 
+				 [{behaviour(), behaviour_api_info()}].
 
 translatable_behaviours(Tree) ->
   Attrs = cerl:module_attrs(Tree),
@@ -87,7 +88,15 @@ translatable_behaviours(Tree) ->
 get_behaviour_apis(Behaviours) ->
   get_behaviour_apis(Behaviours, []).
 
--spec translate_behaviour_api_call(_, _, _, _, _) -> _.
+-spec translate_behaviour_api_call(dialyzer_races:mfa_or_funlbl(), 
+				   [erl_types:erl_type()], 
+				   [dialyzer_races:core_vars()],
+				   module(), 
+				   [{behaviour(), behaviour_api_info()}]) -> 
+				      {dialyzer_races:mfa_or_funlbl(), 
+				       [erl_types:erl_type()], 
+				       [dialyzer_races:core_vars()]} 
+					| 'plain_call'.
 
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _Module, []) ->
   plain_call;
@@ -107,8 +116,9 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _Module, _BehApiInfo) ->
   plain_call.
 
--spec translate_callgraph([{behaviour(), _}], atom(), dialyzer_callgraph:callgraph())
-			  -> dialyzer_callgraph:callgraph().
+-spec translate_callgraph([{behaviour(), behaviour_api_info()}], atom(), 
+			  dialyzer_callgraph:callgraph()) -> 
+			     dialyzer_callgraph:callgraph().
 
 translate_callgraph([{Behaviour,_}|Behaviours], Module, Callgraph) ->
   UsedCalls = [Call || {_From, {M, _F, _A}} = Call <-
@@ -316,6 +326,13 @@ nth_or_0(N, List, _Zero) ->
   lists:nth(N, List).
 
 %------------------------------------------------------------------------------
+
+-type behaviour_api_info()::[{original_fun(), replacement_fun()}].
+-type original_fun()::{atom(), arity()}.
+-type replacement_fun()::{atom(), arity(), arg_list()}.
+-type arg_list()::[byte()].
+
+-spec behaviour_api_calls(behaviour()) -> behaviour_api_info().
 
 behaviour_api_calls(gen_server) ->
   [{{start_link, 3}, {init, 1, [2]}},

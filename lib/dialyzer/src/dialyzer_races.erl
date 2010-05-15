@@ -39,7 +39,7 @@
          let_tag_new/2, new/0, put_curr_fun/3, put_fun_args/2,
          put_race_analysis/2, put_race_list/3]).
 
--export_type([races/0]).
+-export_type([races/0, mfa_or_funlbl/0, core_vars/0]).
 
 -include("dialyzer.hrl").
 
