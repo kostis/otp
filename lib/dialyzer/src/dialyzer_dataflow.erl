@@ -97,8 +97,8 @@
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
 		module               :: module(),
-		behaviour_api_info = [] :: [{dialyzer_behaviours:behaviour(), 
-					    dialyzer_behaviours:behaviour_api_info()}]}).
+		behaviour_api_dict = [] ::
+		  dialyzer_behaviours:behaviour_api_dict()}).
 
 %% Exported Types
 
@@ -681,11 +681,11 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	%%               respective callback module's function.
 
 	Module = State#state.module,
-	BehApiInfo = State#state.behaviour_api_info,
+	BehApiDict = State#state.behaviour_api_dict,
 	{RealFun, RealArgTypes, RealArgs} =
 	  case dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
 								Args, Module,
-								BehApiInfo) of
+								BehApiDict) of
 	    plain_call    -> {Fun, ArgTypes, Args};
 	    BehaviourAPI  -> BehaviourAPI
 	  end,
@@ -2745,7 +2745,7 @@ state__new(Callgraph, Tree, Plt, Module, Records, BehaviourTranslations) ->
   #state{callgraph = Callgraph, envs = Env, fun_tab = FunTab, opaques = Opaques,
 	 plt = Plt, races = dialyzer_races:new(), records = Records,
 	 warning_mode = false, warnings = [], work = Work, tree_map = TreeMap,
-	 module = Module, behaviour_api_info = BehaviourTranslations}.
+	 module = Module, behaviour_api_dict = BehaviourTranslations}.
 
 state__mark_fun_as_handled(#state{fun_tab = FunTab} = State, Fun0) ->
   Fun = get_label(Fun0),
