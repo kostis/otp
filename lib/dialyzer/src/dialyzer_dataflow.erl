@@ -97,7 +97,8 @@
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
 		module               :: module(),
-		behaviour_api_info = [] :: [{atom(),[_]}],
+		behaviour_api_info = [] :: [{dialyzer_behaviours:behaviour(), 
+					    dialyzer_behaviours:behaviour_api_info()}],
 		callback_assocs    = [] :: [{atom(),module()}]}).
 
 %% Exported Types
