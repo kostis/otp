@@ -97,7 +97,9 @@
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
 		module               :: module(),
-		behaviour_api_info = [] :: [{atom(),[_]}]}).
+		behaviour_api_info = [] :: [{dialyzer_behaviours:behaviour(), 
+					    dialyzer_behaviours:behaviour_api_info()}],
+		callback_assocs    = [] :: [{atom(),module()}]}).
 
 %% Exported Types
 
@@ -680,17 +682,21 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	%% EXPERIMENTAL: Turn a behaviour's API call into a call to the
 	%%               respective callback module's function.
 
-	Module = State#state.module,
 	BehApiInfo = State#state.behaviour_api_info,
-	{RealFun, RealArgTypes, RealArgs} =
-	  case dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
-								Args, Module,
-								BehApiInfo) of
-	    plain_call    -> {Fun, ArgTypes, Args};
-	    BehaviourAPI  -> BehaviourAPI
+	CallbackAssocs = State#state.callback_assocs,
+	{RealFun, RealArgTypes, RealArgs, State0} =
+	  case 
+	    dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
+							     Args, BehApiInfo,
+							     CallbackAssocs) of
+	    plain_call -> 
+	      {Fun, ArgTypes, Args, State};
+	    {{TransFun, TransArgTypes, TransArgs}, NewCallbackAssocs} ->
+	      {TransFun, TransArgTypes, TransArgs,
+	       State#state{callback_assocs = NewCallbackAssocs}}
 	  end,
         dialyzer_races:store_race_call(RealFun, RealArgTypes, RealArgs,
-				       {File, Line}, State);
+				       {File, Line}, State0);
       false -> State
     end,
   FailedConj = any_none([RetWithoutLocal|NewArgTypes]),

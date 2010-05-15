@@ -36,8 +36,6 @@
 	 add_handler/3, add_sup_handler/3, delete_handler/3, swap_handler/3,
 	 swap_sup_handler/3, which_handlers/1, call/3, call/4, wake_hib/4]).
 
--export([behaviour_info/1]).
-
 -export([init_it/6,
 	 system_continue/3,
 	 system_terminate/4,
@@ -57,13 +55,25 @@
 %%%  API
 %%%=========================================================================
 
--spec behaviour_info(atom()) -> 'undefined' | [{atom(), arity()}].
-
-behaviour_info(callbacks) ->
-    [{init,1},{handle_event,2},{handle_call,2},{handle_info,2},
-     {terminate,2},{code_change,3}];
-behaviour_info(_Other) ->
-    undefined.
+-callback init(InitArgs) -> {ok, State} | {ok, State, hibernate}.
+-callback handle_event(Event, State) ->
+    {ok, NewState} | {ok, NewState, hibernate} |
+    {swap_handler, Args1, NewState, Handler2 :: atom() | {atom(), Id} , Args2} |
+    remove_handler.
+-callback handle_call(Request, State) ->
+    {ok, Reply, NewState} | {ok, Reply, NewState, hibernate} |
+    {swap_handler, Reply, Args1, NewState, 
+     Handler2 ::  atom() | {atom(), Id}, Args2} |
+    {remove_handler, Reply}.
+-callback handle_info(Info, State) ->
+    {ok, NewState} | {ok, NewState, hibernate} |
+    {swap_handler, Args1, NewState, Handler2 ::  atom() | {atom(), Id}, Args2} |
+    remove_handler.
+-callback terminate(Args | {stop, Reason} | stop | remove_handler | 
+		    {error,{'EXIT',Reason}} | {error,Term}, State) -> 
+    term().
+-callback code_change(OldVsn :: Vsn | {down, Vsn}, State, Extra) -> 
+    {ok, NewState}.
 
 %% gen_event:start(Handler) -> {ok, Pid} | {error, What}
 %%   gen_event:add_handler(Handler, Mod, Args) -> ok | Other
