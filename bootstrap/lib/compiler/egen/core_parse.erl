@@ -13,11 +13,11 @@
 tok_val(T) -> element(3, T).
 tok_line(T) -> element(2, T).
 
--file("/usr/local/lib/erlang/lib/parsetools-2.0.2/include/yeccpre.hrl", 0).
+-file("/home/stavros/git/otp/lib/parsetools/include/yeccpre.hrl", 0).
 %%
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2008-2010. All Rights Reserved.
+%% Copyright Ericsson AB 1996-2010. All Rights Reserved.
 %%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
@@ -78,7 +78,7 @@ yeccpars0(Tokens, Tzr, State, States, Vstack) ->
                 {missing_in_goto_table=Tag, Symbol, State} ->
                     Desc = {Symbol, State, Tag},
                     erlang:raise(error, {yecc_bug, ?CODE_VERSION, Desc},
-                                 Stacktrace)
+				 Stacktrace)
             catch _:_ -> erlang:raise(error, Error, Stacktrace)
             end;
         %% Probably thrown from return_error/2:
@@ -192,9 +192,7 @@ yecctoken2string(Other) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
-
--file("/Users/bjorng/Downloads/otp/bootstrap/lib/compiler/egen/core_parse.erl", 197).
+-file("/home/stavros/git/otp/bootstrap/lib/compiler/egen/core_parse.erl", 195).
 
 yeccpars2(0=S, Cat, Ss, Stack, T, Ts, Tzr) ->
  yeccpars2_0(S, Cat, Ss, Stack, T, Ts, Tzr);
@@ -852,7 +850,7 @@ yeccpars2_0(S, '(', Ss, Stack, T, Ts, Tzr) ->
 yeccpars2_0(S, module, Ss, Stack, T, Ts, Tzr) ->
  yeccpars1(S, 3, Ss, Stack, T, Ts, Tzr).
 
-yeccpars2_1(_S, '$end', _Ss, Stack,  _T, _Ts, _Tzr) ->
+yeccpars2_1(_S, '$end', _Ss, Stack, _T, _Ts, _Tzr) ->
  {ok, hd(Stack)}.
 
 yeccpars2_2(S, module, Ss, Stack, T, Ts, Tzr) ->
