@@ -61,7 +61,8 @@
          put_named_tables/2, put_public_tables/2, put_behaviour_api_calls/2,
 	 get_behaviour_api_calls/1, put_diff_mods/2, put_fast_plt/2,
 	 get_fast_plt/1, get_behaviour_translation/1,
-	 put_behaviour_translation/2]).
+	 put_behaviour_translation/2, clear_behaviour_edges/1,
+	 add_behaviour_edges/2]).
 
 -export_type([callgraph/0]).
 
@@ -108,6 +109,7 @@
                     race_detection = false         :: boolean(),
 		    beh_translation= false         :: boolean(),
 		    beh_api_calls  = []            :: [{mfa(), mfa()}],
+		    beh_edges      = []            :: [callgraph_edge()],
 		    diff_mods      = []            :: [atom()],
 		    depends_on     = dict:new()    :: dict(),
 		    is_dependent   = dict:new()    :: dict(),
@@ -782,6 +784,19 @@ get_behaviour_translation(Callgraph) ->
 
 put_behaviour_translation(Value, Callgraph) ->
   Callgraph#callgraph{beh_translation=Value}.
+
+-spec clear_behaviour_edges(callgraph()) -> callgraph().
+
+clear_behaviour_edges(#callgraph{digraph = DG, 
+				 beh_edges = Edges} = Callgraph) ->
+  digraph:del_edges(DG, Edges),
+  Callgraph.
+
+-spec add_behaviour_edges([callgraph_edge()],callgraph()) -> callgraph().
+
+add_behaviour_edges(Edges, #callgraph{beh_edges = OldEdges} = Callgraph) ->
+  Callgraph1 = add_edges(Edges, Callgraph),
+  Callgraph1#callgraph{beh_edges = Edges ++ OldEdges}.
 
 -spec put_behaviour_api_calls([{mfa(), mfa()}], callgraph()) -> callgraph().
 
