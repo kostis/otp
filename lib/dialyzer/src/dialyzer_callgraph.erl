@@ -790,13 +790,20 @@ put_behaviour_translation(Value, Callgraph) ->
 clear_behaviour_edges(#callgraph{digraph = DG, 
 				 beh_edges = Edges} = Callgraph) ->
   digraph:del_edges(DG, Edges),
-  Callgraph.
+  Callgraph#callgraph{beh_edges = []}.
 
 -spec add_behaviour_edges([callgraph_edge()],callgraph()) -> callgraph().
 
-add_behaviour_edges(Edges, #callgraph{beh_edges = OldEdges} = Callgraph) ->
-  Callgraph1 = add_edges(Edges, Callgraph),
-  Callgraph1#callgraph{beh_edges = Edges ++ OldEdges}.
+add_behaviour_edges(Edges, #callgraph{digraph = DG,
+				      beh_edges = OldEdges} = Callgraph) ->
+  Filter = fun(E) -> case digraph:edge(DG,E) of 
+		       false -> true; 
+		       _ -> false
+		     end
+	   end,
+  NonExistentEdges = [Edges || E <- Edges, Filter(E)],
+  Callgraph1 = add_edges(NonExistentEdges, Callgraph),
+  Callgraph1#callgraph{beh_edges = NonExistentEdges ++ OldEdges}.
 
 -spec put_behaviour_api_calls([{mfa(), mfa()}], callgraph()) -> callgraph().
 
