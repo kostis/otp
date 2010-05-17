@@ -55,6 +55,7 @@
 	 to_dot/2,
 	 to_ps/3]).
 
+%% Data structure interfaces.
 -export([cleanup/1, get_digraph/1, get_named_tables/1, get_public_tables/1,
          get_race_code/1, get_race_detection/1, race_code_new/1,
          put_digraph/2, put_race_code/2, put_race_detection/2,
