@@ -30,6 +30,7 @@
 
 -export([get_fun_types/4, get_warnings/5, format_args/3]).
 
+%% Data structure interfaces.
 -export([state__add_warning/2, state__cleanup/1,
          state__get_callgraph/1, state__get_races/1,
          state__get_records/1, state__put_callgraph/2,
