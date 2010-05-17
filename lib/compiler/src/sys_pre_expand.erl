@@ -552,9 +552,15 @@ fun_tq(Lf, {function,F,A}=Function, St0) ->
             {{'fun',Lf,Function,{Index,Uniq,Fname}},
              St2#expand{fun_index=Index+1}}
     end;
-fun_tq(L, {function,M,F,A}, St) ->
-    {{call,L,{remote,L,{atom,L,erlang},{atom,L,make_fun}},
-      [{atom,L,M},{atom,L,F},{integer,L,A}]},St};
+fun_tq(Lf, {function,M,F,A}, St) ->
+    {As,St0} = new_vars(A, Lf, St),
+    Cs0 = [{clause,Lf,As,[],[{call,Lf,{remote,Lf,{atom,Lf,M},{atom,Lf,F}},As}]}],
+    Uniq = erlang:hash(Cs0, (1 bsl 27)-1),
+    {Cs1,St1} = fun_clauses(Cs0, St0),
+    Index = St1#expand.fun_index,
+    {Fname,St2} = new_fun_name(St1),
+    {{'fun',Lf,{clauses,Cs1},{Index,Uniq,Fname}},
+     St2#expand{fun_index=Index+1}};
 fun_tq(Lf, {clauses,Cs0}, St0) ->
     Uniq = erlang:hash(Cs0, (1 bsl 27)-1),
     {Cs1,St1} = fun_clauses(Cs0, St0),
