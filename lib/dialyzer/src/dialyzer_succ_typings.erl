@@ -137,7 +137,7 @@ get_warnings(Callgraph, Plt, DocPlt, Codeserver,
 get_warnings_from_modules([M|Ms], State, DocPlt,
 			  BehavioursChk, Acc) when is_atom(M) ->
   send_log(State#st.parent, io_lib:format("Getting warnings for ~w\n", [M])),
-  #st{callgraph = Callgraph, codeserver = Codeserver,
+  #st{callgraph = Callgraph0, codeserver = Codeserver,
       no_warn_unused = NoWarnUnused, plt = Plt} = State,
   ModCode = dialyzer_codeserver:lookup_mod_code(M, Codeserver),
   Records = dialyzer_codeserver:lookup_mod_records(M, Codeserver),
@@ -145,15 +145,17 @@ get_warnings_from_modules([M|Ms], State, DocPlt,
   AllFuns = collect_fun_info([ModCode]),
   %% Check if there are contracts for functions that do not exist
   Warnings1 =
-    dialyzer_contracts:contracts_without_fun(Contracts, AllFuns, Callgraph),
-  {Warnings2, FunTypes, RaceCode, PublicTables, NamedTables} =
-    dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph, Records, NoWarnUnused),
+    dialyzer_contracts:contracts_without_fun(Contracts, AllFuns, Callgraph0),
   Attrs = cerl:module_attrs(ModCode),
-  Warnings3 = if BehavioursChk ->
-		  dialyzer_behaviours:check_callbacks(M, Attrs,
-						      Plt, Codeserver);
-		 true -> []
-	      end,
+  {Warnings2, Callgraph} =
+    if BehavioursChk ->
+	{dialyzer_behaviours:check_callbacks(M, Attrs, Plt, Codeserver),
+	 dialyzer_callgraph:put_behaviour_translation(true, Callgraph0)};
+       true -> {[],
+		dialyzer_callgraph:put_behaviour_translation(false, Callgraph0)}
+    end,
+  {Warnings3, FunTypes, RaceCode, PublicTables, NamedTables} =
+    dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph, Records, NoWarnUnused),
   NewDocPlt = insert_into_doc_plt(FunTypes, Callgraph, DocPlt),
   NewCallgraph =
     dialyzer_callgraph:renew_race_info(Callgraph, RaceCode, PublicTables,

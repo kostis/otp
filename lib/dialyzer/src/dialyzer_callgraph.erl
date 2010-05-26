@@ -61,7 +61,9 @@
          put_digraph/2, put_race_code/2, put_race_detection/2,
          put_named_tables/2, put_public_tables/2, put_behaviour_api_calls/2,
 	 get_behaviour_api_calls/1, put_diff_mods/2, put_fast_plt/2,
-	 get_fast_plt/1]).
+	 get_fast_plt/1, get_behaviour_translation/1,
+	 put_behaviour_translation/2, clear_behaviour_edges/1,
+	 add_behaviour_edges/2]).
 
 -export_type([callgraph/0]).
 
@@ -106,7 +108,9 @@
                     public_tables  = []            :: [label()],
                     named_tables   = []            :: [string()],
                     race_detection = false         :: boolean(),
+		    beh_translation= false         :: boolean(),
 		    beh_api_calls  = []            :: [{mfa(), mfa()}],
+		    beh_edges      = []            :: [callgraph_edge()],
 		    diff_mods      = []            :: [atom()],
 		    depends_on     = dict:new()    :: dict(),
 		    is_dependent   = dict:new()    :: dict(),
@@ -771,6 +775,36 @@ to_ps(#callgraph{} = CG, File, Args) ->
   ok.
 
 %-------------------------------------------------------------------------------
+
+-spec get_behaviour_translation(callgraph()) -> boolean().
+
+get_behaviour_translation(Callgraph) ->
+  Callgraph#callgraph.beh_translation.
+
+-spec put_behaviour_translation(boolean(), callgraph()) -> callgraph().
+
+put_behaviour_translation(Value, Callgraph) ->
+  Callgraph#callgraph{beh_translation=Value}.
+
+-spec clear_behaviour_edges(callgraph()) -> callgraph().
+
+clear_behaviour_edges(#callgraph{digraph = DG, 
+				 beh_edges = Edges} = Callgraph) ->
+  digraph:del_edges(DG, Edges),
+  Callgraph#callgraph{beh_edges = []}.
+
+-spec add_behaviour_edges([callgraph_edge()],callgraph()) -> callgraph().
+
+add_behaviour_edges(Edges, #callgraph{digraph = DG,
+				      beh_edges = OldEdges} = Callgraph) ->
+  Filter = fun(E) -> case digraph:edge(DG,E) of 
+		       false -> true; 
+		       _ -> false
+		     end
+	   end,
+  NonExistentEdges = [E || E <- Edges, Filter(E)],
+  Callgraph1 = add_edges(NonExistentEdges, Callgraph),
+  Callgraph1#callgraph{beh_edges = NonExistentEdges ++ OldEdges}.
 
 -spec put_behaviour_api_calls([{mfa(), mfa()}], callgraph()) -> callgraph().
 

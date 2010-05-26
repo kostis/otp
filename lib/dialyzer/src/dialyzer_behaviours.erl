@@ -102,6 +102,7 @@ translate_behaviour_api_call(_Fun, _ArgTypes, _Args, [], _CallbackAssocs) ->
   plain_call;
 translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 			     BehApiInfo, CallbackAssocs) ->
+%  io:format("\nCheck:~p",[{Module, Fun, Arity}]),
   CA = CallbackAssocs,
   Query =
   case lists:keyfind(Module, 1, BehApiInfo) of
@@ -146,6 +147,7 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
       Call = {{Callback, CFun, CArity},
 	      [nth_or_0(N, ArgTypes, erl_types:t_any()) || N <-COrder],
 	      [nth_or_0(N, Args, bypassed) || N <-COrder]},
+%      io:format("\nTranslation: ~p",[Call]),
       {Call, NewCallbackAssocs}
   end;
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
@@ -165,7 +167,7 @@ translate_callgraph([{Behaviour,_}|Behaviours], Module, Callgraph) ->
   DirectCalls = [{From, {Module, Fun, Arity}} ||
 		  {From, To} <- UsedCalls,{API, {Fun, Arity, _Ord}} <- Calls,
 		  To =:= API],
-  NewCallgraph = dialyzer_callgraph:add_edges(DirectCalls, Callgraph),
+  NewCallgraph = dialyzer_callgraph:add_behaviour_edges(DirectCalls, Callgraph),
   translate_callgraph(Behaviours, Module, NewCallgraph);
 translate_callgraph([], _Module, Callgraph) ->
   Callgraph.
