@@ -802,7 +802,7 @@ add_behaviour_edges(Edges, #callgraph{digraph = DG,
 		       _ -> false
 		     end
 	   end,
-  NonExistentEdges = [Edges || E <- Edges, Filter(E)],
+  NonExistentEdges = [E || E <- Edges, Filter(E)],
   Callgraph1 = add_edges(NonExistentEdges, Callgraph),
   Callgraph1#callgraph{beh_edges = NonExistentEdges ++ OldEdges}.
 
