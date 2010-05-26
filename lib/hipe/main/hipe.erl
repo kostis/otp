@@ -1,20 +1,20 @@
 %% -*- erlang-indent-level: 2 -*-
 %%
 %% %CopyrightBegin%
-%% 
-%% Copyright Ericsson AB 2001-2009. All Rights Reserved.
-%% 
+%%
+%% Copyright Ericsson AB 2001-2010. All Rights Reserved.
+%%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
 %% compliance with the License. You should have received a copy of the
 %% Erlang Public License along with this software. If not, it can be
 %% retrieved online at http://www.erlang.org/.
-%% 
+%%
 %% Software distributed under the License is distributed on an "AS IS"
 %% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
 %% the License for the specific language governing rights and limitations
 %% under the License.
-%% 
+%%
 %% %CopyrightEnd%
 %%
 %% ====================================================================
@@ -25,7 +25,6 @@
 %%  Purpose  :  
 %%  Notes    : 
 %%  History  : * 1998-01-28 Erik Johansson (happi@it.uu.se): Created.
-%%  CVS      : $Id$
 %% ====================================================================
 %% @doc This is the direct interface to the HiPE compiler.
 %%
@@ -939,6 +938,8 @@ assemble(CompiledCode, Closures, Exports, Options) ->
       hipe_sparc_assemble:assemble(CompiledCode, Closures, Exports, Options);
     powerpc ->
       hipe_ppc_assemble:assemble(CompiledCode, Closures, Exports, Options);
+    ppc64 ->
+      hipe_ppc_assemble:assemble(CompiledCode, Closures, Exports, Options);
     arm ->
       hipe_arm_assemble:assemble(CompiledCode, Closures, Exports, Options);
     x86 ->
@@ -1390,6 +1391,8 @@ o1_opts() ->
       Common;
     powerpc ->
       Common;
+    ppc64 ->
+      Common;
     arm ->
       Common -- [inline_fp]; % Pointless optimising for absent hardware
     x86 ->
@@ -1411,6 +1414,8 @@ o2_opts() ->
       Common;
     powerpc ->
       Common;
+    ppc64 ->
+      Common;
     arm ->
       Common;
     x86 ->
@@ -1428,6 +1433,8 @@ o3_opts() ->
     ultrasparc ->
       Common;
     powerpc ->
+      Common;
+    ppc64 ->
       Common;
     arm ->
       Common;
