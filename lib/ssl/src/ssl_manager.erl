@@ -27,7 +27,7 @@
 %% Internal application API
 -export([start_link/0, start_link/1, 
 	 connection_init/2, cache_pem_file/1,
-	 lookup_trusted_cert/3, client_session_id/3, server_session_id/3,
+	 lookup_trusted_cert/3, issuer_candidate/1, client_session_id/3, server_session_id/3,
 	 register_session/2, register_session/3, invalidate_session/2,
 	 invalidate_session/3]).
 
@@ -85,8 +85,15 @@ cache_pem_file(File) ->
 %% Function: 
 %% Description: 
 %%--------------------------------------------------------------------
-lookup_trusted_cert(SerialNumber, Issuer, Ref) ->
+lookup_trusted_cert(Ref, SerialNumber, Issuer) ->
     ssl_certificate_db:lookup_trusted_cert(Ref, SerialNumber, Issuer).
+
+%%--------------------------------------------------------------------
+%% Function: 
+%% Description: 
+%%--------------------------------------------------------------------
+issuer_candidate(PrevCandidateKey) ->
+    ssl_certificate_db:issuer_candidate(PrevCandidateKey).
 
 %%--------------------------------------------------------------------
 %% Function: 
@@ -172,10 +179,8 @@ handle_call({{connection_init, TrustedcertsFile, _Role}, Pid}, _From,
 	    {ok, Ref} = ssl_certificate_db:add_trusted_certs(Pid, TrustedcertsFile, Db),
 	    {ok, Ref, Cache}
 	catch
-	    _:{badmatch, Error} ->
-		{error, Error};
-	    _E:_R ->
-		{error, {_R,erlang:get_stacktrace()}}
+	    _:Reason ->
+		{error, Reason}
 	end,
     {reply, Result, State};
 
@@ -197,14 +202,10 @@ handle_call({{cache_pem, File},Pid}, _, State = #state{certificate_db = Db}) ->
     try ssl_certificate_db:cache_pem_file(Pid,File,Db) of
 	Result ->
 	    {reply, Result, State}
-    catch _:{badmatch, Reason} ->
-	    {reply, Reason, State};
-	  _:Reason ->
+    catch 
+	_:Reason ->
 	    {reply, {error, Reason}, State}
-    end;
-	       
-handle_call(_,_, State) ->
-    {reply, ok, State}.
+    end.
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
 %%                                      {noreply, State, Timeout} |
@@ -332,7 +333,7 @@ init_session_validator([Cache, CacheCb, LifeTime]) ->
     CacheCb:foldl(fun session_validation/2,
 		  LifeTime, Cache).
 
-session_validation({{Host, Port, _}, Session}, LifeTime) ->
+session_validation({{{Host, Port}, _}, Session}, LifeTime) ->
     validate_session(Host, Port, Session, LifeTime),
     LifeTime;
 session_validation({{Port, _}, Session}, LifeTime) ->

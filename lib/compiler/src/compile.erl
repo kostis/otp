@@ -301,15 +301,6 @@ fold_comp([{Name,Pass}|Ps], Run, St0) ->
     end;
 fold_comp([], _Run, St) -> {ok,St}.
 
-os_process_size() ->
-    case os:type() of
-	{unix, sunos} ->
-	    Size = os:cmd("ps -o vsz -p " ++ os:getpid() ++ " | tail -1"),
-	    list_to_integer(lib:nonl(Size));
-	_ ->
-	    0
-    end.
-
 run_tc({Name,Fun}, St) ->
     Before0 = statistics(runtime),
     Val = (catch Fun(St)),
@@ -318,9 +309,8 @@ run_tc({Name,Fun}, St) ->
     {After_c, _} = After0,
     Mem0 = erts_debug:flat_size(Val)*erlang:system_info(wordsize),
     Mem = lists:flatten(io_lib:format("~.1f kB", [Mem0/1024])),
-    Sz = lists:flatten(io_lib:format("~.1f MB", [os_process_size()/1024])),
-    io:format(" ~-30s: ~10.2f s ~12s ~10s\n",
-	      [Name,(After_c-Before_c) / 1000,Mem,Sz]),
+    io:format(" ~-30s: ~10.2f s ~12s\n",
+	      [Name,(After_c-Before_c) / 1000,Mem]),
     Val.
 
 comp_ret_ok(#compile{code=Code,warnings=Warn0,module=Mod,options=Opts}=St) ->
@@ -920,13 +910,8 @@ expand_module(#compile{code=Code,options=Opts0,ifile=Filename}=St0) ->
     end.
 
 core_module(#compile{code=Code0,options=Opts}=St) ->
-    case v3_core:module(Code0, Opts) of
-	{ok,Code,Ws} ->
-	    {ok,St#compile{code=Code,warnings=St#compile.warnings ++ Ws}};
-	{error,Es,Ws} ->
-	    {error,St#compile{warnings=St#compile.warnings ++ Ws,
-			      errors=St#compile.errors ++ Es}}
-    end.
+    {ok,Code,Ws} = v3_core:module(Code0, Opts),
+    {ok,St#compile{code=Code,warnings=St#compile.warnings ++ Ws}}.
 
 core_fold_module(#compile{code=Code0,options=Opts,warnings=Warns}=St) ->
     {ok,Code,Ws} = sys_core_fold:module(Code0, Opts),
