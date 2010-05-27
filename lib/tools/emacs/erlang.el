@@ -885,15 +885,54 @@ files written in other languages than Erlang.")
 If nil, the inferior shell replaces the window. This is the traditional
 behaviour.")
 
-(defvar erlang-mode-map nil
+(defconst inferior-erlang-use-cmm (boundp 'minor-mode-overriding-map-alist)
+  "Non-nil means use `compilation-minor-mode' in Erlang shell.")
+
+(defvar erlang-mode-map
+  (let ((map (make-sparse-keymap)))
+    (unless (boundp 'indent-line-function)
+      (define-key map "\t"        'erlang-indent-command))
+    (define-key map ";"	      'erlang-electric-semicolon)
+    (define-key map ","	      'erlang-electric-comma)
+    (define-key map "<"         'erlang-electric-lt)
+    (define-key map ">"         'erlang-electric-gt)
+    (define-key map "\C-m"      'erlang-electric-newline)
+    (if (not (boundp 'delete-key-deletes-forward))
+        (define-key map "\177" 'backward-delete-char-untabify)
+      (define-key map [(backspace)] 'backward-delete-char-untabify))
+    ;;(unless (boundp 'fill-paragraph-function)
+    (define-key map "\M-q"      'erlang-fill-paragraph)
+    (unless (boundp 'beginning-of-defun-function)
+      (define-key map "\M-\C-a"   'erlang-beginning-of-function)
+      (define-key map "\M-\C-e"   'erlang-end-of-function)
+      (define-key map '(meta control h)   'erlang-mark-function))	; Xemacs
+    (define-key map "\M-\t"     'erlang-complete-tag)
+    (define-key map "\C-c\M-\t" 'tempo-complete-tag)
+    (define-key map "\M-+"      'erlang-find-next-tag)
+    (define-key map "\C-c\M-a"  'erlang-beginning-of-clause)
+    (define-key map "\C-c\M-b"  'tempo-backward-mark)
+    (define-key map "\C-c\M-e"  'erlang-end-of-clause)
+    (define-key map "\C-c\M-f"  'tempo-forward-mark)
+    (define-key map "\C-c\M-h"  'erlang-mark-clause)
+    (define-key map "\C-c\C-c"  'comment-region)
+    (define-key map "\C-c\C-j"  'erlang-generate-new-clause)
+    (define-key map "\C-c\C-k"  'erlang-compile)
+    (define-key map "\C-c\C-l"  'erlang-compile-display)
+    (define-key map "\C-c\C-s"  'erlang-show-syntactic-information)
+    (define-key map "\C-c\C-q"  'erlang-indent-function)
+    (define-key map "\C-c\C-u"  'erlang-uncomment-region)
+    (define-key map "\C-c\C-y"  'erlang-clone-arguments)
+    (define-key map "\C-c\C-a"  'erlang-align-arrows)
+    (define-key map "\C-c\C-z"  'erlang-shell-display)
+    (unless inferior-erlang-use-cmm
+      (define-key map "\C-x`"    'erlang-next-error))
+    map)
   "*Keymap used in Erlang mode.")
 (defvar erlang-mode-abbrev-table nil
   "Abbrev table in use in Erlang-mode buffers.")
 (defvar erlang-mode-syntax-table nil
   "Syntax table in use in Erlang-mode buffers.")
 
-(defconst inferior-erlang-use-cmm (boundp 'minor-mode-overriding-map-alist)
-  "Non-nil means use `compilation-minor-mode' in Erlang shell.")
 
 
 (defvar erlang-skel-file "erlang-skels"
@@ -1247,7 +1286,7 @@ Other commands:
   (setq major-mode 'erlang-mode)
   (setq mode-name "Erlang")
   (erlang-syntax-table-init)
-  (erlang-keymap-init)
+  (use-local-map erlang-mode-map)
   (erlang-electric-init)
   (erlang-menu-init)
   (erlang-mode-variables)
@@ -1300,53 +1339,6 @@ Other commands:
 	(setq erlang-mode-syntax-table table)))
 
   (set-syntax-table erlang-mode-syntax-table))
-
-
-(defun erlang-keymap-init ()
-  (if erlang-mode-map
-      nil
-    (setq erlang-mode-map (make-sparse-keymap))
-    (erlang-mode-commands erlang-mode-map))
-  (use-local-map erlang-mode-map))
-
-
-(defun erlang-mode-commands (map)
-  (unless (boundp 'indent-line-function)
-    (define-key map "\t"        'erlang-indent-command))
-  (define-key map ";"	      'erlang-electric-semicolon)
-  (define-key map ","	      'erlang-electric-comma)
-  (define-key map "<"         'erlang-electric-lt)
-  (define-key map ">"         'erlang-electric-gt)
-  (define-key map "\C-m"      'erlang-electric-newline)
-  (if (not (boundp 'delete-key-deletes-forward))
-      (define-key map "\177" 'backward-delete-char-untabify)
-    (define-key map [(backspace)] 'backward-delete-char-untabify))
-  ;;(unless (boundp 'fill-paragraph-function)
-  (define-key map "\M-q"      'erlang-fill-paragraph)
-  (unless (boundp 'beginning-of-defun-function)
-    (define-key map "\M-\C-a"   'erlang-beginning-of-function)
-    (define-key map "\M-\C-e"   'erlang-end-of-function)
-    (define-key map '(meta control h)   'erlang-mark-function))	; Xemacs
-  (define-key map "\M-\t"     'erlang-complete-tag)
-  (define-key map "\C-c\M-\t" 'tempo-complete-tag)
-  (define-key map "\M-+"      'erlang-find-next-tag)  
-  (define-key map "\C-c\M-a"  'erlang-beginning-of-clause)
-  (define-key map "\C-c\M-b"  'tempo-backward-mark)
-  (define-key map "\C-c\M-e"  'erlang-end-of-clause)
-  (define-key map "\C-c\M-f"  'tempo-forward-mark)
-  (define-key map "\C-c\M-h"  'erlang-mark-clause)
-  (define-key map "\C-c\C-c"  'comment-region)
-  (define-key map "\C-c\C-j"  'erlang-generate-new-clause)
-  (define-key map "\C-c\C-k"  'erlang-compile)
-  (define-key map "\C-c\C-l"  'erlang-compile-display)
-  (define-key map "\C-c\C-s"  'erlang-show-syntactic-information)
-  (define-key map "\C-c\C-q"  'erlang-indent-function)
-  (define-key map "\C-c\C-u"  'erlang-uncomment-region)
-  (define-key map "\C-c\C-y"  'erlang-clone-arguments)
-  (define-key map "\C-c\C-a"  'erlang-align-arrows)
-  (define-key map "\C-c\C-z"  'erlang-shell-display)
-  (unless inferior-erlang-use-cmm
-    (define-key map "\C-x`"    'erlang-next-error)))
 
 
 (defun erlang-electric-init ()
@@ -1402,7 +1394,7 @@ Other commands:
   (set (make-local-variable 'imenu-prev-index-position-function)
        'erlang-beginning-of-function)
   (set (make-local-variable 'imenu-extract-index-name-function)
-       'erlang-get-function-name)
+       'erlang-get-function-name-and-arity)
   (set (make-local-variable 'tempo-match-finder)
        "[^-a-zA-Z0-9_]\\([-a-zA-Z0-9_]*\\)\\=")
   (set (make-local-variable 'beginning-of-defun-function)
@@ -2933,10 +2925,16 @@ This assumes that the preceding expression is either simple
       (skip-chars-backward " \t")
       ;; Needed to match the colon in "'foo':'bar'".
       (if (not (memq (preceding-char) '(?# ?:)))
-	  col
-	(backward-char 1)
-	(forward-sexp -1)
-	(current-column)))))
+          col
+        ;; Special hack to handle: (note line break)
+        ;; [#myrecord{
+        ;;  foo = foo}]
+        (or
+         (ignore-errors
+           (backward-char 1)
+           (forward-sexp -1)
+           (current-column))
+         col)))))
 
 (defun erlang-indent-parenthesis (stack-position) 
   (let ((previous (erlang-indent-find-preceding-expr)))
@@ -3504,6 +3502,13 @@ Normally used in conjunction with `erlang-beginning-of-clause', e.g.:
 			(forward-sexp 1))))
 	       res)
 	   (error nil)))))
+
+(defun erlang-get-function-name-and-arity ()
+  "Return the name and arity of the function at point, or nil.
+The return value is a string of the form \"foo/1\"."
+  (let ((name (erlang-get-function-name))
+        (arity (erlang-get-function-arity)))
+    (and name arity (format "%s/%d" name arity))))
 
 (defun erlang-get-function-arguments ()
   "Return arguments of current function, or nil."
@@ -4901,9 +4906,14 @@ a prompt.  When nil, we will wait forever, or until \\[keyboard-quit].")
 (defvar inferior-erlang-buffer nil
   "Buffer of last invoked inferior Erlang, or nil.")
 
+;; Enable uniquifying Erlang shell buffers based on directory name.
+(eval-after-load "uniquify"
+  '(add-to-list 'uniquify-list-buffers-directory-modes 'erlang-shell-mode))
+
 ;;;###autoload
-(defun inferior-erlang ()
+(defun inferior-erlang (&optional command)
   "Run an inferior Erlang.
+With prefix command, prompt for command to start Erlang with.
 
 This is just like running Erlang in a normal shell, except that
 an Emacs buffer is used for input and output.
@@ -4917,17 +4927,37 @@ Entry to this mode calls the functions in the variables
 The following commands imitate the usual Unix interrupt and
 editing control characters:
 \\{erlang-shell-mode-map}"
-  (interactive)
+  (interactive
+   (when current-prefix-arg
+     (list (if (fboundp 'read-shell-command)
+               ;; `read-shell-command' is a new function in Emacs 23.
+	       (read-shell-command "Erlang command: ")
+	     (read-string "Erlang command: ")))))
   (require 'comint)
-  (let ((opts inferior-erlang-machine-options))
-    (cond ((eq inferior-erlang-shell-type 'oldshell)
-	   (setq opts (cons "-oldshell" opts)))
-	  ((eq inferior-erlang-shell-type 'newshell)
-	   (setq opts (append '("-newshell" "-env" "TERM" "vt100") opts))))
-    (setq inferior-erlang-buffer
-	  (apply 'make-comint
-		 inferior-erlang-process-name inferior-erlang-machine
-		 nil opts)))
+  (let (cmd opts)
+    (if command
+        (setq cmd "sh"
+              opts (list "-c" command))
+      (setq cmd inferior-erlang-machine
+            opts inferior-erlang-machine-options)
+      (cond ((eq inferior-erlang-shell-type 'oldshell)
+             (setq opts (cons "-oldshell" opts)))
+            ((eq inferior-erlang-shell-type 'newshell)
+             (setq opts (append '("-newshell" "-env" "TERM" "vt100") opts)))))
+
+    ;; Using create-file-buffer and list-buffers-directory in this way
+    ;; makes uniquify give each buffer a unique name based on the
+    ;; directory.
+    (let ((fake-file-name (expand-file-name inferior-erlang-buffer-name default-directory)))
+      (setq inferior-erlang-buffer (create-file-buffer fake-file-name))
+      (apply 'make-comint-in-buffer
+             inferior-erlang-process-name
+             inferior-erlang-buffer
+             cmd
+             nil opts)
+      (with-current-buffer inferior-erlang-buffer
+        (setq list-buffers-directory fake-file-name))))
+
   (setq inferior-erlang-process
 	(get-buffer-process inferior-erlang-buffer))
   (if (> 21 erlang-emacs-major-version)	; funcalls to avoid compiler warnings
@@ -4940,10 +4970,6 @@ editing control characters:
   (if (and (not (eq system-type 'windows-nt))
 	   (eq inferior-erlang-shell-type 'newshell))
       (setq comint-process-echoes t))
-  ;; `rename-buffer' takes only one argument in Emacs 18.
-  (condition-case nil
-      (rename-buffer inferior-erlang-buffer-name t)
-    (error (rename-buffer inferior-erlang-buffer-name)))
   (erlang-shell-mode))
 
 
