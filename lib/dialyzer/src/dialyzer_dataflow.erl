@@ -296,20 +296,18 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
       case BehaviourTranslations of
 	[] -> dialyzer_races:race(State5);
 	Behaviours ->
-          Callgraph2 = State5#state.callgraph,
-	  TranslatedCallgraph =
+	  TempCG = 
 	    dialyzer_behaviours:translate_callgraph(Behaviours, Module,
-						    Callgraph2),
-          St =
-            dialyzer_races:race(State5#state{callgraph = TranslatedCallgraph}),
-          Callgraph3 =
-	    dialyzer_callgraph:clear_behaviour_edges(TranslatedCallgraph),
-          St#state{callgraph = Callgraph3}
+						    State5#state.callgraph),
+          TempSt =
+            dialyzer_races:race(State5#state{callgraph = TempCG}),
+          OriginalCG =
+	    dialyzer_callgraph:clear_behaviour_edges(TempCG),
+          TempSt#state{callgraph = OriginalCG}
       end;
     false ->
       state__restore_race_code(
-        dict:merge(fun (_K, V1, _V2) -> V1 end,
-                   RaceCode, RaceCode1), State2)
+        dict:merge(fun (_K, V1, _V2) -> V1 end, RaceCode, RaceCode1), State2)
   end.
 
 analyze_loop(#state{callgraph = Callgraph, races = Races} = State) ->
