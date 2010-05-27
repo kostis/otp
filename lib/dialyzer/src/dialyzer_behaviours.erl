@@ -87,13 +87,13 @@ translatable_behaviours(Tree) ->
 get_behaviour_apis(Behaviours) ->
   get_behaviour_apis(Behaviours, []).
 
--spec translate_behaviour_api_call(dialyzer_races:mfa_or_funlbl(), 
-				   [erl_types:erl_type()], 
+-spec translate_behaviour_api_call(dialyzer_races:mfa_or_funlbl(),
+				   [erl_types:erl_type()],
 				   [dialyzer_races:core_vars()],
 				   behaviour_api_dict(),
-				   [{atom(), module()}]) -> 
-				      {{dialyzer_races:mfa_or_funlbl(), 
-					[erl_types:erl_type()], 
+				   [{atom(), module()}]) ->
+				      {{dialyzer_races:mfa_or_funlbl(),
+					[erl_types:erl_type()],
 					[dialyzer_races:core_vars()]},
 				       [{atom(), module()}]}
 					| 'plain_call'.
@@ -115,7 +115,7 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 	  case Directive of
 	    {create, no, _} -> plain_call;
 	    {create,  N, M} ->
-	      case cerl:concrete(nth_or_0(M, Args, foo)) of	      
+	      case cerl:concrete(nth_or_0(M, Args, foo)) of
 		CallbackModule when is_atom(CallbackModule) ->
 		  CM = CallbackModule,
 		  case cerl:concrete(nth_or_0(N, Args, foo)) of
@@ -155,7 +155,7 @@ translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
   plain_call.
 
 -spec translate_callgraph(behaviour_api_dict(), atom(),
-			  dialyzer_callgraph:callgraph()) -> 
+			  dialyzer_callgraph:callgraph()) ->
 			     dialyzer_callgraph:callgraph().
 
 translate_callgraph([{Behaviour,_}|Behaviours], Module, Callgraph) ->
@@ -234,7 +234,7 @@ parse_spec(String, ExpTypes, Records) ->
       case erl_parse:parse_form(Tokens) of
 	{ok, Form} ->
 	  case Form of
-	    {attribute, _, Name, {{Fun, _}, [TypeForm|_Constraint]}} 
+	    {attribute, _, Name, {{Fun, _}, [TypeForm|_Constraint]}}
 	    when (Name =:= 'spec') or (Name =:= 'callback') ->
 	      MaybeRemoteType = erl_types:t_from_form(TypeForm),
 	      try
@@ -369,8 +369,12 @@ nth_or_0(N, List, _Zero) ->
 -type behaviour_api_info()::[{original_fun(), replacement_fun(), directive()}].
 -type original_fun()::{atom(), arity()}.
 -type replacement_fun()::{atom(), arity(), arg_list()}.
--type directive()::{'create', 'no' | byte(), byte()} | {'refer', byte()}.
--type arg_list()::[byte()].
+-type directive()::{'create', name_arg(), callback_module_arg()} |
+		   {'refer', name_arg()}.
+-type arg_list()::[original_fun_arg()].
+-type name_arg()::'no' | original_fun_arg().
+-type callback_module_arg()::original_fun_arg().
+-type original_fun_arg()::byte().
 
 -spec behaviour_api_calls(behaviour()) -> behaviour_api_info().
 

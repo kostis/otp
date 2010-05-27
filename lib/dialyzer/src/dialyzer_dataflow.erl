@@ -302,7 +302,8 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
 						    Callgraph2),
           St =
             dialyzer_races:race(State5#state{callgraph = TranslatedCallgraph}),
-          Callgraph3 = dialyzer_callgraph:clear_behaviour_edges(Callgraph2),
+          Callgraph3 =
+	    dialyzer_callgraph:clear_behaviour_edges(TranslatedCallgraph),
           St#state{callgraph = Callgraph3}
       end;
     false ->
@@ -683,11 +684,11 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	BehApiDict = State#state.behaviour_api_dict,
 	CallbackAssocs = State#state.callback_assocs,
 	{RealFun, RealArgTypes, RealArgs, State0} =
-	  case 
+	  case
 	    dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
 							     Args, BehApiDict,
 							     CallbackAssocs) of
-	    plain_call -> 
+	    plain_call ->
 	      {Fun, ArgTypes, Args, State};
 	    {{TransFun, TransArgTypes, TransArgs}, NewCallbackAssocs} ->
 	      {TransFun, TransArgTypes, TransArgs,
@@ -2767,7 +2768,7 @@ state__set_warning_mode(#state{tree_map = TreeMap, fun_tab = FunTab,
                                races = Races} = State) ->
   ?debug("Starting warning pass\n", []),
   Funs = dict:fetch_keys(TreeMap),
-  State#state{work = init_work([top|Funs--[top]]),
+  State#state{work = init_work([top|lists:sort(Funs)--[top]]),
 	      fun_tab = FunTab, warning_mode = true,
               races = dialyzer_races:put_race_analysis(true, Races)}.
 
