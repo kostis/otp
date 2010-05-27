@@ -48,14 +48,30 @@
 
 -import(lists, [reverse/1]).
 
+-type pos()   :: pos_integer().
+-type token() :: {atom(), pos()}
+	       | {'atom', pos(), atom()}
+	       | {'char', pos(), char()}
+	       | {'float', pos(), float()}
+	       | {'integer', pos(), integer()}
+	       | {'string', pos(), string()}
+	       | {'var', pos(), atom()}.
+
+-type core_scan_ret() :: {'ok', [token()], pos()}
+                       | {'error', {pos(),'core_scan',term()}, pos()}.
+
 %% string([Char]) ->
 %% string([Char], StartPos) ->
 %%    {ok, [Tok], EndPos} |
 %%    {error, {Pos,core_scan,What}, EndPos}
 
+-spec string(string()) -> core_scan_ret().
+
 string(Cs) -> string(Cs, 1).
 
-string(Cs, Sp) ->
+-spec string(string(), pos()) -> core_scan_ret().
+
+string(Cs, Sp) when is_integer(Sp), Sp > 0 ->
     %% Add an 'eof' to always get correct handling.
     case string_pre_scan(Cs, [], Sp) of
 	{done,_,SoFar,Ep} ->			%Got tokens
