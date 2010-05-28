@@ -31,10 +31,12 @@
 -module(dialyzer_behaviours).
 
 -export([check_callbacks/4, get_behaviours/2, get_behaviour_apis/1,
-	 translate_behaviour_api_call/5, translatable_behaviours/1,
-	 translate_callgraph/3]).
+	 translate_behaviour_api_call/5, translatable_behaviours/0,
+	 translate_callgraph/3, get_registering_apis/1]).
 
 -export_type([behaviour/0, behaviour_api_dict/0]).
+
+-define(TRANSLATABLE_BEHAVIOURS, [gen_server]).
 
 %%--------------------------------------------------------------------
 
@@ -75,12 +77,11 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
       [add_tag_file_line(Module, W, State) || W <- Warnings]
   end.
 
--spec translatable_behaviours(cerl:c_module()) -> behaviour_api_dict().
+-spec translatable_behaviours() -> behaviour_api_dict().
 
-translatable_behaviours(Tree) ->
-  Attrs = cerl:module_attrs(Tree),
-  {Behaviours, _BehLines} = get_behaviours(Attrs),
-  [{B, Calls} || B <- Behaviours, (Calls = behaviour_api_calls(B)) =/= []].
+translatable_behaviours() ->
+  [{B, Calls} || B <- ?TRANSLATABLE_BEHAVIOURS, 
+		 (Calls = behaviour_api_calls(B)) =/= []].
 
 -spec get_behaviour_apis([behaviour()]) -> [mfa()].
 
@@ -253,7 +254,8 @@ parse_spec(String, ExpTypes, Records) ->
   end.
 
 reason_spec_error({spec_remote_error, Msg}) ->
-  io_lib:format("Remote type solver error: ~s. Make sure the behaviour source is included in the analysis or the plt",[Msg]);
+  io_lib:format("Remote type solver error: ~s. Make sure the behaviour "
+		"source is included in the analysis or the plt",[Msg]);
 reason_spec_error(not_a_spec) ->
   "This is not a spec";
 reason_spec_error({spec_parser_error, Line, Msg}) ->
@@ -364,7 +366,19 @@ nth_or_0(N, List, _Zero) ->
   lists:nth(N, List).
 
 %------------------------------------------------------------------------------
+-spec get_registering_apis(behaviour_api_dict()) -> [mfa()].
 
+get_registering_apis(BehApiDict) ->
+  get_registering_apis(BehApiDict, []).
+
+get_registering_apis([{Behaviour, APIInfo}|Rest], Acc) ->
+  NewRegAPIs = [{Behaviour, Fun, Arity} ||
+		 {{Fun, Arity}, _, {create, N, _}} <- APIInfo,
+		 is_integer(N)],
+  get_registering_apis(Rest, NewRegAPIs ++ Acc);
+get_registering_apis([], Acc) -> Acc.
+
+%------------------------------------------------------------------------------
 -type behaviour_api_dict()::[{behaviour(), behaviour_api_info()}].
 -type behaviour_api_info()::[{original_fun(), replacement_fun(), directive()}].
 -type original_fun()::{atom(), arity()}.

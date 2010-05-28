@@ -52,6 +52,7 @@
 	 strip_module_deps/2,
 	 take_scc/1,
 	 remove_external/1,
+	 calls_behaviour_filter/2,
 	 to_dot/2,
 	 to_ps/3]).
 
@@ -144,7 +145,8 @@ lookup_rec_var(Label, #callgraph{rec_var_map = RecVarMap})
   when is_integer(Label) ->
   dict:find(Label, RecVarMap).
 
--spec lookup_call_site(label(), callgraph()) -> 'error' | {'ok', [_]}. % XXX: refine
+-spec lookup_call_site(label(), callgraph()) -> 
+        'error' | {'ok', [_]}. % XXX: refine
 
 lookup_call_site(Label, #callgraph{calls = Calls})
   when is_integer(Label) ->
@@ -163,7 +165,8 @@ lookup_label({_,_,_} = MFA, #callgraph{rev_name_map = RevNameMap}) ->
 lookup_label(Label, #callgraph{}) when is_integer(Label) ->
   {ok, Label}.
 
--spec in_neighbours(mfa_or_funlbl(), callgraph()) -> 'none' | [mfa_or_funlbl(),...].
+-spec in_neighbours(mfa_or_funlbl(), callgraph()) -> 
+        'none' | [mfa_or_funlbl(),...].
 
 in_neighbours(Label, #callgraph{digraph = Digraph, name_map = NameMap})
   when is_integer(Label) ->
@@ -218,7 +221,8 @@ non_local_calls(#callgraph{digraph = DG}) ->
   Edges = digraph_edges(DG),
   find_non_local_calls(Edges, sets:new()).
 
--spec find_non_local_calls([{mfa_or_funlbl(), mfa_or_funlbl()}], set()) -> mfa_calls().
+-spec find_non_local_calls([{mfa_or_funlbl(), mfa_or_funlbl()}], set()) -> 
+        mfa_calls().
 
 find_non_local_calls([{{M,_,_}, {M,_,_}}|Left], Set) ->
   find_non_local_calls(Left, Set);
@@ -346,7 +350,8 @@ reset_from_funs(Funs, #callgraph{fast_plt = FastPlt} = CG) ->
     false -> slow_reset_from_funs(Funs, CG)
   end.
 
-fast_reset_from_funs(Funs, #callgraph{digraph = DG, diff_mods = DiffMods} = CG) ->
+fast_reset_from_funs(Funs, 
+		     #callgraph{digraph = DG, diff_mods = DiffMods} = CG) ->
   SubGraph = digraph_reaching_subgraph(Funs, DG),
   SG1 = digraph_utils:condensation(SubGraph),
   {ChangedFuns, FunDependsOn, FunDependents} = dependencies(SG1, DiffMods),
@@ -364,7 +369,8 @@ slow_reset_from_funs(Funs, #callgraph{digraph = DG} = CG) ->
   digraph_delete(SubGraph),
   CG#callgraph{postorder = Postorder}.
 
--spec module_postorder_from_funs([mfa_or_funlbl()], callgraph()) -> [[module()]].
+-spec module_postorder_from_funs([mfa_or_funlbl()], callgraph()) -> 
+        [[module()]].
 
 module_postorder_from_funs(Funs, #callgraph{digraph = DG} = CG) ->
   SubGraph = digraph_reaching_subgraph(Funs, DG),
@@ -788,7 +794,7 @@ put_behaviour_translation(Value, Callgraph) ->
 
 -spec clear_behaviour_edges(callgraph()) -> callgraph().
 
-clear_behaviour_edges(#callgraph{digraph = DG, 
+clear_behaviour_edges(#callgraph{digraph = DG,
 				 beh_edges = Edges} = Callgraph) ->
   digraph:del_edges(DG, Edges),
   Callgraph#callgraph{beh_edges = []}.
@@ -797,8 +803,8 @@ clear_behaviour_edges(#callgraph{digraph = DG,
 
 add_behaviour_edges(Edges, #callgraph{digraph = DG,
 				      beh_edges = OldEdges} = Callgraph) ->
-  Filter = fun(E) -> case digraph:edge(DG,E) of 
-		       false -> true; 
+  Filter = fun(E) -> case digraph:edge(DG,E) of
+		       false -> true;
 		       _ -> false
 		     end
 	   end,
@@ -884,3 +890,21 @@ changed(SCC, Callgraph) ->
   Callgraph#callgraph{changed_funs = NewChangedFuns}.
 
 %-------------------------------------------------------------------------------
+
+-spec calls_behaviour_filter(callgraph(),
+			     dialyzer_behaviours:behaviour_api_dict()) ->
+				fun((label()) -> boolean()).
+
+calls_behaviour_filter(#callgraph{beh_api_calls = BehApiCalls} = Callgraph,
+		       BehaviourAPIDict) ->
+  RegisteringAPIs = dialyzer_behaviours:get_registering_apis(BehaviourAPIDict),
+  fun(Label) ->
+      case lookup_name(Label, Callgraph) of
+	error -> false;
+	{ok, Name} ->
+	  case lists:keyfind(Name, 1, BehApiCalls) of
+	    false    -> false;
+	    {_, API} -> lists:member(API, RegisteringAPIs)
+	  end
+      end
+  end.

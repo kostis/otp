@@ -98,7 +98,8 @@
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
 		module               :: module(),
-		behaviour_api_dict = [] :: dialyzer_behaviours:behaviour_api_dict(),
+		behaviour_api_dict = [] :: 
+		  dialyzer_behaviours:behaviour_api_dict(),
 		callback_assocs    = [] :: [{atom(),module()}]}).
 
 %% Exported Types
@@ -273,7 +274,7 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
   BehTranslation = dialyzer_callgraph:get_behaviour_translation(Callgraph),
   BehaviourTranslations =
     case RaceDetection andalso BehTranslation of
-      true -> dialyzer_behaviours:translatable_behaviours(Tree);
+      true -> dialyzer_behaviours:translatable_behaviours();
       false -> []
     end,
   TopFun = cerl:ann_c_fun([{label, top}], [], Tree),
@@ -296,7 +297,7 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
       case BehaviourTranslations of
 	[] -> dialyzer_races:race(State5);
 	Behaviours ->
-	  TempCG = 
+	  TempCG =
 	    dialyzer_behaviours:translate_callgraph(Behaviours, Module,
 						    State5#state.callgraph),
           TempSt =
@@ -777,7 +778,8 @@ get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes,
 	false ->
 	  SigArgs = t_fun_args(Sig),
 	  case is_opaque_related_problem(ArgNs, ArgTypes) of
-	    true ->  %% an opaque term is used where a structured term is expected
+	    true ->  
+	      %% an opaque term is used where a structured term is expected
 	      ExpectedArgs =
 		case FailReason of
 		  only_sig -> SigArgs;
@@ -787,7 +789,8 @@ get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes,
 	    false ->
 	      case is_opaque_related_problem(ArgNs, SigArgs) orelse
 		is_opaque_related_problem(ArgNs, ContrArgs) of
-		true ->  %% a structured term is used where an opaque is expected
+		true ->  
+		  %% a structured term is used where an opaque is expected
 		  ExpectedTriples =
 		    case FailReason of
 		      only_sig -> expected_arg_triples(ArgNs, SigArgs, State);
@@ -1248,7 +1251,8 @@ handle_tuple(Tree, Map, State) ->
 			      Msg = {record_constr,
 				     [TagVal, format_patterns(ErrorPat),
 				      format_type(ErrorType, State1)]},
-			      State2 = state__add_warning(State1, ?WARN_MATCHING,
+			      State2 = state__add_warning(State1, 
+							  ?WARN_MATCHING,
 							  Tree, Msg),
 			      {State2, Map1, t_none()};
 			    {Map2, ETypes} ->
@@ -1609,7 +1613,8 @@ bind_pat_vars([Pat|PatLeft], [Type|TypeLeft], Acc, Map, State, Rev) ->
 		  Maps ->
 		    Map1 = join_maps(Maps, Map),
 		    TupleType = t_sup([t_tuple(EsTypes)
-				       || {M, EsTypes} <- Results, M =/= error]),
+				       || {M, EsTypes} <- Results,
+					  M =/= error]),
 		    {Map1, TupleType}
 		end
 	    end
@@ -2763,10 +2768,19 @@ state__warning_mode(#state{warning_mode = WM}) ->
   WM.
 
 state__set_warning_mode(#state{tree_map = TreeMap, fun_tab = FunTab,
-                               races = Races} = State) ->
+                               races = Races, callgraph = Callgraph,
+			       behaviour_api_dict = BehApiDict} = State) ->
   ?debug("Starting warning pass\n", []),
-  Funs = dict:fetch_keys(TreeMap),
-  State#state{work = init_work([top|lists:sort(Funs)--[top]]),
+  Labels = dict:fetch_keys(TreeMap) -- [top],
+  Funs =
+    case BehApiDict of
+      [] -> Labels;
+      _  -> Filter =
+	      dialyzer_callgraph:calls_behaviour_filter(Callgraph, BehApiDict),
+	    {CallBehaviour, Rest} = lists:partition(Filter, Labels),
+	    CallBehaviour ++ Rest
+    end,
+  State#state{work = init_work([top|Funs]),
 	      fun_tab = FunTab, warning_mode = true,
               races = dialyzer_races:put_race_analysis(true, Races)}.
 

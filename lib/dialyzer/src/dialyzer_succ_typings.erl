@@ -124,7 +124,13 @@ get_refined_success_typings(State) ->
 
 get_warnings(Callgraph, Plt, DocPlt, Codeserver,
 	     NoWarnUnused, Parent, BehavioursChk) ->
-  InitState = #st{callgraph = Callgraph, codeserver = Codeserver,
+  Callgraph1 =
+    if BehavioursChk ->
+	dialyzer_callgraph:put_behaviour_translation(true, Callgraph);
+       true ->
+	dialyzer_callgraph:put_behaviour_translation(false, Callgraph)
+    end,
+  InitState = #st{callgraph = Callgraph1, codeserver = Codeserver,
 		  no_warn_unused = NoWarnUnused, parent = Parent, plt = Plt,
 		  old_plt = dialyzer_plt:new(),
 		  fast_plt = dialyzer_callgraph:get_fast_plt(Callgraph)},
@@ -132,12 +138,11 @@ get_warnings(Callgraph, Plt, DocPlt, Codeserver,
   Mods = dialyzer_callgraph:modules(NewState#st.callgraph),
   CWarns = dialyzer_contracts:get_invalid_contract_warnings(Mods, Codeserver,
 							    NewState#st.plt),
-  get_warnings_from_modules(Mods, NewState, DocPlt, BehavioursChk, CWarns).
+  get_warnings_from_modules(Mods, NewState, DocPlt, CWarns).
 
-get_warnings_from_modules([M|Ms], State, DocPlt,
-			  BehavioursChk, Acc) when is_atom(M) ->
+get_warnings_from_modules([M|Ms], State, DocPlt, Acc) when is_atom(M) ->
   send_log(State#st.parent, io_lib:format("Getting warnings for ~w\n", [M])),
-  #st{callgraph = Callgraph0, codeserver = Codeserver,
+  #st{callgraph = Callgraph, codeserver = Codeserver,
       no_warn_unused = NoWarnUnused, plt = Plt} = State,
   ModCode = dialyzer_codeserver:lookup_mod_code(M, Codeserver),
   Records = dialyzer_codeserver:lookup_mod_records(M, Codeserver),
@@ -145,25 +150,24 @@ get_warnings_from_modules([M|Ms], State, DocPlt,
   AllFuns = collect_fun_info([ModCode]),
   %% Check if there are contracts for functions that do not exist
   Warnings1 =
-    dialyzer_contracts:contracts_without_fun(Contracts, AllFuns, Callgraph0),
+    dialyzer_contracts:contracts_without_fun(Contracts, AllFuns, Callgraph),
   Attrs = cerl:module_attrs(ModCode),
-  {Warnings2, Callgraph} =
-    if BehavioursChk ->
-	{dialyzer_behaviours:check_callbacks(M, Attrs, Plt, Codeserver),
-	 dialyzer_callgraph:put_behaviour_translation(true, Callgraph0)};
-       true -> {[],
-		dialyzer_callgraph:put_behaviour_translation(false, Callgraph0)}
+  Warnings2  =
+    case dialyzer_callgraph:get_behaviour_translation(Callgraph) of
+      true  -> dialyzer_behaviours:check_callbacks(M, Attrs, Plt, Codeserver);
+      false -> []
     end,
   {Warnings3, FunTypes, RaceCode, PublicTables, NamedTables} =
-    dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph, Records, NoWarnUnused),
+    dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph, Records, 
+				   NoWarnUnused),
   NewDocPlt = insert_into_doc_plt(FunTypes, Callgraph, DocPlt),
   NewCallgraph =
     dialyzer_callgraph:renew_race_info(Callgraph, RaceCode, PublicTables,
                                        NamedTables),
   State1 = st__renew_state_calls(NewCallgraph, State),
-  get_warnings_from_modules(Ms, State1, NewDocPlt, BehavioursChk,
+  get_warnings_from_modules(Ms, State1, NewDocPlt,
 			    [Warnings1, Warnings2, Warnings3|Acc]);
-get_warnings_from_modules([], #st{plt = Plt}, DocPlt, _, Acc) ->
+get_warnings_from_modules([], #st{plt = Plt}, DocPlt, Acc) ->
   {lists:flatten(Acc), Plt, DocPlt}.
 
 refine_succ_typings(ModulePostorder, State) ->
@@ -286,8 +290,8 @@ compare_types_1([], [], _Strict, NotFixpoint) ->
 find_succ_typings(State) ->
   find_succ_typings(State, []).
 
-find_succ_typings(#st{callgraph = Callgraph, parent = Parent, fast_plt = Fast} = State,
-		  NotFixpoint) ->
+find_succ_typings(#st{callgraph = Callgraph, parent = Parent, 
+		      fast_plt = Fast} = State, NotFixpoint) ->
   case dialyzer_callgraph:take_scc(Callgraph) of
     {ok, SCC, NewCallgraph} ->
       Msg = io_lib:format("Typesig analysis for SCC: ~w\n", [format_scc(SCC)]),
@@ -361,8 +365,9 @@ fast_analyze_scc(SCC, #st{codeserver = Codeserver,
 		   dialyzer_codeserver:lookup_mfa_code(MFA, Codeserver),
 		   dialyzer_codeserver:lookup_mod_records(M, Codeserver)}
 		  || {M, _, _} = MFA <- SCC],
-      Contracts1 = [{MFA, dialyzer_codeserver:lookup_mfa_contract(MFA, Codeserver)}
-		    || {_, _, _} = MFA <- SCC],
+      Contracts1 = 
+	[{MFA, dialyzer_codeserver:lookup_mfa_contract(MFA, Codeserver)}
+	 || {_, _, _} = MFA <- SCC],
       Contracts2 = [{MFA, Contract} || {MFA, {ok, Contract}} <- Contracts1],
       Contracts3 = orddict:from_list(Contracts2),
       {SuccTypes2, PltContracts2, NotFixpoint2, AllFuns} =
@@ -375,7 +380,8 @@ fast_analyze_scc(SCC, #st{codeserver = Codeserver,
 		   {Callgraph,[]}
 	end,
       State2 = insert_into_plt(SuccTypes2, State),
-      ContrPlt2 = dialyzer_plt:insert_contract_list(State2#st.plt, PltContracts2),
+      ContrPlt2 = 
+	dialyzer_plt:insert_contract_list(State2#st.plt, PltContracts2),
       {State2#st{plt = ContrPlt2, callgraph = NewCallgraph2}, NotFixpoint};
     _ -> Result
   end.
@@ -649,7 +655,8 @@ analyze_module(LabeledTree, NextLbl, Plt, Records, Contracts) ->
   CodeServer2 = dialyzer_codeserver:insert(Mod, LabeledTree, CodeServer1),
   CodeServer3 = dialyzer_codeserver:set_next_core_label(NextLbl, CodeServer2),
   CodeServer4 = dialyzer_codeserver:store_records(Mod, Records, CodeServer3),
-  CodeServer5 = dialyzer_codeserver:store_contracts(Mod, Contracts, CodeServer4),
+  CodeServer5 = 
+    dialyzer_codeserver:store_contracts(Mod, Contracts, CodeServer4),
   Res = analyze_callgraph(CallGraph4, Plt, CodeServer5),
   dialyzer_callgraph:delete(CallGraph4),
   dialyzer_codeserver:delete(CodeServer5),
