@@ -45,7 +45,7 @@
          put_curr_fun_lbl_args/3, put_fun_args/2, put_heisen_anal/2,
          put_race_list/3]).
 
--export_type([code/0, core_vars/0, mfa_or_funlbl/0, races/0]).
+-export_type([code/0, core_vars/0, races/0]).
 
 -include("dialyzer.hrl").
 -include("dialyzer_heisenbugs.hrl").

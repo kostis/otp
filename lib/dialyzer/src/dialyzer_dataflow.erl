@@ -283,9 +283,11 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
   RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
   DLDetection = dialyzer_callgraph:get_deadlock_detection(Callgraph),
   MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
+  BehTranslation = dialyzer_callgraph:get_behaviour_translation(Callgraph),
   BehaviourTranslations =
-    case RaceDetection orelse DLDetection orelse MsgAnalysis of
-      true -> dialyzer_behaviours:translatable_behaviours(Tree);
+    case (RaceDetection andalso BehTranslation) orelse DLDetection orelse
+      MsgAnalysis of
+      true -> dialyzer_behaviours:translatable_behaviours();
       false -> []
     end,
   TopFun = cerl:ann_c_fun([{label, top}], [], Tree),
@@ -306,17 +308,15 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
           dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
             dialyzer_races:race(State4)));
 	Behaviours ->
-          Callgraph1 = State4#state.callgraph,
-          Digraph = dialyzer_callgraph:get_digraph(Callgraph1),
-	  TranslatedCG =
+	  TempCG =
             dialyzer_behaviours:translate_callgraph(Behaviours, Module,
-						    Callgraph1),
+						    State4#state.callgraph),
           St =
             dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
-              dialyzer_races:race(State4#state{callgraph = TranslatedCG}))),
-          Callgraph2 = dialyzer_callgraph:put_digraph(Digraph,
-                                                      St#state.callgraph),
-          St#state{callgraph = Callgraph2}
+              dialyzer_races:race(State4#state{callgraph = TempCG}))),
+          OriginalCG =
+	    dialyzer_callgraph:clear_behaviour_edges(TempCG),
+          St#state{callgraph = OriginalCG}
       end;
     false -> State2
   end.
@@ -2911,10 +2911,19 @@ state__warning_mode(#state{warning_mode = WM}) ->
   WM.
 
 state__set_warning_mode(#state{tree_map = TreeMap, fun_tab = FunTab,
-                               races = Races} = State) ->
+                               races = Races, callgraph = Callgraph,
+			       behaviour_api_dict = BehApiDict} = State) ->
   ?debug("Starting warning pass\n", []),
-  Funs = dict:fetch_keys(TreeMap),
-  State#state{work = init_work([top|Funs--[top]]),
+  Labels = dict:fetch_keys(TreeMap) -- [top],
+  Funs =
+    case BehApiDict of
+      [] -> Labels;
+      _  -> Filter =
+	      dialyzer_callgraph:calls_behaviour_filter(Callgraph, BehApiDict),
+	    {CallBehaviour, Rest} = lists:partition(Filter, Labels),
+	    CallBehaviour ++ Rest
+    end,
+  State#state{work = init_work([top|Funs]),
 	      fun_tab = FunTab, warning_mode = true,
               races = dialyzer_races:put_heisen_anal(true, Races)}.
 

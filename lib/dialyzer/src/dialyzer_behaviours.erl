@@ -31,10 +31,12 @@
 -module(dialyzer_behaviours).
 
 -export([check_callbacks/4, get_behaviours/2, get_behaviour_apis/1,
-	 translate_behaviour_api_call/5, translatable_behaviours/1,
-	 translate_callgraph/3]).
+	 translate_behaviour_api_call/5, translatable_behaviours/0,
+	 translate_callgraph/3, get_registering_apis/1]).
 
 -export_type([behaviour/0, behaviour_api_dict/0]).
+
+-define(TRANSLATABLE_BEHAVIOURS, [gen_server]).
 
 %%--------------------------------------------------------------------
 
@@ -75,27 +77,23 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
       [add_tag_file_line(Module, W, State) || W <- Warnings]
   end.
 
--spec translatable_behaviours(cerl:c_module()) -> behaviour_api_dict().
+-spec translatable_behaviours() -> behaviour_api_dict().
 
-translatable_behaviours(Tree) ->
-  Attrs = cerl:module_attrs(Tree),
-  {Behaviours, _BehLines} = get_behaviours(Attrs),
-  [{B, Calls} || B <- Behaviours, (Calls = behaviour_api_calls(B)) =/= []].
+translatable_behaviours() ->
+  [{B, Calls} || B <- ?TRANSLATABLE_BEHAVIOURS,
+                 (Calls = behaviour_api_calls(B)) =/= []].
 
 -spec get_behaviour_apis([behaviour()]) -> [mfa()].
 
 get_behaviour_apis(Behaviours) ->
   get_behaviour_apis(Behaviours, []).
 
--spec translate_behaviour_api_call(dialyzer_races:mfa_or_funlbl(), 
-				   [erl_types:erl_type()], 
-				   [dialyzer_races:core_vars()],
-				   module(), 
-				   behaviour_api_dict()) -> 
-				      {dialyzer_races:mfa_or_funlbl(), 
-				       [erl_types:erl_type()], 
-				       [dialyzer_races:core_vars()]} 
-					| 'plain_call'.
+-spec translate_behaviour_api_call(mfa_or_funlbl(), [erl_types:erl_type()],
+                                   [dialyzer_races:core_vars()],
+				   behaviour_api_dict(),
+                                   [{atom(), module()}]) ->
+	{{mfa_or_funlbl(), [erl_types:erl_type()],
+          [dialyzer_races:core_vars()]}, [{atom(), module()}]} | 'plain_call'.
 
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, [], _CallbackAssocs) ->
   plain_call;
@@ -113,7 +111,7 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 	  case Directive of
 	    {create, no, _} -> plain_call;
 	    {create,  N, M} ->
-	      case cerl:concrete(nth_or_0(M, Args, foo)) of	      
+	      case cerl:concrete(nth_or_0(M, Args, foo)) of
 		CallbackModule when is_atom(CallbackModule) ->
 		  CM = CallbackModule,
 		  case cerl:concrete(nth_or_0(N, Args, foo)) of
@@ -135,8 +133,7 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 		      end;
 		    _ -> plain_call
 		  end
-	      end;
-	    _Any -> plain_call
+	      end
 	  end
       end
   end,
@@ -153,8 +150,8 @@ translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
   plain_call.
 
 -spec translate_callgraph(behaviour_api_dict(), atom(),
-			  dialyzer_callgraph:callgraph()) -> 
-			     dialyzer_callgraph:callgraph().
+			  dialyzer_callgraph:callgraph()) ->
+        dialyzer_callgraph:callgraph().
 
 translate_callgraph([{Behaviour,_}|Behaviours], Module, Callgraph) ->
   UsedCalls = [Call || {_From, {M, _F, _A}} = Call <-
@@ -165,7 +162,7 @@ translate_callgraph([{Behaviour,_}|Behaviours], Module, Callgraph) ->
   DirectCalls = [{From, {Module, Fun, Arity}} ||
 		  {From, To} <- UsedCalls,{API, {Fun, Arity, _Ord}} <- Calls,
 		  To =:= API],
-  NewCallgraph = dialyzer_callgraph:add_edges(DirectCalls, Callgraph),
+  NewCallgraph = dialyzer_callgraph:add_behaviour_edges(DirectCalls, Callgraph),
   translate_callgraph(Behaviours, Module, NewCallgraph);
 translate_callgraph([], _Module, Callgraph) ->
   Callgraph.
@@ -232,7 +229,7 @@ parse_spec(String, ExpTypes, Records) ->
       case erl_parse:parse_form(Tokens) of
 	{ok, Form} ->
 	  case Form of
-	    {attribute, _, Name, {{Fun, _}, [TypeForm|_Constraint]}} 
+	    {attribute, _, Name, {{Fun, _}, [TypeForm|_Constraint]}}
 	    when (Name =:= 'spec') or (Name =:= 'callback') ->
 	      MaybeRemoteType = erl_types:t_from_form(TypeForm),
 	      try
@@ -251,7 +248,8 @@ parse_spec(String, ExpTypes, Records) ->
   end.
 
 reason_spec_error({spec_remote_error, Msg}) ->
-  io_lib:format("Remote type solver error: ~s. Make sure the behaviour source is included in the analysis or the plt",[Msg]);
+  io_lib:format("Remote type solver error: ~s. Make sure the behaviour "
+		"source is included in the analysis or the plt",[Msg]);
 reason_spec_error(not_a_spec) ->
   "This is not a spec";
 reason_spec_error({spec_parser_error, Line, Msg}) ->
@@ -362,12 +360,29 @@ nth_or_0(N, List, _Zero) ->
   lists:nth(N, List).
 
 %------------------------------------------------------------------------------
+-spec get_registering_apis(behaviour_api_dict()) -> [mfa()].
 
+get_registering_apis(BehApiDict) ->
+  get_registering_apis(BehApiDict, []).
+
+get_registering_apis([{Behaviour, APIInfo}|Rest], Acc) ->
+  NewRegAPIs = [{Behaviour, Fun, Arity} ||
+                 {{Fun, Arity}, _, {create, N, _}} <- APIInfo,
+		 is_integer(N)],
+  get_registering_apis(Rest, NewRegAPIs ++ Acc);
+get_registering_apis([], Acc) -> Acc.
+
+%------------------------------------------------------------------------------
 -type behaviour_api_dict()::[{behaviour(), behaviour_api_info()}].
--type behaviour_api_info()::[{original_fun(), replacement_fun()}].
+-type behaviour_api_info()::[{original_fun(), replacement_fun(), directive()}].
 -type original_fun()::{atom(), arity()}.
 -type replacement_fun()::{atom(), arity(), arg_list()}.
--type arg_list()::[byte()].
+-type directive()::{'create', name_arg(), callback_module_arg()} |
+		   {'refer', name_arg()}.
+-type arg_list()::[original_fun_arg()].
+-type name_arg()::'no' | original_fun_arg().
+-type callback_module_arg()::original_fun_arg().
+-type original_fun_arg()::byte().
 
 -spec behaviour_api_calls(behaviour()) -> behaviour_api_info().
 
