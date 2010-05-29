@@ -1,19 +1,19 @@
 %%
 %% %CopyrightBegin%
-%% 
-%% Copyright Ericsson AB 1996-2009. All Rights Reserved.
-%% 
+%%
+%% Copyright Ericsson AB 1996-2010. All Rights Reserved.
+%%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
 %% compliance with the License. You should have received a copy of the
 %% Erlang Public License along with this software. If not, it can be
 %% retrieved online at http://www.erlang.org/.
-%% 
+%%
 %% Software distributed under the License is distributed on an "AS IS"
 %% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
 %% the License for the specific language governing rights and limitations
 %% under the License.
-%% 
+%%
 %% %CopyrightEnd%
 %%
 -module(timer).
@@ -302,7 +302,7 @@ pid_delete(Pid) ->
 		     ['$_']}]),
     lists:foreach(fun({IntKey, TimerKey, _ }) ->
 			  ets:delete(?INTERVAL_TAB, IntKey),
-			  ets:delete(?TIMER_TAB, TimerKey) 
+			  ets:delete(?TIMER_TAB, TimerKey)
 		  end, IntervalTimerList).
 
 %% Calculate time to the next timeout. Returned timeout must fit in a 
@@ -318,8 +318,8 @@ next_timeout() ->
     end.
 
 %% Help functions
-do_apply({M,F,A} = MFA) ->
-    case MFA of
+do_apply({M,F,A}) ->
+    case {M,F,A} of
 	{?MODULE, send, A} -> 
 	    %% If send op. send directly, (faster than spawn)
 	    catch send(A);

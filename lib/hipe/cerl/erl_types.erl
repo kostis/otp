@@ -205,6 +205,7 @@
 	 t_var_name/1,
 	 %% t_assign_variables_to_subtype/2,
 	 type_is_defined/3,
+	 record_field_diffs_to_string/2,
 	 subst_all_vars_to_any/1,
 	 lift_list_to_pos_empty/1
 	]).
@@ -400,7 +401,8 @@ t_is_none(_) -> false.
 -spec t_opaque(module(), atom(), [_], erl_type()) -> erl_type().
 
 t_opaque(Mod, Name, Args, Struct) ->
-  ?opaque(set_singleton(#opaque{mod=Mod, name=Name, args=Args, struct=Struct})).
+  O = #opaque{mod = Mod, name = Name, args = Args, struct = Struct},
+  ?opaque(set_singleton(O)).
 
 -spec t_is_opaque(erl_type()) -> boolean().
 
@@ -429,7 +431,7 @@ t_opaque_structure(?opaque(Elements)) ->
 t_opaque_module(?opaque(Elements)) ->
   case ordsets:size(Elements) of
     1 ->
-      [#opaque{mod=Module}] = ordsets:to_list(Elements),
+      [#opaque{mod = Module}] = ordsets:to_list(Elements),
       Module;
     _ -> throw({error, "Unexpected multiple opaque types"})
   end.
@@ -633,7 +635,7 @@ t_unopaque_on_mismatch(GenType, Type, Opaques) ->
   case t_inf(GenType, Type) of
     ?none ->
       Unopaqued = t_unopaque(Type, Opaques),
-      %% Unions might be a problem, must investigate.
+      %% XXX: Unions might be a problem, must investigate.
       case t_inf(GenType, Unopaqued) of
 	?none -> Type;
 	_ -> Unopaqued
@@ -642,13 +644,13 @@ t_unopaque_on_mismatch(GenType, Type, Opaques) ->
   end.
 
 -spec module_builtin_opaques(module()) -> [erl_type()].
-   
+
 module_builtin_opaques(Module) ->
   [O || O <- all_opaque_builtins(), t_opaque_module(O) =:= Module].
-           
+
 %%-----------------------------------------------------------------------------
-%% Remote types
-%% These types are used for preprocessing they should never reach the analysis stage
+%% Remote types: these types are used for preprocessing;
+%% they should never reach the analysis stage.
 
 -spec t_remote(module(), atom(), [_]) -> erl_type().
 
@@ -810,7 +812,7 @@ t_is_none_or_unit(?unit) -> true;
 t_is_none_or_unit(_) -> false.
 
 %%-----------------------------------------------------------------------------
-%% Atoms and the derived type bool
+%% Atoms and the derived type boolean
 %%
 
 -spec t_atom() -> erl_type().
@@ -3309,26 +3311,42 @@ record_to_string(Tag, [_|Fields], FieldNames, RecDict) ->
   FieldStrings = record_fields_to_string(Fields, FieldNames, RecDict, []),
   "#" ++ atom_to_list(Tag) ++ "{" ++ sequence(FieldStrings, [], ",") ++ "}".
 
-record_fields_to_string([Field|Left1], [{FieldName, DeclaredType}|Left2], 
-			RecDict, Acc) ->
-  PrintType =
-    case t_is_equal(Field, DeclaredType) of
-      true -> false;
+record_fields_to_string([F|Fs], [{FName, _DefType}|FDefs], RecDict, Acc) ->
+  NewAcc =
+    case t_is_any(F) orelse t_is_atom('undefined', F) of
+      true -> Acc;
       false ->
-	case t_is_any(DeclaredType) andalso t_is_atom(undefined, Field) of
-	  true -> false;
-	  false ->
-	    TmpType = t_subtract(DeclaredType, t_atom(undefined)),
-	    not t_is_equal(Field, TmpType)
-	end
+	StrFV = atom_to_list(FName) ++ "::" ++ t_to_string(F, RecDict),
+	%% ActualDefType = t_subtract(DefType, t_atom('undefined')),
+	%% Str = case t_is_any(ActualDefType) of
+	%% 	  true -> StrFV;
+	%% 	  false -> StrFV ++ "::" ++ t_to_string(ActualDefType, RecDict)
+	%%	end,
+	[StrFV|Acc]
     end,
-  case PrintType of
-    false -> record_fields_to_string(Left1, Left2, RecDict, Acc);
-    true ->
-      String = atom_to_list(FieldName) ++ "::" ++ t_to_string(Field, RecDict),
-      record_fields_to_string(Left1, Left2, RecDict, [String|Acc])
-  end;
+  record_fields_to_string(Fs, FDefs, RecDict, NewAcc);
 record_fields_to_string([], [], _RecDict, Acc) ->
+  lists:reverse(Acc).
+
+-spec record_field_diffs_to_string(erl_type(), dict()) -> string().
+
+record_field_diffs_to_string(?tuple([_|Fs], Arity, Tag), RecDict) ->
+  [TagAtom] = t_atom_vals(Tag),
+  {ok, FieldNames} = lookup_record(TagAtom, Arity-1, RecDict),
+  %% io:format("RecCElems = ~p\nRecTypes = ~p\n", [Fs, FieldNames]),
+  FieldDiffs = field_diffs(Fs, FieldNames, RecDict, []),
+  sequence(FieldDiffs, [], " and ").
+
+field_diffs([F|Fs], [{FName, DefType}|FDefs], RecDict, Acc) ->
+  NewAcc =
+    case t_is_subtype(F, DefType) of
+      true -> Acc;
+      false ->
+	Str = atom_to_list(FName) ++ "::" ++ t_to_string(DefType, RecDict),
+	[Str|Acc]
+    end,
+  field_diffs(Fs, FDefs, RecDict, NewAcc);
+field_diffs([], [], _, Acc) ->
   lists:reverse(Acc).
 
 comma_sequence(Types, RecDict) ->
@@ -3349,8 +3367,8 @@ sequence([], [], _Delimiter) ->
   [];
 sequence([T], Acc, _Delimiter) ->
   lists:flatten(lists:reverse([T|Acc]));
-sequence([T|Left], Acc, Delimiter) -> 
-  sequence(Left, [T ++ Delimiter|Acc], Delimiter).
+sequence([T|Ts], Acc, Delimiter) -> 
+  sequence(Ts, [T ++ Delimiter|Acc], Delimiter).
 
 %%=============================================================================
 %% 

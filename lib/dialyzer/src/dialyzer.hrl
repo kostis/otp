@@ -31,7 +31,7 @@
 -define(RET_DISCREPANCIES, 2).
 
 -type dial_ret() :: ?RET_NOTHING_SUSPICIOUS
-                  | ?RET_INTERNAL_ERROR 
+                  | ?RET_INTERNAL_ERROR
                   | ?RET_DISCREPANCIES.
 
 %%--------------------------------------------------------------------
@@ -90,7 +90,7 @@
 %%--------------------------------------------------------------------
 %% THIS TYPE SHOULD ONE DAY DISAPPEAR -- IT DOES NOT BELONG HERE
 %%--------------------------------------------------------------------
- 
+
 -type ordset(T)      :: [T] .      %% XXX: temporarily
 
 %%--------------------------------------------------------------------
@@ -128,7 +128,9 @@
                    deadlock_detection = false        :: boolean(),
                    msg_analysis       = false        :: boolean(),
 		   behaviours_chk     = false        :: boolean(),
-		   callgraph_file     = ""           :: file:filename()}).
+		   callgraph_file     = ""           :: file:filename(),
+		   diff_mods          = []           :: [atom()],
+		   fast_plt           = false        :: boolean()}).
 
 -record(options, {files           = []		   :: [file:filename()],
 		  files_rec       = []		   :: [file:filename()],
@@ -146,8 +148,8 @@
 		  output_file     = none	   :: 'none' | file:filename(),
 		  output_format   = formatted      :: 'raw' | 'formatted',
 		  callgraph_file  = ""             :: file:filename(),
-		  check_plt       = true           :: boolean()
-		 }).
+		  check_plt       = true           :: boolean(),
+		  fast_plt        = true           :: boolean()}).
 
 -record(contract, {contracts	  = []		   :: [contract_pair()],
 		   args		  = []		   :: [erl_types:erl_type()],

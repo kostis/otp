@@ -34,19 +34,25 @@
 	 translate_behaviour_api_call/5, translatable_behaviours/1,
 	 translate_callgraph/3]).
 
+-export_type([behaviour/0, behaviour_api_dict/0]).
+
 %%--------------------------------------------------------------------
 
 -include("dialyzer.hrl").
 
 %%--------------------------------------------------------------------
 
+-type behaviour() :: atom().
+
 -record(state, {plt        :: dialyzer_plt:plt(),
 		codeserver :: dialyzer_codeserver:codeserver(),
-		filename   :: string(),
-		behlines   :: [{atom(), number()}]}).
+		filename   :: file:filename(),
+		behlines   :: [{behaviour(), non_neg_integer()}]}).
+
+%%--------------------------------------------------------------------
 
 -spec get_behaviours([module()], dialyzer_codeserver:codeserver()) ->
-  {[atom()], [atom()]}.
+  {[behaviour()], [behaviour()]}.
 
 get_behaviours(Modules, Codeserver) ->
   get_behaviours(Modules, Codeserver, [], []).
@@ -59,31 +65,37 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
   {Behaviours, BehLines} = get_behaviours(Attrs),
   case Behaviours of
     [] -> [];
-     _ -> {_Var,Code} =
-	    dialyzer_codeserver:lookup_mfa_code({Module,module_info,0},
-						Codeserver),
-	  File = get_file(cerl:get_ann(Code)),
-	  State = #state{plt = Plt, codeserver = Codeserver, filename = File,
-			 behlines = BehLines},
-	  Warnings = get_warnings(Module, Behaviours, State),
-	  [add_tag_file_line(Module, W, State) || W <- Warnings]
+    _ ->
+      MFA = {Module,module_info,0},
+      {_Var,Code} = dialyzer_codeserver:lookup_mfa_code(MFA, Codeserver),
+      File = get_file(cerl:get_ann(Code)),
+      State = #state{plt = Plt, codeserver = Codeserver, filename = File,
+		     behlines = BehLines},
+      Warnings = get_warnings(Module, Behaviours, State),
+      [add_tag_file_line(Module, W, State) || W <- Warnings]
   end.
 
--spec translatable_behaviours(cerl:c_module()) -> [{atom(),[_]}].
+-spec translatable_behaviours(cerl:c_module()) -> behaviour_api_dict().
 
 translatable_behaviours(Tree) ->
   Attrs = cerl:module_attrs(Tree),
   {Behaviours, _BehLines} = get_behaviours(Attrs),
   [{B, Calls} || B <- Behaviours, (Calls = behaviour_api_calls(B)) =/= []].
 
--spec get_behaviour_apis([atom()]) -> [mfa()].
+-spec get_behaviour_apis([behaviour()]) -> [mfa()].
 
 get_behaviour_apis(Behaviours) ->
   get_behaviour_apis(Behaviours, []).
 
--spec translate_behaviour_api_call(mfa_or_funlbl(), _, _, [_],
-                                   [{atom(),atom()}]) ->
-      {_,_} | 'plain_call'.
+-spec translate_behaviour_api_call(dialyzer_races:mfa_or_funlbl(), 
+				   [erl_types:erl_type()], 
+				   [dialyzer_races:core_vars()],
+				   module(), 
+				   behaviour_api_dict()) -> 
+				      {dialyzer_races:mfa_or_funlbl(), 
+				       [erl_types:erl_type()], 
+				       [dialyzer_races:core_vars()]} 
+					| 'plain_call'.
 
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, [], _CallbackAssocs) ->
   plain_call;
@@ -140,8 +152,9 @@ translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
 			     _CallbackAssocs) ->
   plain_call.
 
--spec translate_callgraph([{atom(), _}], atom(), dialyzer_callgraph:callgraph())
-			  -> dialyzer_callgraph:callgraph().
+-spec translate_callgraph(behaviour_api_dict(), atom(),
+			  dialyzer_callgraph:callgraph()) -> 
+			     dialyzer_callgraph:callgraph().
 
 translate_callgraph([{Behaviour,_}|Behaviours], Module, Callgraph) ->
   UsedCalls = [Call || {_From, {M, _F, _A}} = Call <-
@@ -303,7 +316,7 @@ get_line([]) -> -1.
 get_file([{file, File}|_]) -> File;
 get_file([_|Tail]) -> get_file(Tail).
 
-%%------------------------------------------------------------------------------
+%%-----------------------------------------------------------------------------
 
 get_behaviours([], _Codeserver, KnownAcc, UnknownAcc) ->
   {KnownAcc, UnknownAcc};
@@ -332,7 +345,7 @@ call_behaviours([Behaviour|Rest], KnownAcc, UnknownAcc) ->
     _:_ -> call_behaviours(Rest, KnownAcc, [Behaviour | UnknownAcc])
   end.
 
-%-------------------------------------------------------------------------------
+%------------------------------------------------------------------------------
 
 get_behaviour_apis([], Acc) ->
   Acc;
@@ -341,14 +354,22 @@ get_behaviour_apis([Behaviour | Rest], Acc) ->
 	   {{Fun, Arity}, _, _} <- behaviour_api_calls(Behaviour)],
   get_behaviour_apis(Rest, MFAs ++ Acc).
 
-%-------------------------------------------------------------------------------
+%------------------------------------------------------------------------------
 
 nth_or_0(0, _List, Zero) ->
   Zero;
 nth_or_0(N, List, _Zero) ->
   lists:nth(N, List).
 
-%-------------------------------------------------------------------------------
+%------------------------------------------------------------------------------
+
+-type behaviour_api_dict()::[{behaviour(), behaviour_api_info()}].
+-type behaviour_api_info()::[{original_fun(), replacement_fun()}].
+-type original_fun()::{atom(), arity()}.
+-type replacement_fun()::{atom(), arity(), arg_list()}.
+-type arg_list()::[byte()].
+
+-spec behaviour_api_calls(behaviour()) -> behaviour_api_info().
 
 behaviour_api_calls(gen_server) ->
   [{{start_link, 3}, {init, 1, [2]}, {create, no, 1}},

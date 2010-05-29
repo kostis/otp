@@ -59,7 +59,7 @@
 analyze(Tree) ->
   %% io:format("Handling ~w\n", [cerl:atom_val(cerl:module_name(Tree))]),
   {_, State} = traverse(Tree, map__new(), state__new(Tree), top),
-  Esc = state__esc(State), 
+  Esc = state__esc(State),
   %% Add dependency from 'external' to all escaping function
   State1 = state__add_deps(external, output(Esc), State),
   Deps = state__deps(State1),
@@ -110,15 +110,15 @@ traverse(Tree, Out, State, CurrentFun) ->
       Body = cerl:fun_body(Tree),
       Label = cerl_trees:get_label(Tree),
       State1 =
-	if CurrentFun =:= top -> 
+	if CurrentFun =:= top ->
 	    state__add_deps(top, output(set__singleton(Label)), State);
-	   true -> 
+	   true ->
 	    O1 = output(set__singleton(CurrentFun)),
 	    O2 = output(set__singleton(Label)),
 	    TmpState = state__add_deps(Label, O1, State),
 	    state__add_deps(CurrentFun, O2,TmpState)
 	end,
-      {BodyFuns, State2} = traverse(Body, Out, State1, 
+      {BodyFuns, State2} = traverse(Body, Out, State1,
 				    cerl_trees:get_label(Tree)),
       {output(set__singleton(Label)), state__add_esc(BodyFuns, State2)};
     'let' ->
@@ -149,7 +149,7 @@ traverse(Tree, Out, State, CurrentFun) ->
       Clauses = cerl:receive_clauses(Tree),
       TimeOut = cerl:receive_timeout(Tree),
       Action = cerl:receive_action(Tree),
-      {ClauseFuns, State1} = 
+      {ClauseFuns, State1} =
 	traverse_clauses(Clauses, output(none), Out, State, CurrentFun),
       {_, State2} = traverse(TimeOut, Out, State1, CurrentFun),
       {ActionFuns, State3} = traverse(Action, Out, State2, CurrentFun),
@@ -173,12 +173,12 @@ traverse(Tree, Out, State, CurrentFun) ->
       Args = cerl:tuple_es(Tree),
       {List, State1} = traverse_list(Args, Out, State, CurrentFun),
       {merge_outs(List), State1};
-    values ->      
+    values ->
       traverse_list(cerl:values_es(Tree), Out, State, CurrentFun);
     var ->
       case map__lookup(cerl_trees:get_label(Tree), Out) of
 	none -> {output(none), State};
-	{value, Val} -> 
+	{value, Val} ->
 	  case is_only_external(Val) of
 	    true ->
 	      %% Do nothing
@@ -239,17 +239,17 @@ filter_match_fail([Clause]) ->
 filter_match_fail([H|T]) ->
   [H|filter_match_fail(T)];
 filter_match_fail([]) ->
-  %% This can actually happen, for example in 
+  %% This can actually happen, for example in
   %%      receive after 1 -> ok end
   [].
 
-remote_call(Tree, ArgFuns, State) ->  
+remote_call(Tree, ArgFuns, State) ->
   M = cerl:call_module(Tree),
   F = cerl:call_name(Tree),
   A = length(cerl:call_args(Tree)),
   case cerl:is_c_atom(M) andalso cerl:is_c_atom(F) of
     false ->
-      %% Unknown function. 
+      %% Unknown function.
       {output(set__singleton(external)), state__add_esc(ArgFuns, State)};
     true ->
       M1 = cerl:atom_val(M),
@@ -258,12 +258,12 @@ remote_call(Tree, ArgFuns, State) ->
       case erl_bifs:is_pure(M1, F1, A) of
 	true ->
 	  case Literal of
-	    true -> 
+	    true ->
 	      {output(none), State};
-	    false -> 
+	    false ->
 	      {output(set__singleton(external)), state__add_esc(ArgFuns, State)}
 	  end;
-	false ->	  
+	false ->
 	  State1 = case cerl_closurean:is_escape_op(M1, F1, A) of
 		     true -> state__add_esc(ArgFuns, State);
 		     false -> State
@@ -325,7 +325,7 @@ set__filter(#set{set = Set}, Fun) ->
 %% Outputs
 %%
 
--record(output, {type    :: 'single' | 'list', 
+-record(output, {type    :: 'single' | 'list',
 		 content :: 'none' | #set{} | [#output{}]}).
 
 output(none) -> #output{type = single, content = none};
@@ -343,7 +343,7 @@ merge_outs([#output{content = none}|Left], O) ->
   merge_outs(Left, O);
 merge_outs([O|Left], #output{content = none}) ->
   merge_outs(Left, O);
-merge_outs([#output{type = single, content = S1}|Left], 
+merge_outs([#output{type = single, content = S1}|Left],
 	   #output{type = single, content = S2}) ->
   merge_outs(Left, output(set__union(S1, S2)));
 merge_outs([#output{type = list, content = L1}|Left],
@@ -353,7 +353,7 @@ merge_outs([#output{type = list, content = L1}|Left],
 merge_outs([], Res) ->
   Res.
 
-filter_outs(#output{type = single, content = S}, Fun) -> 
+filter_outs(#output{type = single, content = S}, Fun) ->
   output(set__filter(S, Fun)).
 
 add_external(#output{type = single, content = Set}) ->
@@ -382,7 +382,7 @@ map__add(Label, Set, Map) ->
       map__store(Label, Set, Map)
   end.
 
-map__store(Label, Val, Map) ->  
+map__store(Label, Val, Map) ->
   dict:store(Label, Val, Map).
 
 map__lookup(Label, Map) ->
@@ -420,7 +420,7 @@ bind_pats_list([Pat|PatLeft],
   bind_pats_list(PatLeft, SetLeft, Map1);
 bind_pats_list([], [], Map) ->
   Map.
-  
+
 bind_single([Var|Left], O, Map) ->
   bind_single(Left, O, map__store(cerl_trees:get_label(Var), O, Map));
 bind_single([], _O, Map) ->
@@ -460,14 +460,14 @@ all_vars(Tree, AccIn) ->
 
 -type local_set() :: 'none' | #set{}.
 
--record(state, {deps    :: dict(), 
-		esc     :: local_set(), 
-		call    :: dict(), 
+-record(state, {deps    :: dict(),
+		esc     :: local_set(),
+		call    :: dict(),
 		arities :: dict()}).
 
 state__new(Tree) ->
   Exports = set__from_list([X || X <- cerl:module_exports(Tree)]),
-  InitEsc = set__from_list([cerl_trees:get_label(Fun) 
+  InitEsc = set__from_list([cerl_trees:get_label(Fun)
 			    || {Var, Fun} <- cerl:module_defs(Tree),
 			       set__is_element(Var, Exports)]),
   Arities = cerl_trees:fold(fun find_arities/2, dict:new(), Tree),
@@ -485,7 +485,7 @@ find_arities(Tree, AccMap) ->
 
 state__add_deps(_From, #output{content = none}, State) ->
   State;
-state__add_deps(From, #output{type = single, content=To}, 
+state__add_deps(From, #output{type = single, content=To},
 		#state{deps = Map} = State) ->
   %% io:format("Adding deps from ~w to ~w\n", [From, set__to_ordsets(To)]),
   State#state{deps = map__add(From, To, Map)}.
@@ -504,10 +504,10 @@ state__esc(#state{esc = Esc}) ->
 
 state__store_callsite(_From, #output{content = none}, _CallArity, State) ->
   State;
-state__store_callsite(From, To, CallArity, 
+state__store_callsite(From, To, CallArity,
 		      #state{call = Calls, arities = Arities} = State) ->
   Filter = fun(external) -> true;
-	      (Fun) -> CallArity =:= dict:fetch(Fun, Arities) 
+	      (Fun) -> CallArity =:= dict:fetch(Fun, Arities)
 	   end,
   case filter_outs(To, Filter) of
     #output{content = none} -> State;
@@ -524,7 +524,7 @@ state__calls(#state{call = Calls}) ->
 -ifndef(NO_UNUSED).
 
 test(Mod) ->
-  {ok, _, Code} = compile:file(Mod, [to_core, binary]), 
+  {ok, _, Code} = compile:file(Mod, [to_core, binary]),
   Tree = cerl:from_records(Code),
   {LabeledTree, _} = cerl_trees:label(Tree),
   {Deps, Esc, Calls} = analyze(LabeledTree),
@@ -538,14 +538,14 @@ test(Mod) ->
 	      'fun' ->
 		case lists:keyfind(id, 1, cerl:get_ann(SubTree)) of
 		  false -> Acc;
-		  {id, ID} -> 
+		  {id, ID} ->
 		    dict:store(cerl_trees:get_label(SubTree), ID, Acc)
 		end;
 	      module ->
 		Defs = cerl:module_defs(SubTree),
 		lists:foldl(fun({Var, Fun}, Acc1) ->
 				dict:store(cerl_trees:get_label(Fun),
-					   {cerl:fname_id(Var), 
+					   {cerl:fname_id(Var),
 					    cerl:fname_arity(Var)},
 					   Acc1)
 			    end, Acc, Defs);
@@ -553,7 +553,7 @@ test(Mod) ->
 		Defs = cerl:letrec_defs(SubTree),
 		lists:foldl(fun({Var, Fun}, Acc1) ->
 				dict:store(cerl_trees:get_label(Fun),
-					   {cerl:fname_id(Var), 
+					   {cerl:fname_id(Var),
 					    cerl:fname_arity(Var)},
 					   Acc1)
 			    end, Acc, Defs);

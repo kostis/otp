@@ -81,6 +81,7 @@ MODULES= \
 	port_bif_SUITE \
 	process_SUITE \
 	pseudoknot_SUITE \
+	receive_SUITE \
 	ref_SUITE \
 	register_SUITE \
 	save_calls_SUITE \
@@ -117,7 +118,8 @@ NO_OPT= bs_bincomp \
 	bs_match_int \
 	bs_match_tail \
 	bs_match_misc \
-	bs_utf
+	bs_utf \
+	guard
 
 
 NO_OPT_MODULES= $(NO_OPT:%=%_no_opt_SUITE)

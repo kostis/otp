@@ -208,7 +208,7 @@ BEAM_FORMAT_NUMBER=0
 
 # New instructions in R10B.
 109: bs_init2/6
-110: bs_bits_to_bytes/3
+110: -bs_bits_to_bytes/3
 111: bs_add/5
 112: apply/1
 113: apply_last/2
@@ -274,3 +274,9 @@ BEAM_FORMAT_NUMBER=0
 # R13B03
 
 149: on_load/0
+
+# R14A
+
+150: recv_mark/1
+151: recv_set/1
+152: gc_bif3/7

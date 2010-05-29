@@ -21,7 +21,7 @@
 %%%-------------------------------------------------------------------
 %%% File    : dialyzer_callgraph.erl
 %%% Author  : Tobias Lindahl <tobiasl@it.uu.se>
-%%% Description : 
+%%% Description :
 %%%
 %%% Created : 30 Mar 2005 by Tobias Lindahl <tobiasl@it.uu.se>
 %%%-------------------------------------------------------------------
@@ -29,6 +29,7 @@
 
 -export([add_edges/2,
 	 all_nodes/1,
+	 changed/2,
 	 delete/1,
 	 finalize/1,
 	 is_escaping/2,
@@ -42,6 +43,7 @@
 	 module_deps/1,
 	 %% module_postorder/1,
 	 module_postorder_from_funs/2,
+	 need_analysis/2,
 	 new/0,
 	 in_neighbours/2,
 	 renew_heisen_info/5,
@@ -53,6 +55,7 @@
 	 to_dot/2,
 	 to_ps/3]).
 
+%% Data structure interfaces.
 -export([cleanup/1, get_digraph/1, get_deadlock_detection/1,
          get_deadlocks/1, get_msg_analysis/1, get_msgs/1,
          get_named_tables/1, get_public_tables/1,
@@ -60,7 +63,8 @@
          put_deadlocks/2, put_digraph/2, put_msg_analysis/2,
          put_msgs/2, put_named_tables/2, put_public_tables/2,
          put_race_detection/2,
-         put_behaviour_api_calls/2, get_behaviour_api_calls/1]).
+         put_behaviour_api_calls/2, get_behaviour_api_calls/1,
+         put_diff_mods/2, put_fast_plt/2, get_fast_plt/1]).
 
 -export_type([callgraph/0]).
 
@@ -74,10 +78,10 @@
 %%-----------------------------------------------------------------------------
 %% A callgraph is a directed graph where the nodes are functions and a
 %% call between two functions is an edge from the caller to the callee.
-%% 
+%%
 %% calls	-  A mapping from call site (and apply site) labels
 %%		   to the possible functions that can be called.
-%% digraph	-  A digraph representing the callgraph. 
+%% digraph	-  A digraph representing the callgraph.
 %%		   Nodes are represented as MFAs or labels.
 %% esc		-  A set of all escaping functions as reported by dialyzer_dep.
 %% postorder	-  A list of strongly connected components of the callgraph
@@ -107,7 +111,12 @@
                     race_detection = false                   :: boolean(),
                     dl_detection   = false                   :: boolean(),
                     msg_analysis   = false                   :: boolean(),
-		    beh_api_calls  = []                      :: [{mfa(), mfa()}]}).
+		    beh_api_calls  = []                      :: [{mfa(), mfa()}],
+		    diff_mods      = []                      :: [atom()],
+		    depends_on     = dict:new()              :: dict(),
+		    is_dependent   = dict:new()              :: dict(),
+		    changed_funs   = sets:new()              :: set(),
+		    fast_plt       = false                   :: boolean()}).
 
 %% Exported Types
 
@@ -132,7 +141,7 @@ all_nodes(#callgraph{digraph = DG}) ->
 
 -spec lookup_rec_var(label(), callgraph()) -> 'error' | {'ok', mfa()}.
 
-lookup_rec_var(Label, #callgraph{rec_var_map = RecVarMap}) 
+lookup_rec_var(Label, #callgraph{rec_var_map = RecVarMap})
   when is_integer(Label) ->
   dict:find(Label, RecVarMap).
 
@@ -175,7 +184,7 @@ is_self_rec(MfaOrLabel, #callgraph{self_rec = SelfRecs}) ->
 -spec is_escaping(label(), callgraph()) -> boolean().
 
 is_escaping(Label, #callgraph{esc = Esc}) when is_integer(Label) ->
-  sets:is_element(Label, Esc).  
+  sets:is_element(Label, Esc).
 
 -type callgraph_edge() :: {mfa_or_funlbl(),mfa_or_funlbl()}.
 -spec add_edges([callgraph_edge()], callgraph()) -> callgraph().
@@ -217,7 +226,7 @@ find_non_local_calls([{{M,_,_}, {M,_,_}}|Left], Set) ->
 find_non_local_calls([{{M1,_,_}, {M2,_,_}} = Edge|Left], Set) when M1 =/= M2 ->
   find_non_local_calls(Left, sets:add_element(Edge, Set));
 find_non_local_calls([{{_,_,_}, Label}|Left], Set) when is_integer(Label) ->
-  find_non_local_calls(Left, Set);  
+  find_non_local_calls(Left, Set);
 find_non_local_calls([{Label, {_,_,_}}|Left], Set) when is_integer(Label) ->
   find_non_local_calls(Left, Set);
 find_non_local_calls([{Label1, Label2}|Left], Set) when is_integer(Label1),
@@ -310,14 +319,51 @@ create_module_digraph([], MDG) ->
 
 -spec finalize(callgraph()) -> callgraph().
 
-finalize(#callgraph{digraph = DG} = CG) ->
-  CG#callgraph{postorder = digraph_finalize(DG)}.
+finalize(#callgraph{fast_plt = FastPlt} = CG) ->
+  case FastPlt of
+    true  -> fast_finalize(CG);
+    false -> slow_finalize(CG)
+  end.
+
+fast_finalize(#callgraph{digraph = DG, diff_mods = DiffMods} = CG) ->
+  DG1 = digraph_utils:condensation(DG),
+  {ChangedFuns, FunDependsOn, FunDependents} = dependencies(DG1, DiffMods),
+  PostOrder = digraph_finalize(DG1, DiffMods),
+  digraph_delete(DG1),
+  CG#callgraph{postorder    = PostOrder,
+	       depends_on   = FunDependsOn,
+	       is_dependent = FunDependents,
+	       changed_funs = ChangedFuns}.
+
+slow_finalize(#callgraph{digraph = DG, diff_mods = DiffMods} = CG) ->
+  DG1 = digraph_utils:condensation(DG),
+  PostOrder = digraph_finalize(DG1, DiffMods),
+  digraph_delete(DG1),
+  CG#callgraph{postorder = PostOrder}.
 
 -spec reset_from_funs([mfa_or_funlbl()], callgraph()) -> callgraph().
 
-reset_from_funs(Funs, #callgraph{digraph = DG} = CG) ->
+reset_from_funs(Funs, #callgraph{fast_plt = FastPlt} = CG) ->
+  case FastPlt of
+    true  -> fast_reset_from_funs(Funs, CG);
+    false -> slow_reset_from_funs(Funs, CG)
+  end.
+
+fast_reset_from_funs(Funs, #callgraph{digraph = DG, diff_mods = DiffMods} = CG) ->
   SubGraph = digraph_reaching_subgraph(Funs, DG),
-  Postorder = digraph_finalize(SubGraph),
+  SG1 = digraph_utils:condensation(SubGraph),
+  {ChangedFuns, FunDependsOn, FunDependents} = dependencies(SG1, DiffMods),
+  PostOrder = digraph_finalize(SG1, DiffMods),
+  digraph_delete(SG1),
+  digraph_delete(SubGraph),
+  CG#callgraph{postorder    = PostOrder,
+	       depends_on   = FunDependsOn,
+	       is_dependent = FunDependents,
+	       changed_funs = ChangedFuns}.
+
+slow_reset_from_funs(Funs, #callgraph{digraph = DG} = CG) ->
+  SubGraph = digraph_reaching_subgraph(Funs, DG),
+  Postorder = slow_digraph_finalize(SubGraph),
   digraph_delete(SubGraph),
   CG#callgraph{postorder = Postorder}.
 
@@ -328,7 +374,7 @@ module_postorder_from_funs(Funs, #callgraph{digraph = DG} = CG) ->
   PO = module_postorder(CG#callgraph{digraph = SubGraph}),
   digraph_delete(SubGraph),
   PO.
-  
+
 %%----------------------------------------------------------------------
 %% Core code
 %%----------------------------------------------------------------------
@@ -342,22 +388,22 @@ module_postorder_from_funs(Funs, #callgraph{digraph = DG} = CG) ->
 scan_core_tree(Tree, #callgraph{calls = OldCalls,
 				esc = OldEsc,
 				name_map = OldNameMap,
-				rec_var_map = OldRecVarMap, 
+				rec_var_map = OldRecVarMap,
 				rev_name_map = OldRevNameMap,
 				self_rec = OldSelfRec} = CG) ->
   %% Build name map and recursion variable maps.
-  {NewNameMap, NewRevNameMap, NewRecVarMap} = 
+  {NewNameMap, NewRevNameMap, NewRecVarMap} =
     build_maps(Tree, OldRecVarMap, OldNameMap, OldRevNameMap),
-  
+
   %% First find the module-local dependencies.
   {Deps0, EscapingFuns, Calls} = dialyzer_dep:analyze(Tree),
   NewCalls = dict:merge(fun(_Key, Val, Val) -> Val end, OldCalls, Calls),
   NewEsc = sets:union(sets:from_list(EscapingFuns), OldEsc),
   LabelEdges = get_edges_from_deps(Deps0),
-  
+
   %% Find the self recursive functions. Named functions get both the
   %% key and their name for convenience.
-  SelfRecs0 = lists:foldl(fun({Key, Key}, Acc) -> 
+  SelfRecs0 = lists:foldl(fun({Key, Key}, Acc) ->
 			      case dict:find(Key, NewNameMap) of
 				error      -> [Key|Acc];
 				{ok, Name} -> [Key, Name|Acc]
@@ -365,9 +411,9 @@ scan_core_tree(Tree, #callgraph{calls = OldCalls,
 			     (_, Acc) -> Acc
 			  end, [], LabelEdges),
   SelfRecs = sets:union(sets:from_list(SelfRecs0), OldSelfRec),
-  
+
   NamedEdges1 = name_edges(LabelEdges, NewNameMap),
-  
+
   %% We need to scan for inter-module calls since these are not tracked
   %% by dialyzer_dep. Note that the caller is always recorded as the
   %% top level function. This is OK since the included functions are
@@ -389,13 +435,13 @@ scan_core_tree(Tree, #callgraph{calls = OldCalls,
   CG1#callgraph{calls = NewCalls,
                 esc = NewEsc,
                 name_map = NewNameMap,
-                rec_var_map = NewRecVarMap, 
+                rec_var_map = NewRecVarMap,
                 rev_name_map = NewRevNameMap,
                 self_rec = SelfRecs}.
 
 build_maps(Tree, RecVarMap, NameMap, RevNameMap) ->
   %% We only care about the named (top level) functions. The anonymous
-  %% functions will be analysed together with their parents. 
+  %% functions will be analysed together with their parents.
   Defs = cerl:module_defs(Tree),
   Mod = cerl:atom_val(cerl:module_name(Tree)),
   lists:foldl(fun({Var, Function}, {AccNameMap, AccRevNameMap, AccRecVarMap}) ->
@@ -413,7 +459,7 @@ get_edges_from_deps(Deps) ->
   %% this information.
   Edges = dict:fold(fun(external, _Set, Acc) -> Acc;
 		       (Caller, Set, Acc)    ->
-			[[{Caller, Callee} || Callee <- Set, 
+			[[{Caller, Callee} || Callee <- Set,
 					      Callee =/= external]|Acc]
 		    end, [], Deps),
   lists:flatten(Edges).
@@ -454,16 +500,16 @@ scan_one_core_fun(TopTree, FunName) ->
 		    CalleeM = cerl:call_module(Tree),
 		    CalleeF = cerl:call_name(Tree),
 		    A = length(cerl:call_args(Tree)),
-		    case (cerl:is_c_atom(CalleeM) andalso 
+		    case (cerl:is_c_atom(CalleeM) andalso
 			  cerl:is_c_atom(CalleeF)) of
-		      true -> 
+		      true ->
 			M = cerl:atom_val(CalleeM),
 			F = cerl:atom_val(CalleeF),
 			case erl_bif_types:is_known(M, F, A) of
 			  true -> Acc;
 			  false -> [{FunName, {M, F, A}}|Acc]
 			end;
-		      false -> 
+		      false ->
 			%% We cannot handle run-time bindings
 			Acc
 		    end;
@@ -506,7 +552,7 @@ digraph_confirm_vertices([MFA|Left], DG) ->
   digraph_confirm_vertices(Left, DG);
 digraph_confirm_vertices([], DG) ->
   DG.
-  
+
 digraph_remove_external(DG) ->
   Vertices = digraph:vertices(DG),
   Unconfirmed = remove_unconfirmed(Vertices, DG),
@@ -549,7 +595,7 @@ digraph_in_neighbours(V, DG) ->
 %% considered to belong to all modules to make sure that we do not
 %% lose any nodes.
 
-digraph_postorder(Digraph) ->
+digraph_postorder(Digraph, DiffMods) ->
   %% Remove all self-edges for SCCs.
   Edges = [digraph:edge(Digraph, E) || E <- digraph:edges(Digraph)],
   SelfEdges = [E || {E, V, V, _} <- Edges],
@@ -559,34 +605,47 @@ digraph_postorder(Digraph) ->
   case Leaves =:= [] of
     true -> [];
     false ->
-      {Module, Taken} = take_sccs_from_fresh_module(Leaves),
+      {Module, Taken} = take_sccs_from_fresh_module(Leaves, DiffMods),
       true = digraph:del_vertices(Digraph, Taken),
-      digraph_postorder(Digraph, Module, [Taken])
+      digraph_postorder(Digraph, Module, [Taken], DiffMods)
   end.
 
-digraph_postorder(Digraph, LastModule, Acc) ->
+digraph_postorder(Digraph, LastModule, Acc, DiffMods) ->
   Leaves = digraph_leaves(Digraph),
   case Leaves =:= [] of
     true -> lists:append(lists:reverse(Acc));
     false ->
       case [SCC || SCC <- Leaves, scc_belongs_to_module(SCC, LastModule)] of
 	[] ->
-	  {NewModule, NewTaken} = take_sccs_from_fresh_module(Leaves),
+	  {NewModule, NewTaken} = take_sccs_from_fresh_module(Leaves, DiffMods),
 	  true = digraph:del_vertices(Digraph, NewTaken),
-	  digraph_postorder(Digraph, NewModule, [NewTaken|Acc]);
+	  digraph_postorder(Digraph, NewModule, [NewTaken|Acc], DiffMods);
 	NewTaken ->
 	  true = digraph:del_vertices(Digraph, NewTaken),
-	  digraph_postorder(Digraph, LastModule, [NewTaken|Acc])
+	  digraph_postorder(Digraph, LastModule, [NewTaken|Acc], DiffMods)
       end
   end.
 
 digraph_leaves(Digraph) ->
   [V || V <- digraph:vertices(Digraph), digraph:out_degree(Digraph, V) =:= 0].
 
-take_sccs_from_fresh_module(Leaves) ->
-  NewModule = find_module(hd(Leaves)),
-  {NewModule, 
-   [SCC || SCC <- Leaves, scc_belongs_to_module(SCC, NewModule)]}.
+take_sccs_from_fresh_module(Leaves, DiffMods) ->
+  NewModule =
+    case find_leaf_in_diff(Leaves, DiffMods) of
+      none   -> find_module(hd(Leaves));
+      {ok,H} -> H
+    end,
+  {NewModule, [SCC || SCC <- Leaves, scc_belongs_to_module(SCC, NewModule)]}.
+
+find_leaf_in_diff(_Leaves, []) ->
+  none;
+find_leaf_in_diff([Leaf|Leaves], DiffMods) ->
+  case [M || {M,_,_} <- Leaf, lists:member(M, DiffMods)] of
+    [H|_T] -> {ok, H};
+    []     -> find_leaf_in_diff(Leaves, DiffMods)
+  end;
+find_leaf_in_diff([], _DiffMods) ->
+  none.
 
 -spec scc_belongs_to_module(scc(), module()) -> boolean().
 
@@ -598,19 +657,22 @@ scc_belongs_to_module([{M, _, _}|Left], Module) ->
   end;
 scc_belongs_to_module([], _Module) ->
   false.
-      
+
 -spec find_module(scc()) -> module().
 
 find_module([{M, _, _}|_]) -> M;
 find_module([Label|Left]) when is_integer(Label) -> find_module(Left).
 
-digraph_finalize(DG) ->
+digraph_finalize(DG, DiffMods) ->
+  digraph_postorder(DG, DiffMods).
+
+slow_digraph_finalize(DG) ->
   DG1 = digraph_utils:condensation(DG),
-  Postorder = digraph_postorder(DG1),
+  Postorder = digraph_postorder(DG1, []),
   digraph:delete(DG1),
   Postorder.
 
-digraph_reaching_subgraph(Funs, DG) ->  
+digraph_reaching_subgraph(Funs, DG) ->
   Vertices = digraph_utils:reaching(Funs, DG),
   digraph_utils:subgraph(DG, Vertices).
 
@@ -724,7 +786,7 @@ to_dot(#callgraph{digraph = DG, esc = Esc} = CG, File) ->
 	      {ok, Name} -> Name
 	    end
 	end,
-  Escaping = [{Fun(L), {color, red}} 
+  Escaping = [{Fun(L), {color, red}}
 	      || L <- sets:to_list(Esc), L =/= external],
   Vertices = digraph_edges(DG),
   hipe_dot:translate_list(Vertices, File, "CG", Escaping).
@@ -749,3 +811,72 @@ put_behaviour_api_calls(Calls, Callgraph) ->
 
 get_behaviour_api_calls(Callgraph) ->
   Callgraph#callgraph.beh_api_calls.
+
+%-------------------------------------------------------------------------------
+
+-spec put_diff_mods([atom()], callgraph()) -> callgraph().
+
+put_diff_mods(DiffMods, Callgraph) ->
+  Callgraph#callgraph{diff_mods = DiffMods}.
+
+-spec put_fast_plt(boolean(), callgraph()) -> callgraph().
+
+put_fast_plt(FastPlt, Callgraph) ->
+  Callgraph#callgraph{fast_plt = FastPlt}.
+
+-spec get_fast_plt(callgraph()) -> boolean().
+
+get_fast_plt(Callgraph) ->
+  Callgraph#callgraph.fast_plt.
+
+%%=============================================================================
+%% Utilities for faster plt check
+%%=============================================================================
+
+dependencies(DG, DiffMods) ->
+  F = digraph:vertices(DG),
+  DependsOnList  = [{F1, digraph:out_neighbours(DG, F1)} || F1 <- F],
+  DependentsList = [{F1, digraph:in_neighbours(DG, F1)}  || F1 <- F],
+  DependsOnDict  = lists:foldl(fun dict_store/2, dict:new(), DependsOnList),
+  DependentsDict = lists:foldl(fun dict_store/2, dict:new(), DependentsList),
+  DiffF = [L || L <- F, {M,_,_} <- L, lists:member(M,DiffMods)],
+  NeedF = needed_fixpoint(DiffF,DependsOnDict),
+  DifferFuns = lists:foldl(fun sets:add_element/2, sets:new(), DiffF),
+  NeededFuns = lists:foldl(fun sets:add_element/2, DifferFuns, NeedF),
+  {NeededFuns, DependsOnDict, DependentsDict}.
+
+dict_store({Key, Value}, Dict) ->
+  dict:store(Key, Value, Dict).
+
+needed_fixpoint(DiffF, DependsOnDict) ->
+  needed_fixpoint(DiffF, DependsOnDict, sets:new(), 0).
+
+needed_fixpoint(Base, Dict, Set, OldSize) ->
+  NewBase = lists:append([dict:fetch(Q, Dict) || Q <- Base]),
+  CleanBase = [Q || Q <- NewBase, not sets:is_element(Q, Set)],
+  NewSet = lists:foldl(fun sets:add_element/2, Set, CleanBase),
+  NewSize = sets:size(NewSet),
+  case NewSize =:= OldSize of
+    true  -> sets:to_list(Set);
+    false -> needed_fixpoint(CleanBase, Dict, NewSet, NewSize)
+  end.
+
+-spec need_analysis(scc(), callgraph()) -> boolean().
+
+need_analysis(SCC, Callgraph) ->
+  sets:is_element(SCC, Callgraph#callgraph.changed_funs).
+
+-spec changed(scc(), callgraph()) -> callgraph().
+
+changed(SCC, Callgraph) ->
+  DependentsDict = Callgraph#callgraph.is_dependent,
+  DependsOnDict = Callgraph#callgraph.depends_on,
+  ChangedFuns = Callgraph#callgraph.changed_funs,
+  {ok, SCCDependents} = dict:find(SCC,DependentsDict),
+  DepDependenciesFun = fun(V,L1) -> [dict:fetch(V, DependsOnDict)|L1] end,
+  DepDependencies = lists:foldl(DepDependenciesFun, [], SCCDependents),
+  NewChangedFuns =
+    lists:foldl(fun sets:add_element/2, ChangedFuns, DepDependencies),
+  Callgraph#callgraph{changed_funs = NewChangedFuns}.
+
+%-------------------------------------------------------------------------------

@@ -29,6 +29,7 @@
 -include("ssl_internal.hrl").
 -include("ssl_alert.hrl").
 -include("ssl_handshake.hrl").
+-include("ssl_cipher.hrl").
 -include("ssl_debug.hrl").
 
 %% Connection state handling
@@ -38,7 +39,10 @@
          set_mac_secret/4,
 	 set_master_secret/2, 
          activate_pending_connection_state/2,
-         set_pending_cipher_state/4]).
+         set_pending_cipher_state/4,
+	 set_renegotiation_flag/2,
+	 set_client_verify_data/3,
+	 set_server_verify_data/3]).
 
 %% Handling of incoming data
 -export([get_tls_records/2]).
@@ -175,6 +179,98 @@ set_master_secret(MasterSecret,
                                        master_secret = MasterSecret}},
     States#connection_states{pending_read = Read1, pending_write = Write1}.
 
+%%--------------------------------------------------------------------
+%% Function: set_renegotiation_flag(Flag, States) -> 
+%%                                                #connection_states{}
+%%      Flag = boolean()
+%%	States = #connection_states{}
+%%
+%% Set master_secret in pending connection states
+%%--------------------------------------------------------------------
+set_renegotiation_flag(Flag, #connection_states{
+			 current_read = CurrentRead0,
+			 current_write = CurrentWrite0,
+			 pending_read = PendingRead0,
+			 pending_write = PendingWrite0} 
+		       = ConnectionStates) ->
+    CurrentRead = CurrentRead0#connection_state{secure_renegotiation = Flag},
+    CurrentWrite = CurrentWrite0#connection_state{secure_renegotiation = Flag},
+    PendingRead = PendingRead0#connection_state{secure_renegotiation = Flag},
+    PendingWrite = PendingWrite0#connection_state{secure_renegotiation = Flag},
+    ConnectionStates#connection_states{current_read = CurrentRead, 
+				       current_write = CurrentWrite, 
+				       pending_read = PendingRead, 
+				       pending_write = PendingWrite}.
+
+%%--------------------------------------------------------------------
+%% Function: set_client_verify_data(State, Data, States) -> 
+%%                                                #connection_states{}
+%%      State = atom()
+%%      Data = binary()
+%%	States = #connection_states{}
+%%
+%% Set verify data in connection states.                 
+%%--------------------------------------------------------------------
+set_client_verify_data(current_read, Data, 
+		       #connection_states{current_read = CurrentRead0,
+					  pending_write = PendingWrite0} 
+		       = ConnectionStates) ->
+    CurrentRead = CurrentRead0#connection_state{client_verify_data = Data},
+    PendingWrite = PendingWrite0#connection_state{client_verify_data = Data},
+    ConnectionStates#connection_states{current_read = CurrentRead,
+				       pending_write = PendingWrite};
+set_client_verify_data(current_write, Data, 
+		       #connection_states{pending_read = PendingRead0,
+					  current_write = CurrentWrite0} 
+		       = ConnectionStates) ->
+    PendingRead = PendingRead0#connection_state{client_verify_data = Data},
+    CurrentWrite = CurrentWrite0#connection_state{client_verify_data = Data},
+    ConnectionStates#connection_states{pending_read = PendingRead,
+				       current_write = CurrentWrite};
+set_client_verify_data(current_both, Data, 
+		       #connection_states{current_read = CurrentRead0,
+					  current_write = CurrentWrite0} 
+		       = ConnectionStates) ->
+    CurrentRead = CurrentRead0#connection_state{client_verify_data = Data},
+    CurrentWrite = CurrentWrite0#connection_state{client_verify_data = Data},
+    ConnectionStates#connection_states{current_read = CurrentRead,
+				       current_write = CurrentWrite}.
+
+%%--------------------------------------------------------------------
+%% Function: set_server_verify_data(State, Data, States) -> 
+%%                                                #connection_states{}
+%%      State = atom()
+%%      Data = binary()
+%%	States = #connection_states{}
+%%
+%% Set verify data in pending connection states.
+%%--------------------------------------------------------------------
+set_server_verify_data(current_write, Data, 
+		       #connection_states{pending_read = PendingRead0,
+					  current_write = CurrentWrite0} 
+		       = ConnectionStates) ->
+    PendingRead = PendingRead0#connection_state{server_verify_data = Data},
+    CurrentWrite = CurrentWrite0#connection_state{server_verify_data = Data},
+    ConnectionStates#connection_states{pending_read = PendingRead,
+				       current_write = CurrentWrite};
+
+set_server_verify_data(current_read, Data, 
+		       #connection_states{current_read = CurrentRead0,
+					  pending_write = PendingWrite0} 
+		       = ConnectionStates) ->
+    CurrentRead = CurrentRead0#connection_state{server_verify_data = Data},
+    PendingWrite = PendingWrite0#connection_state{server_verify_data = Data},
+    ConnectionStates#connection_states{current_read = CurrentRead,
+				       pending_write = PendingWrite};
+
+set_server_verify_data(current_both, Data, 
+		       #connection_states{current_read = CurrentRead0,
+					  current_write = CurrentWrite0} 
+		       = ConnectionStates) ->
+    CurrentRead = CurrentRead0#connection_state{server_verify_data = Data},
+    CurrentWrite = CurrentWrite0#connection_state{server_verify_data = Data},
+    ConnectionStates#connection_states{current_read = CurrentRead,
+				       current_write = CurrentWrite}.
 
 %%--------------------------------------------------------------------
 %% Function: activate_pending_connection_state(States, Type) -> 
@@ -191,7 +287,9 @@ activate_pending_connection_state(States =
     NewCurrent = Pending#connection_state{sequence_number = 0},
     SecParams = Pending#connection_state.security_parameters,
     ConnectionEnd = SecParams#security_parameters.connection_end,
-    NewPending = empty_connection_state(ConnectionEnd),
+    EmptyPending = empty_connection_state(ConnectionEnd),
+    SecureRenegotation = NewCurrent#connection_state.secure_renegotiation,
+    NewPending = EmptyPending#connection_state{secure_renegotiation = SecureRenegotation},
     States#connection_states{current_read = NewCurrent,
                              pending_read = NewPending
                             };
@@ -202,7 +300,9 @@ activate_pending_connection_state(States =
     NewCurrent = Pending#connection_state{sequence_number = 0},
     SecParams = Pending#connection_state.security_parameters,
     ConnectionEnd = SecParams#security_parameters.connection_end,
-    NewPending = empty_connection_state(ConnectionEnd),
+    EmptyPending = empty_connection_state(ConnectionEnd),
+    SecureRenegotation = NewCurrent#connection_state.secure_renegotiation,
+    NewPending = EmptyPending#connection_state{secure_renegotiation = SecureRenegotation},
     States#connection_states{current_write = NewCurrent,
                              pending_write = NewPending
                             }.
@@ -311,16 +411,14 @@ protocol_version(tlsv1) ->
     {3, 1};
 protocol_version(sslv3) ->
     {3, 0};
-protocol_version(sslv2) ->
+protocol_version(sslv2) -> %% Backwards compatibility
     {2, 0};
 protocol_version({3, 2}) ->
     'tlsv1.1';
 protocol_version({3, 1}) ->
     tlsv1;
 protocol_version({3, 0}) ->
-    sslv3;
-protocol_version({2, 0}) ->
-    sslv2.
+    sslv3.
 %%--------------------------------------------------------------------
 %% Function: protocol_version(Version1, Version2) -> #protocol_version{}
 %%     Version1 = Version2 = #protocol_version{}
@@ -368,7 +466,7 @@ highest_protocol_version(_, [Version | Rest]) ->
 %%--------------------------------------------------------------------
 supported_protocol_versions() ->
     Fun = fun(Version) ->
-		  protocol_version(Version)
+		  protocol_version(Version) 
 	  end,
     case application:get_env(ssl, protocol_version) of
 	undefined ->
@@ -376,10 +474,17 @@ supported_protocol_versions() ->
 	{ok, []} ->
 	    lists:map(Fun, ?DEFAULT_SUPPORTED_VERSIONS);
 	{ok, Vsns} when is_list(Vsns) ->
-	    lists:map(Fun, Vsns);
+	    Versions = lists:filter(fun is_acceptable_version/1, lists:map(Fun, Vsns)),
+	    supported_protocol_versions(Versions);
 	{ok, Vsn} ->
-	    [Fun(Vsn)]
+	    Versions = lists:filter(fun is_acceptable_version/1, [Fun(Vsn)]),
+	    supported_protocol_versions(Versions)
     end.
+
+supported_protocol_versions([]) ->
+    ?DEFAULT_SUPPORTED_VERSIONS;
+supported_protocol_versions([_|_] = Vsns) ->
+    Vsns.
 
 %%--------------------------------------------------------------------
 %% Function: is_acceptable_version(Version) -> true | false
@@ -433,12 +538,10 @@ initial_connection_state(ConnectionEnd) ->
                      }.
 
 initial_security_params(ConnectionEnd) ->
-    #security_parameters{connection_end = ConnectionEnd,
-                         bulk_cipher_algorithm = ?NULL,
-                         mac_algorithm = ?NULL,         
-                         compression_algorithm = ?NULL,
-                         cipher_type = ?NULL
-                        }.
+    SecParams = #security_parameters{connection_end = ConnectionEnd,
+				     compression_algorithm = ?NULL},
+    ssl_cipher:security_parameters(?TLS_NULL_WITH_NULL_NULL, 
+				   SecParams).
 
 empty_connection_state(ConnectionEnd) ->
     SecParams = empty_security_params(ConnectionEnd),
@@ -590,7 +693,7 @@ hash_and_bump_seqno(#connection_state{sequence_number = SeqNo,
 check_hash(_, _) ->
     ok. %% TODO check this 
 
-mac_hash(?NULL, {_,_}, _MacSecret, _SeqNo, _Type,
+mac_hash({_,_}, ?NULL, _MacSecret, _SeqNo, _Type,
 	 _Length, _Fragment) ->
     <<>>;
 mac_hash({3, 0}, MacAlg, MacSecret, SeqNo, Type, Length, Fragment) ->
