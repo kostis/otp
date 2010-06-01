@@ -27,11 +27,23 @@
 	 which_children/1, count_children/1,
 	 check_childspecs/1]).
 
--export([behaviour_info/1]).
-
 %% Internal exports
 -export([init/1, handle_call/3, handle_info/2, terminate/2, code_change/3]).
 -export([handle_cast/2]).
+
+%%--------------------------------------------------------------------------
+
+-type mfargs()   :: {module(), atom(), [term()]}.
+-type modules()  :: [module()] | 'dynamic'.
+-type restart()  :: 'permanent' | 'transient' | 'temporary'.
+-type shutdown() :: 'brutal_kill' | timeout().
+-type worker()   :: 'worker' | 'supervisor'.
+-type child_spec() :: {term(),mfargs(),restart(),shutdown(),worker(),modules()}.
+
+-type strategy() :: 'one_for_all' | 'one_for_one'
+                  | 'rest_for_one' | 'simple_one_for_one'.
+
+%%--------------------------------------------------------------------------
 
 -define(DICT, dict).
 
@@ -55,10 +67,12 @@
 
 -define(is_simple(State), State#state.strategy =:= simple_one_for_one).
 
-behaviour_info(callbacks) ->
-    [{init,1}];
-behaviour_info(_Other) ->
-    undefined.
+-callback init(Args :: term()) ->
+    {ok, {{RestartStrategy :: strategy(),
+           MaxR            :: non_neg_integer(),
+           MaxT            :: non_neg_integer()}, 
+           [ChildSpec :: child_spec()]}}
+    | ignore.
 
 %%% ---------------------------------------------------
 %%% This is a general process supervisor built upon gen_server.erl.
