@@ -325,32 +325,8 @@ compile_src(File, Includes, Defines, Callgraph, CServer, UseContracts) ->
   case dialyzer_utils:get_abstract_code_from_src(File, CompOpts) of
     {error, _Msg} = Error -> Error;
     {ok, AbstrCode} ->
-      case dialyzer_utils:get_core_from_abstract_code(AbstrCode, CompOpts) of
-	error -> {error, "  Could not find abstract code for: " ++ File};
-	{ok, Core} ->
-          Mod = cerl:concrete(cerl:module_name(Core)),
-	  NoWarn = abs_get_nowarn(AbstrCode, Mod),
-	  case dialyzer_utils:get_record_and_type_info(AbstrCode) of
-	    {error, _} = Error -> Error;
-	    {ok, RecInfo} ->
-	      CServer2 =
-		dialyzer_codeserver:store_temp_records(Mod, RecInfo, CServer),
-	      case UseContracts of
-		true ->
-		  case dialyzer_utils:get_spec_info(Mod, AbstrCode, RecInfo) of
-		    {error, _} = Error -> Error;
-		    {ok, SpecInfo} ->
-		      CServer3 =
-			dialyzer_codeserver:store_temp_contracts(Mod,
-								 SpecInfo,
-								 CServer2),
-		      store_core(Mod, Core, NoWarn, Callgraph, CServer3)
-		  end;
-		false ->
-		  store_core(Mod, Core, NoWarn, Callgraph, CServer2)
-	      end
-	  end
-      end
+      compile_common(File, AbstrCode, CompOpts, Callgraph, CServer, 
+		     UseContracts)
   end.
 
 compile_byte(File, Callgraph, CServer, UseContracts) ->
@@ -359,29 +335,32 @@ compile_byte(File, Callgraph, CServer, UseContracts) ->
       {error, "  Could not get abstract code for: " ++ File ++ "\n" ++
        "  Recompile with +debug_info or analyze starting from source code"};
     {ok, AbstrCode} ->
-      case dialyzer_utils:get_core_from_abstract_code(AbstrCode) of
-	error -> {error, "  Could not get core for: "++File};
-	{ok, Core} ->
-          Mod = cerl:concrete(cerl:module_name(Core)),
-          NoWarn = abs_get_nowarn(AbstrCode, Mod),
-	  case dialyzer_utils:get_record_and_type_info(AbstrCode) of
-	    {error, _} = Error -> Error;
-	    {ok, RecInfo} ->
-	      CServer1 = 
-		dialyzer_codeserver:store_temp_records(Mod, RecInfo, CServer),
-	      case UseContracts of
-		true ->
-		  case dialyzer_utils:get_spec_info(Mod, AbstrCode, RecInfo) of
-		    {error, _} = Error -> Error;
-		    {ok, SpecInfo} ->
-		      CServer2 = 
-			dialyzer_codeserver:store_temp_contracts(Mod, SpecInfo,
-								 CServer1),
-		      store_core(Mod, Core, NoWarn, Callgraph, CServer2)
-		  end;
-		false ->
-		  store_core(Mod, Core, NoWarn, Callgraph, CServer1)
-	      end
+      compile_common(File, AbstrCode, [], Callgraph, CServer, UseContracts)
+  end.
+
+compile_common(File, AbstrCode, CompOpts, Callgraph, CServer, UseContracts) ->
+  case dialyzer_utils:get_core_from_abstract_code(AbstrCode, CompOpts) of
+    error -> {error, "  Could not get core for: "++File};
+    {ok, Core} ->
+      Mod = cerl:concrete(cerl:module_name(Core)),
+      NoWarn = abs_get_nowarn(AbstrCode, Mod),
+      case dialyzer_utils:get_record_and_type_info(AbstrCode) of
+	{error, _} = Error -> Error;
+	{ok, RecInfo} ->
+	  CServer1 = 
+	    dialyzer_codeserver:store_temp_records(Mod, RecInfo, CServer),
+	  case UseContracts of
+	    true ->
+	      case dialyzer_utils:get_spec_info(Mod, AbstrCode, RecInfo) of
+		{error, _} = Error -> Error;
+		{ok, SpecInfo} ->
+		  CServer2 = 
+		    dialyzer_codeserver:store_temp_contracts(Mod, SpecInfo,
+							     CServer1),
+		  store_core(Mod, Core, NoWarn, Callgraph, CServer2)
+	      end;
+	    false ->
+	      store_core(Mod, Core, NoWarn, Callgraph, CServer1)
 	  end
       end
   end.
