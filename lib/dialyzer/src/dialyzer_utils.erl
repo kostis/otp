@@ -313,10 +313,11 @@ merge_records(NewRecords, OldRecords) ->
 %% ============================================================================
 
 -spec get_spec_info(atom(), abstract_code(), dict()) ->
-        {'ok', dict()} | {'error', string()}.
+        {'ok', dict(), dict()} | {'error', string()}.
 
 get_spec_info(ModName, AbstractCode, RecordsDict) ->
-  get_spec_info(AbstractCode, dict:new(), RecordsDict, ModName, "nofile").
+  get_spec_info(AbstractCode, dict:new(), dict:new(), RecordsDict, ModName, 
+		"nofile").
 
 %% TypeSpec is a list of conditional contracts for a function.
 %% Each contract is of the form {[Argument], Range, [Constraint]} where
@@ -324,18 +325,29 @@ get_spec_info(ModName, AbstractCode, RecordsDict) ->
 %%  - Constraint is of the form {subtype, T1, T2} where T1 and T2
 %%    are erl_types:erl_type()
 
-get_spec_info([{attribute, Ln, spec, {Id, TypeSpec}}|Left],
-	      SpecDict, RecordsDict, ModName, File) when is_list(TypeSpec) ->
+get_spec_info([{attribute, Ln, AttrType, {Id, TypeSpec}}|Left], 
+	      SpecDict, CBSpecDict, RecordsDict, ModName, File)
+  when is_list(TypeSpec),
+       (AttrType =:= 'spec' orelse AttrType =:= 'callback') ->
   MFA = case Id of
 	  {_, _, _} = T -> T;
 	  {F, A} -> {ModName, F, A}
 	end,
-  try dict:find(MFA, SpecDict) of
+  Dict = case AttrType of
+	   spec     -> SpecDict;
+	   callback -> CBSpecDict
+	 end,
+  try dict:find(MFA, Dict) of
     error ->
-      NewSpecDict =
+      NewDict =
 	dialyzer_contracts:store_tmp_contract(MFA, {File, Ln}, TypeSpec,
-					      SpecDict, RecordsDict),
-      get_spec_info(Left, NewSpecDict, RecordsDict, ModName, File);
+					      Dict, RecordsDict),
+      case AttrType of
+	spec -> 
+	  get_spec_info(Left, NewDict, CBSpecDict, RecordsDict, ModName, File);
+	callback ->
+	  get_spec_info(Left, SpecDict, NewDict, RecordsDict, ModName, File)
+      end;
     {ok, {{OtherFile, L},_C}} ->
       {Mod, Fun, Arity} = MFA,
       Msg = io_lib:format("  Contract for function ~w:~w/~w "
@@ -348,12 +360,13 @@ get_spec_info([{attribute, Ln, spec, {Id, TypeSpec}}|Left],
 					  "in line ~w: ~s\n", [Ln, Error]))}
   end;
 get_spec_info([{attribute, _, file, {IncludeFile, _}}|Left],
-	      SpecDict, RecordsDict, ModName, _File) ->
-  get_spec_info(Left, SpecDict, RecordsDict, ModName, IncludeFile);
-get_spec_info([_Other|Left], SpecDict, RecordsDict, ModName, File) ->
-  get_spec_info(Left, SpecDict, RecordsDict, ModName, File);
-get_spec_info([], SpecDict, _RecordsDict, _ModName, _File) ->
-  {ok, SpecDict}.
+	      SpecDict, CBSpecDict, RecordsDict, ModName, _File) ->
+  get_spec_info(Left, SpecDict, CBSpecDict, RecordsDict, ModName, IncludeFile);
+get_spec_info([_Other|Left],
+	      SpecDict, CBSpecDict, RecordsDict, ModName, File) ->
+  get_spec_info(Left, SpecDict, CBSpecDict, RecordsDict, ModName, File);
+get_spec_info([], SpecDict, CBSpecDict, _RecordsDict, _ModName, _File) ->
+  {ok, SpecDict, CBSpecDict}.
 
 %% ============================================================================
 %%

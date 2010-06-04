@@ -84,7 +84,7 @@ collect_one_file_info(File, Analysis) ->
 	      Mod = list_to_atom(filename:basename(File, ".erl")),
 	      case dialyzer_utils:get_spec_info(Mod, AbstractCode, Records) of
 		{error, Reason} -> typer:compile_error([Reason]);
-		{ok, SpecInfo} -> 
+		{ok, SpecInfo, _CBSpecInfo} -> 
 		  analyze_core_tree(Core, Records, SpecInfo, Analysis, File)
 	      end
 	  end
@@ -100,7 +100,8 @@ analyze_core_tree(Core, Records, SpecInfo, Analysis, File) ->
   CS2 = dialyzer_codeserver:insert(Module, Tree, CS1),
   CS3 = dialyzer_codeserver:set_next_core_label(NewLabel, CS2),
   CS4 = dialyzer_codeserver:store_temp_records(Module, Records, CS3),
-  CS5 = dialyzer_codeserver:store_temp_contracts(Module, SpecInfo, CS4),
+  CS5 = dialyzer_codeserver:store_temp_contracts(Module, SpecInfo,
+						 dict:new(), CS4),
   Ex_Funcs = [{0,F,A} || {_,_,{F,A}} <- cerl:module_exports(Tree)],
   TmpCG = Analysis#typer_analysis.callgraph,
   CG = dialyzer_callgraph:scan_core_tree(Tree, TmpCG),
