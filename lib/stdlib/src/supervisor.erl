@@ -78,7 +78,13 @@
 -define(is_simple(State), State#state.strategy =:= simple_one_for_one).
 
 behaviour_info(callbacks) ->
-    [{init,1}];
+    [{init,1,
+      "-spec init(Args) ->
+         {'ok', {{RestartStrategy :: supervisor:strategy(),
+                  MaxR            :: non_neg_integer(),
+                  MaxT            :: non_neg_integer()}, 
+                 [ChildSpec :: supervisor:child_spec()]}}
+         | 'ignore'."}];
 behaviour_info(_Other) ->
     undefined.
 
