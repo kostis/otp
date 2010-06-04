@@ -128,16 +128,21 @@ hello(#server_hello{cipher_suite = CipherSuite, server_version = Version,
 		    session_id = SessionId, renegotiation_info = Info},
       #ssl_options{secure_renegotiate = SecureRenegotation},
       ConnectionStates0, Renegotiation) ->
-    
-    case handle_renegotiation_info(client, Info, ConnectionStates0, 
-				   Renegotiation, SecureRenegotation, []) of
-	{ok, ConnectionStates1} ->
-	    ConnectionStates =
-		hello_pending_connection_states(client, CipherSuite, Random, 
-						Compression, ConnectionStates1),
-	    {Version, SessionId, ConnectionStates};
-	#alert{} = Alert ->
-	    Alert
+
+    case ssl_record:is_acceptable_version(Version) of
+	true ->
+	    case handle_renegotiation_info(client, Info, ConnectionStates0, 
+					   Renegotiation, SecureRenegotation, []) of
+		{ok, ConnectionStates1} ->
+		    ConnectionStates =
+			hello_pending_connection_states(client, CipherSuite, Random, 
+							Compression, ConnectionStates1),
+		    {Version, SessionId, ConnectionStates};
+		#alert{} = Alert ->
+		    Alert
+	    end;
+	false ->
+	    ?ALERT_REC(?FATAL, ?PROTOCOL_VERSION)
     end;
 			       
 hello(#client_hello{client_version = ClientVersion, random = Random,

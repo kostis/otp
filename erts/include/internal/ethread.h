@@ -1,19 +1,19 @@
 /*
  * %CopyrightBegin%
- * 
- * Copyright Ericsson AB 2004-2009. All Rights Reserved.
- * 
+ *
+ * Copyright Ericsson AB 2004-2010. All Rights Reserved.
+ *
  * The contents of this file are subject to the Erlang Public License,
  * Version 1.1, (the "License"); you may not use this file except in
  * compliance with the License. You should have received a copy of the
  * Erlang Public License along with this software. If not, it can be
  * retrieved online at http://www.erlang.org/.
- * 
+ *
  * Software distributed under the License is distributed on an "AS IS"
  * basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
  * the License for the specific language governing rights and limitations
  * under the License.
- * 
+ *
  * %CopyrightEnd%
  */
 
@@ -375,6 +375,12 @@ ETHR_INLINE_FUNC_NAME_(ethr_mutex_unlock)(ethr_mutex *mtx)
 #define ETHR_HAVE_OPTIMIZED_ATOMIC_OPS 1
 #define ETHR_HAVE_OPTIMIZED_LOCKS 1
 
+#define ETHR_MEMORY_BARRIER \
+do { \
+    volatile LONG x___ = 0; \
+    (void) _InterlockedCompareExchange(&x___, (LONG) 1, (LONG) 0); \
+} while (0)
+
 typedef struct {
     volatile LONG value;
 } ethr_atomic_t;
@@ -688,25 +694,33 @@ ETHR_INLINE_FUNC_NAME_(ethr_write_lock)(ethr_rwlock_t *lock)
 #endif
 
 /* For CPU-optimised atomics, spinlocks, and rwlocks. */
-#if !defined(ETHR_DISABLE_NATIVE_IMPLS) && defined(__GNUC__)
-#  if ETHR_SIZEOF_PTR == 4
-#    if defined(__i386__)
-#      include "i386/ethread.h"
-#    elif (defined(__powerpc__) || defined(__ppc__)) && !defined(__powerpc64__)
-#      include "ppc32/ethread.h"
-#    elif defined(__sparc__)
-#      include "sparc32/ethread.h"
-#    elif defined(__tile__)
-#      include "tile/ethread.h"
+#if !defined(ETHR_DISABLE_NATIVE_IMPLS)
+#  if defined(__GNUC__)
+#    if defined(ETHR_PREFER_GCC_NATIVE_IMPLS)
+#      include "gcc/ethread.h"
 #    endif
-#  elif ETHR_SIZEOF_PTR == 8
-#    if defined(__x86_64__)
-#      include "x86_64/ethread.h"
-#    elif defined(__sparc__) && defined(__arch64__)
-#      include "sparc64/ethread.h"
+#    ifndef ETHR_HAVE_NATIVE_ATOMICS
+#      if ETHR_SIZEOF_PTR == 4
+#        if defined(__i386__)
+#          include "i386/ethread.h"
+#        elif (defined(__powerpc__)||defined(__ppc__))&&!defined(__powerpc64__)
+#          include "ppc32/ethread.h"
+#        elif defined(__sparc__)
+#          include "sparc32/ethread.h"
+#        elif defined(__tile__)
+#          include "tile/ethread.h"
+#        endif
+#      elif ETHR_SIZEOF_PTR == 8
+#        if defined(__x86_64__)
+#          include "x86_64/ethread.h"
+#        elif defined(__sparc__) && defined(__arch64__)
+#          include "sparc64/ethread.h"
+#        endif
+#      endif
+#      include "gcc/ethread.h"
 #    endif
 #  endif
-#endif /* !defined(ETHR_DISABLE_NATIVE_IMPLS) && defined(__GNUC__) */
+#endif /* !defined(ETHR_DISABLE_NATIVE_IMPLS) */
 
 #ifdef ETHR_HAVE_OPTIMIZED_ATOMIC_OPS
 #  undef ETHR_HAVE_NATIVE_ATOMICS
@@ -1124,8 +1138,14 @@ ETHR_INLINE_FUNC_NAME_(ethr_write_lock)(ethr_rwlock_t *lock)
  */
 #ifndef ETHR_HAVE_OPTIMIZED_ATOMIC_OPS
 
-#define ETHR_ATOMIC_ADDR_BITS 4
-#define ETHR_ATOMIC_ADDR_SHIFT 3
+/*
+ * ETHR_MEMORY_BARRIER orders between locked and atomic accesses only,
+ * i.e. when this atomic fallback is used a noop is sufficient.
+ */
+#define ETHR_MEMORY_BARRIER
+
+#define ETHR_ATOMIC_ADDR_BITS 10
+#define ETHR_ATOMIC_ADDR_SHIFT 6
 
 typedef struct {
     union {
