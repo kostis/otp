@@ -26,7 +26,7 @@
 -module(sys_pre_expand).
 
 %% Main entry point.
--export([module/3,format_error/1]).
+-export([module/2]).
 
 -import(ordsets, [from_list/1,add_element/2,union/2]).
 -import(lists,   [member/2,foldl/3,foldr/3]).
@@ -43,6 +43,7 @@
                  mod_imports,                   %Module Imports
                  compile=[],                    %Compile flags
                  attributes=[],                 %Attributes
+                 callbacks=[],                  %Callbacks
                  defined=[],                    %Defined functions
                  vcount=0,                      %Variable counter
                  func=[],                       %Current function
@@ -50,9 +51,7 @@
                  fcount=0,                      %Local fun count
                  fun_index=0,                   %Global index for funs
                  bitdefault,
-                 bittypes,
-		 filename,                      %Filename
-		 callbacks=[]                   %Special callback attributes
+                 bittypes
                 }).
 
 %% module(Forms, CompileOptions)
@@ -61,7 +60,7 @@
 %%  exports and imports are really ordsets!
 %%  CompileOptions is augmented with options from -compile attributes.
 
-module(Fs0, Filename, Opts0) ->
+module(Fs0, Opts0) ->
 
     %% Expand records. Normalise guard tests.
     Fs = erl_expand_records:module(Fs0, Opts0),
@@ -80,8 +79,7 @@ module(Fs0, Filename, Opts0) ->
                   compile=Opts,
                   defined=PreExp,
                   bitdefault = erl_bits:system_bitdefault(),
-                  bittypes = erl_bits:system_bittypes(),
-		  filename=Filename
+                  bittypes = erl_bits:system_bittypes()
                  },
     %% Expand the functions.
     {Tfs,St1} = forms(Fs, define_functions(Fs, St0)),
@@ -93,12 +91,9 @@ module(Fs0, Filename, Opts0) ->
               end,
     %% Generate all functions from stored info.
     {Ats,St3} = module_attrs(St2#expand{exports = Exports}),
-    case module_predef_funcs(St3) of
-	{ok,Mfs,St4} ->
-	    {ok, St4#expand.module, St4#expand.exports, Ats ++ Efs ++ Mfs,
-	     St4#expand.compile};
-	{error,_} = Error -> Error
-    end.
+    {Mfs,St4} = module_predef_funcs(St3),
+    {St4#expand.module, St4#expand.exports, Ats ++ Efs ++ Mfs,
+     St4#expand.compile}.
 
 compiler_options(Forms) ->
     lists:flatten([C || {attribute,_,compile,C} <- Forms]).
@@ -178,49 +173,53 @@ define_functions(Forms, #expand{defined=Predef}=St) ->
                end, Predef, Forms),
     St#expand{defined=ordsets:from_list(Fs)}.
 
-module_attrs(St) ->
-    Attrs = [{attribute,Line,Name,Val} || 
-	       {Name,Line,Val} <- St#expand.attributes],
-    {Callbacks,Rest} = lists:partition(fun({_,_,N,_}) -> N =:= callback end,
-					Attrs),
-    {Rest, St#expand{callbacks=Callbacks}}.
+module_attrs(#expand{attributes=Attributes}=St) ->
+    Attrs = [{attribute,Line,Name,Val} || {Name,Line,Val} <- Attributes],
+    Callbacks = [Callback || {_,_,callback,_}=Callback <- Attrs],
+    {Attrs,St#expand{callbacks=Callbacks}}.
 
 module_predef_funcs(St) ->
-    PreDef0 = [{module_info,0},{module_info,1}],
-    PreForms0 =
-	[{function,0,module_info,0,
-	  [{clause,0,[],[],
-	    [{call,0,{remote,0,{atom,0,erlang},{atom,0,get_module_info}},
-	      [{atom,0,St#expand.module}]}]}]},
-	 {function,0,module_info,1,
-	  [{clause,0,[{var,0,'X'}],[],
-	    [{call,0,{remote,0,{atom,0,erlang},{atom,0,get_module_info}},
-	      [{atom,0,St#expand.module},{var,0,'X'}]}]}]}],
-    case St#expand.callbacks of
-	[] ->
-	    PreDef = PreDef0,
-	    PreForms = PreForms0,
-	    Return = ok;	
-	Callbacks ->
-	    case lists:member({behaviour_info,1},St#expand.defined) of
-		true -> PreDef = [],
-			PreForms = [],
-			Return = {error,[{St#expand.filename,
-					  [{L,sys_pre_expand,callback} || 
-					      {_,L,_,_} <- Callbacks]}]};
-		false -> PreDef = [{behaviour_info,1}|PreDef0],
-			 PreForms = [gen_beh_info(Callbacks)|PreForms0],
-			 Return = ok
-	    end
-    end,
-    case Return of
-	'ok' ->
-	    PreExp = PreDef,
-	    {Return,PreForms,
-	     St#expand{defined=union(from_list(PreDef), St#expand.defined),
-		       exports=union(from_list(PreExp), St#expand.exports)}};
-	{'error',_} = Error -> Error
-    end.
+    {Mpf1,St1}=module_predef_func_beh_info(St),
+    {Mpf2,St2}=module_predef_funcs_mod_info(St1),
+    {Mpf1++Mpf2,St2}.
+
+module_predef_func_beh_info(#expand{callbacks=[]}=St) ->
+    {[], St};
+module_predef_func_beh_info(#expand{callbacks=Callbacks,defined=Defined,
+				    exports=Exports}=St) ->
+    PreDef=[{behaviour_info,1}],
+    PreExp=PreDef,
+    {[gen_beh_info(Callbacks)],
+     St#expand{defined=union(from_list(PreDef), Defined),
+	       exports=union(from_list(PreExp), Exports)}}.
+
+gen_beh_info(Callbacks) ->
+    List = make_list(Callbacks),
+    {function,0,behaviour_info,1,
+     [{clause,0,[{atom,0,callbacks}],[],
+       [List]}]}.
+
+make_list([]) -> {nil,0};
+make_list([{_,_,_,[{{Name,Arity},_}]}|Rest]) ->
+    {cons,0,
+     {tuple,0,
+      [{atom,0,Name},
+       {integer,0,Arity}]},
+     make_list(Rest)}.
+
+module_predef_funcs_mod_info(St) ->
+    PreDef = [{module_info,0},{module_info,1}],
+    PreExp = PreDef,
+    {[{function,0,module_info,0,
+       [{clause,0,[],[],
+        [{call,0,{remote,0,{atom,0,erlang},{atom,0,get_module_info}},
+          [{atom,0,St#expand.module}]}]}]},
+      {function,0,module_info,1,
+       [{clause,0,[{var,0,'X'}],[],
+        [{call,0,{remote,0,{atom,0,erlang},{atom,0,get_module_info}},
+          [{atom,0,St#expand.module},{var,0,'X'}]}]}]}],
+     St#expand{defined=union(from_list(PreDef), St#expand.defined),
+               exports=union(from_list(PreExp), St#expand.exports)}}.
 
 %% forms(Forms, State) ->
 %%      {TransformedForms,State'}
@@ -718,22 +717,3 @@ imported(F, A, St) ->
         {ok,Mod} -> {yes,Mod};
         error -> no
     end.
-
-format_error(callback) ->
-    "cannot define callback attrs when behaviour_info is defined".
-
-gen_beh_info(Callbacks) ->
-    List = make_list(Callbacks),
-    {function,0,behaviour_info,1,
-     [{clause,0,[{atom,0,callbacks}],[],
-       [List]}]}.
-
-make_list([]) -> {nil,0};
-make_list([{_,_,_,[{{Name,Arity},_}]}=Form|Rest]) ->
-    {cons,0,
-     {tuple,0,
-      [{atom,0,Name},
-       {integer,0,Arity},
-       {string,0,lists:flatten(erl_pp:form(Form))}]},
-     make_list(Rest)}.
-

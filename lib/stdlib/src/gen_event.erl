@@ -55,26 +55,6 @@
 %%%  API
 %%%=========================================================================
 
--callback init(InitArgs) -> {ok, State} | {ok, State, hibernate}.
--callback handle_event(Event, State) ->
-    {ok, NewState} | {ok, NewState, hibernate} |
-    {swap_handler, Args1, NewState, Handler2 :: atom() | {atom(), Id} , Args2} |
-    remove_handler.
--callback handle_call(Request, State) ->
-    {ok, Reply, NewState} | {ok, Reply, NewState, hibernate} |
-    {swap_handler, Reply, Args1, NewState, 
-     Handler2 ::  atom() | {atom(), Id}, Args2} |
-    {remove_handler, Reply}.
--callback handle_info(Info, State) ->
-    {ok, NewState} | {ok, NewState, hibernate} |
-    {swap_handler, Args1, NewState, Handler2 ::  atom() | {atom(), Id}, Args2} |
-    remove_handler.
--callback terminate(Args | {stop, Reason} | stop | remove_handler | 
-		    {error,{'EXIT',Reason}} | {error,Term}, State) -> 
-    term().
--callback code_change(OldVsn :: Vsn | {down, Vsn}, State, Extra) -> 
-    {ok, NewState}.
-
 %% gen_event:start(Handler) -> {ok, Pid} | {error, What}
 %%   gen_event:add_handler(Handler, Mod, Args) -> ok | Other
 %%      gen_event:notify(Handler, Event) -> ok
@@ -85,41 +65,36 @@
 %%   gen_event:which_handler(Handler) -> [Mod]
 %% gen_event:stop(Handler) -> ok 
 
-
-%% handlers must export
-%% Mod:init(Args) -> {ok, State} | Other
-%% Mod:handle_event(Event, State) -> 
-%%    {ok, State'} | remove_handler | {swap_handler,Args1,State1,Mod2,Args2}
-%% Mod:handle_info(Info, State) ->
-%%    {ok, State'} | remove_handler | {swap_handler,Args1,State1,Mod2,Args2}
-%% Mod:handle_call(Query, State) -> 
-%%    {ok, Reply, State'} | {remove_handler, Reply} | 
-%%    {swap_handler, Reply, Args1,State1,Mod2,Args2}
-%% Mod:terminate(Args, State) -> Val
-
-
-%% add_handler(H, Mod, Args) -> ok | Other
-%%    Mod:init(Args) -> {ok, State} | Other
-
-%% delete_handler(H, Mod, Args) -> Val
-%%    Mod:terminate(Args, State) -> Val
-
-%% notify(H, Event) 
-%%    Mod:handle_event(Event, State) ->
-%%         {ok, State1}
-%%         remove_handler
-%%               Mod:terminate(remove_handler, State) is called
-%%               the return value is ignored
-%%         {swap_handler, Args1, State1, Mod2, Args2}
-%%               State2 = Mod:terminate(Args1, State1) is called
-%%               the return value is chained into the new module and
-%%               Mod2:init({Args2, State2}) is called
-%%         Other
-%%               Mod:terminate({error, Other}, State) is called
-%%               The return value is ignored
-%% call(H, Mod, Query) -> Val
-%% call(H, Mod, Query, Timeout) -> Val
-%%      Mod:handle_call(Query, State) -> as above
+-callback init(InitArgs :: term()) -> 
+    {ok, State :: term()} | 
+    {ok, State :: term(), hibernate}.
+-callback handle_event(Event :: term(), State :: term()) ->
+    {ok, NewState :: term()} | 
+    {ok, NewState :: term(), hibernate} |
+    {swap_handler, Args1 :: term(), NewState :: term(),
+     Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
+    remove_handler.
+-callback handle_call(Request :: term(), State :: term()) ->
+    {ok, Reply :: term(), NewState :: term()} | 
+    {ok, Reply :: term(), NewState :: term(), hibernate} |
+    {swap_handler, Reply :: term(), Args1 :: term(), NewState :: term(), 
+     Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
+    {remove_handler, Reply :: term()}.
+-callback handle_info(Info :: term(), State :: term()) ->
+    {ok, NewState :: term()} |
+    {ok, NewState :: term(), hibernate} |
+    {swap_handler, Args1 :: term(), NewState :: term(),
+     Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
+    remove_handler.
+-callback terminate(Args :: (term() | {stop, Reason :: term()} | 
+                             stop | remove_handler |
+                             {error, {'EXIT', Reason :: term()}} | 
+                             {error, term()}), 
+                    State :: term()) -> 
+    term().
+-callback code_change(OldVsn :: (term() | {down, term()}), 
+                      State :: term(), Extra :: term()) -> 
+    {ok, NewState :: term()}.
 
 %%---------------------------------------------------------------------------
 

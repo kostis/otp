@@ -126,36 +126,38 @@
 %%% Interface functions.
 %%% ---------------------------------------------------
 
--callback init(Args) ->
-    {ok, StateName :: atom(), StateData} |
-    {ok, StateName :: atom(), StateData, timeout()} |
-    {ok, StateName :: atom(), StateData, hibernate} | 
-    {stop, Reason} | ignore.
--callback handle_event(Event, StateName :: atom(), StateData) -> 
-    {next_state, NextStateName :: atom(), NewStateData} |
-    {next_state, NextStateName :: atom(), NewStateData, timeout()} |
-    {next_state, NextStateName :: atom(), NewStateData, hibernate} |
-    {stop, Reason, NewStateData}.
--callback handle_sync_event(Event, From :: {pid(), Tag}, StateName :: atom(),
-			    StateData) ->
-    {reply, Reply, NextStateName :: atom(), NewStateData} |
-    {reply, Reply, NextStateName :: atom(), NewStateData, timeout()} |
-    {reply, Reply, NextStateName :: atom(), NewStateData, hibernate} |
-    {next_state, NextStateName :: atom(), NewStateData} |
-    {next_state, NextStateName :: atom(), NewStateData, timeout()} |
-    {next_state, NextStateName :: atom(), NewStateData, hibernate} |
-    {stop, Reason, Reply, NewStateData} | {stop, Reason, NewStateData}.
--callback handle_info(Info, StateName :: atom(), StateData) ->
-    {next_state, NextStateName :: atom(), NewStateData} |
-    {next_state, NextStateName :: atom(), NewStateData, timeout()} |
-    {next_state, NextStateName :: atom(), NewStateData, hibernate} |
-    {stop, Reason :: normal | term(), NewStateData}.
+-callback init(Args :: term()) ->
+    {ok, StateName :: atom(), StateData :: term()} |
+    {ok, StateName :: atom(), StateData :: term(), timeout() | hibernate} |
+    {stop, Reason :: term()} | ignore.
+-callback handle_event(Event :: term(), StateName :: atom(),
+                       StateData :: term()) -> 
+    {next_state, NextStateName :: atom(), NewStateData :: term()} |
+    {next_state, NextStateName :: atom(), NewStateData :: term(),
+     timeout() | hibernate} |
+    {stop, Reason :: term(), NewStateData :: term()}.
+-callback handle_sync_event(Event :: term(), From :: {pid(), Tag :: term()},
+                            StateName :: atom(), StateData :: term()) ->
+    {reply, Reply :: term(), NextStateName :: atom(), NewStateData :: term()} |
+    {reply, Reply :: term(), NextStateName :: atom(), NewStateData :: term(), 
+     timeout() | hibernate} |
+    {next_state, NextStateName :: atom(), NewStateData :: term()} |
+    {next_state, NextStateName :: atom(), NewStateData :: term(), 
+     timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewStateData :: term()} |
+    {stop, Reason :: term(), NewStateData :: term()}.
+-callback handle_info(Info :: term(), StateName :: atom(),
+                      StateData :: term()) ->
+    {next_state, NextStateName :: atom(), NewStateData :: term()} |
+    {next_state, NextStateName :: atom(), NewStateData :: term(), 
+     timeout() | hibernate} |
+    {stop, Reason :: normal | term(), NewStateData :: term()}.
 -callback terminate(Reason :: normal | shutdown | {shutdown, term()} 
-		    | term(), StateName :: atom(), StateData) -> 
+		    | term(), StateName :: atom(), StateData :: term()) -> 
     term().
--callback code_change(OldVsn :: Vsn | {down, Vsn}, StateName :: atom(), 
-		      StateData, Extra) -> 
-    {ok, NextStateName :: atom(), NewStateData}.
+-callback code_change(OldVsn :: term() | {down, term()}, StateName :: atom(), 
+		      StateData :: term(), Extra :: term()) -> 
+    {ok, NextStateName :: atom(), NewStateData :: term()}.
 
 %%% ---------------------------------------------------
 %%% Starts a generic state machine.

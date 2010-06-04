@@ -109,26 +109,32 @@
 %%%  API
 %%%=========================================================================
 
--callback init(Args) ->
-    {ok, State} | {ok, State, timeout()} | {ok, State, hibernate} |
-    {stop, Reason} | ignore.
--callback handle_call(Request, From :: {pid(), Tag}, State) ->
-    {reply, Reply, NewState} | {reply, Reply, NewState, timeout()} |
-    {reply, Reply, NewState, hibernate} | {noreply, NewState} |
-    {noreply, NewState, timeout()} | {noreply, NewState, hibernate} |
-    {stop, Reason, Reply, NewState} | {stop, Reason, NewState}.
--callback handle_cast(Request, State) ->
-    {noreply, NewState} | {noreply, NewState, timeout()} |
-    {noreply, NewState, hibernate} |
-    {stop, Reason, NewState}.
--callback handle_info(Info :: timeout() | term(), State) ->
-    {noreply, NewState} | {noreply, NewState, timeout()} |
-    {noreply, NewState, hibernate} |
-    {stop, Reason, NewState}.
--callback terminate(Reason :: normal | shutdown | {shutdown, term()} | 
-		    term(), State) -> term().
--callback code_change(OldVsn :: Vsn | {down, Vsn}, State, Extra) ->
-    {ok, NewState}.
+-callback init(Args :: term()) ->
+    {ok, State :: term()} | {ok, State :: term(), timeout() | hibernate} |
+    {stop, Reason :: term()} | ignore.
+-callback handle_call(Request :: term(), From :: {pid(), Tag :: term()}, 
+                      State :: term()) ->
+    {reply, Reply :: term(), NewState :: term()} | 
+    {reply, Reply :: term(), NewState :: term(), timeout() | hibernate} |
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback handle_cast(Request :: term(), State :: term()) ->
+    {noreply, NewState :: term} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback handle_info(Info :: timeout() | term(), State :: term()) ->
+    {noreply, NewState :: term()} | 
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback terminate(Reason :: (normal | shutdown | {shutdown, term()} |
+                               term()), 
+                    State :: term()) -> 
+    term().
+-callback code_change(OldVsn :: (term() | {down, term()}), State :: term(), 
+                      Extra :: term()) ->
+    {ok, NewState :: term()}.
 
 %%%  -----------------------------------------------------------------
 %%% Starts a generic server.

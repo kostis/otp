@@ -900,14 +900,10 @@ core_lint_module(St) ->
 %% expand_module(State) -> State'
 %%  Do the common preprocessing of the input forms.
 
-expand_module(#compile{code=Code,options=Opts0,ifile=Filename}=St0) ->
-    case sys_pre_expand:module(Code, Filename, Opts0) of
-	{ok,Mod,Exp,Forms,Opts1} ->
-	    Opts = expand_opts(Opts1),
-	    {ok,St0#compile{module=Mod,options=Opts,code={Mod,Exp,Forms}}};
-	{error,Es} ->
-	    {error,St0#compile{errors=St0#compile.errors ++ Es}}
-    end.
+expand_module(#compile{code=Code,options=Opts0}=St0) ->
+    {Mod,Exp,Forms,Opts1} = sys_pre_expand:module(Code, Opts0),
+    Opts = expand_opts(Opts1),
+    {ok,St0#compile{module=Mod,options=Opts,code={Mod,Exp,Forms}}}.
 
 core_module(#compile{code=Code0,options=Opts}=St) ->
     {ok,Code,Ws} = v3_core:module(Code0, Opts),
@@ -1309,6 +1305,8 @@ restore_expand_module([{attribute,Line,opaque,[Type]}|Fs]) ->
     [{attribute,Line,opaque,Type}|restore_expand_module(Fs)];
 restore_expand_module([{attribute,Line,spec,[Arg]}|Fs]) ->
     [{attribute,Line,spec,Arg}|restore_expand_module(Fs)];
+restore_expand_module([{attribute,Line,callback,[Arg]}|Fs]) ->
+    [{attribute,Line,callback,Arg}|restore_expand_module(Fs)];
 restore_expand_module([F|Fs]) ->
     [F|restore_expand_module(Fs)];
 restore_expand_module([]) -> [].
