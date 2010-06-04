@@ -75,9 +75,11 @@ extract(#typer_analysis{macros = Macros, includes = Includes,
 	      {ok, RecDict} ->
 		Mod = list_to_atom(filename:basename(File, ".erl")),
 		case dialyzer_utils:get_spec_info(Mod, AbstractCode, RecDict) of
-		  {ok, SpecDict} ->
-		    CS1 = dialyzer_codeserver:store_temp_records(Mod, RecDict, CS),
-		    dialyzer_codeserver:store_temp_contracts(Mod, SpecDict, CS1);
+		  {ok, SpecDict, CBSpecDict} ->
+		    CS1 =
+		      dialyzer_codeserver:store_temp_records(Mod, RecDict, CS),
+		    dialyzer_codeserver:store_temp_contracts(Mod, SpecDict,
+							     CBSpecDict, CS1);
 		  {error, Reason} -> compile_error([Reason])
 		end;
 	      {error, Reason} -> compile_error([Reason])

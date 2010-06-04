@@ -30,8 +30,11 @@
 
 -module(dialyzer_behaviours).
 
--export([check_callbacks/4, get_behaviours/2, get_behaviour_apis/1,
-	 translate_behaviour_api_call/5, translatable_behaviours/1,
+-export([check_callbacks/4,
+	 get_behaviour_apis/1,
+	 scan_behaviours/3,
+	 translatable_behaviours/1,
+	 translate_behaviour_api_call/5,
 	 translate_callgraph/3]).
 
 %%--------------------------------------------------------------------
@@ -45,11 +48,13 @@
 		filename   :: string(),
 		behlines   :: [{atom(), number()}]}).
 
--spec get_behaviours([module()], dialyzer_codeserver:codeserver()) ->
-  {[atom()], [atom()]}.
+%%--------------------------------------------------------------------
 
-get_behaviours(Modules, Codeserver) ->
-  get_behaviours(Modules, Codeserver, [], []).
+-spec scan_behaviours([module()], dialyzer_codeserver:codeserver(), 
+		      dialyzer_plt:plt()) -> {[atom()], [atom()]}.
+
+scan_behaviours(Modules, Codeserver, Plt) ->
+  scan_behaviours(Modules, Codeserver, Plt, [], []).
 
 -spec check_callbacks(module(), [{cerl:cerl(), cerl:cerl()}],
 		      dialyzer_plt:plt(),
@@ -65,7 +70,7 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
 	  File = get_file(cerl:get_ann(Code)),
 	  State = #state{plt = Plt, codeserver = Codeserver, filename = File,
 			 behlines = BehLines},
-	  Warnings = get_warnings(Module, Behaviours, State),
+	  Warnings = get_warnings(Module, Behaviours, Plt),
 	  [add_tag_file_line(Module, W, State) || W <- Warnings]
   end.
 
@@ -128,104 +133,54 @@ get_behaviours(Attrs) ->
   BehLines = [{B,L} || {L1,L} <- BehaviourListsAndLine, B <- L1],
   {Behaviours, BehLines}.
 
-get_warnings(Module, Behaviours, State) ->
-  get_warnings(Module, Behaviours, State, []).
+get_warnings(Module, Behaviours, Plt) ->
+  get_warnings(Module, Behaviours, Plt, []).
 
 get_warnings(_, [], _, Acc) ->
   Acc;
-get_warnings(Module, [Behaviour|Rest], State, Acc) ->
-  Warnings = check_behaviour(Module, Behaviour, State),
-  get_warnings(Module, Rest, State, Warnings ++ Acc).
+get_warnings(Module, [Behaviour|Rest], Plt, Acc) ->
+  Warnings = check_behaviour(Module, Behaviour, Plt),
+  get_warnings(Module, Rest, Plt, Warnings ++ Acc).
 
-check_behaviour(Module, Behaviour, State) ->
-  try
-    Callbacks = Behaviour:behaviour_info(callbacks),
-    Fun = fun({_,_,_}) -> true;
-	     (_)       -> false
-	  end,
-    case lists:any(Fun, Callbacks) of
-      true ->  check_all_callbacks(Module, Behaviour, Callbacks, State);
-      false -> []
-    end
-  catch
-    _:_ -> []
+check_behaviour(Module, Behaviour, Plt) ->
+  Callbacks = dialyzer_plt:get_callbacks(Behaviour, Plt),
+  case Callbacks of
+    [] -> [];
+     _ -> check_all_callbacks(Module, Behaviour, Callbacks, Plt)
   end.
 
 check_all_callbacks(Module, Behaviour, Callbacks, State) ->
   check_all_callbacks(Module, Behaviour, Callbacks, State, []).
 
-check_all_callbacks(_Module, _Behaviour, [], _State, Acc) ->
-  Acc;
-check_all_callbacks(Module, Behaviour, [{Fun, Arity, Spec}|Rest], State, Acc) ->
-  Records = dialyzer_codeserver:get_records(State#state.codeserver),
-  case parse_spec(Spec, Records) of
-    {ok, Fun, Type} ->
-      RetType = erl_types:t_fun_range(Type),
-      ArgTypes = erl_types:t_fun_args(Type),
-      Warns = check_callback(Module, Behaviour, Fun, Arity, RetType,
-			     ArgTypes, State#state.plt);
-    Else ->
-      Warns = [{invalid_spec, [Behaviour, Fun, Arity, reason_spec_error(Else)]}]
-  end,
-  check_all_callbacks(Module, Behaviour, Rest, State, Warns ++ Acc);
-check_all_callbacks(Module, Behaviour, [{Fun, Arity}|Rest], State, Acc) ->
-  Warns = {spec_missing, [Behaviour, Fun, Arity]},
-  check_all_callbacks(Module, Behaviour, Rest, State, [Warns|Acc]).
+check_all_callbacks(Module, Behaviour, [Callback|Rest], Plt, Acc) ->
+  Warns = check_callback(Module, Behaviour, Callback, Plt),
+  check_all_callbacks(Module, Behaviour, Rest, Plt, Warns ++ Acc);
+check_all_callbacks(_Module, _Behaviour, [], _Plt, Acc) ->
+  Acc.
 
-parse_spec(String, Records) ->
-  case erl_scan:string(String) of
-    {ok, Tokens, _} ->
-      case erl_parse:parse(Tokens) of
-	{ok, Form} ->
-	  case Form of
-	    {attribute, _, 'spec', {{Fun, _}, [TypeForm|_Constraint]}} ->
-	      MaybeRemoteType = erl_types:t_from_form(TypeForm),
-	      try
-		Type = erl_types:t_solve_remote(MaybeRemoteType, Records),
-		{ok, Fun, Type}
-	      catch
-		throw:{error,Msg} -> {spec_remote_error, Msg}
-	      end;
-	    _Other -> not_a_spec
-	  end;
-	{error, {Line, _, Msg}} -> {spec_parser_error, Line, Msg}
+check_callback(Module, Behaviour, {_M, F, A} = Callback, Plt) ->
+  case dialyzer_plt:lookup_callback_contract(Plt, Callback) of
+    {value, Contract} ->
+      ContractReturn = dialyzer_contracts:get_contract_return(Contract),
+      ContractArgs = dialyzer_contracts:get_contract_args(Contract),
+      case dialyzer_plt:lookup(Plt, {Module, F, A}) of
+	{value, {InferredReturn, InferredArgs}} ->
+	  Warn1 = case unifiable(InferredReturn, ContractReturn) of
+		    [] -> [];
+		    Offenders ->
+		      [{callback_type_mismatch,
+			[Behaviour, F, A, erl_types:t_sup(Offenders)]}]
+		  end,
+	  ZipArgs = lists:zip3(lists:seq(1, A), InferredArgs, ContractArgs),
+	  Warn2 = [{callback_arg_type_mismatch,
+		    [Behaviour, F, A, N,
+		     erl_types:t_sup(Offenders)]} ||
+		    {Offenders, N} <- [check_callback_1(V) || V <- ZipArgs],
+		    Offenders =/= []],
+	  Warn1 ++ Warn2;
+	_ -> [{callback_missing, [Behaviour, F, A]}]
       end;
-    _Other ->
-      lexer_error
-  end.
-
-reason_spec_error({spec_remote_error, Msg}) ->
-  io_lib:format("Remote type solver error: ~s. Make sure the behaviour source is included in the analysis or the plt",[Msg]);
-reason_spec_error(not_a_spec) ->
-  "This is not a spec";
-reason_spec_error({spec_parser_error, Line, Msg}) ->
-  io_lib:format("~s line of the spec: ~s", [ordinal(Line),Msg]);
-reason_spec_error(lexer_error) ->
-  "Lexical error".
-
-ordinal(1) -> "1st";
-ordinal(2) -> "2nd";
-ordinal(3) -> "3rd";
-ordinal(N) when is_integer(N) -> io_lib:format("~wth",[N]).
-
-check_callback(Module, Behaviour, Fun, Arity, XRetType, XArgTypes, Plt) ->
-  LookupType = dialyzer_plt:lookup(Plt, {Module, Fun, Arity}),
-  case LookupType of
-    {value, {Type,Args}} ->
-      Warn1 = case unifiable(Type, XRetType) of
-		[] -> [];
-		Offenders ->
-		  [{callback_type_mismatch,
-		   [Behaviour, Fun, Arity, erl_types:t_sup(Offenders)]}]
-	      end,
-      ZipArgs = lists:zip3(lists:seq(1, Arity), Args, XArgTypes),
-      Warn2 = [{callback_arg_type_mismatch,
-		[Behaviour, Fun, Arity, N,
-		 erl_types:t_sup(Offenders)]} ||
-		{Offenders, N} <- [check_callback_1(V) || V <- ZipArgs],
-		Offenders =/= []],
-      Warn1 ++ Warn2;
-    _ -> [{callback_missing, [Behaviour, Fun, Arity]}]
+    _ -> []
   end.
 
 check_callback_1({N, T1, T2}) ->
@@ -262,31 +217,41 @@ get_file([_|Tail]) -> get_file(Tail).
 
 %%------------------------------------------------------------------------------
 
-get_behaviours([], _Codeserver, KnownAcc, UnknownAcc) ->
+scan_behaviours([], _Codeserver, _Plt, KnownAcc, UnknownAcc) ->
   {KnownAcc, UnknownAcc};
-get_behaviours([M|Rest], Codeserver, KnownAcc, UnknownAcc) ->
+scan_behaviours([M|Rest], Codeserver, Plt, KnownAcc, UnknownAcc) ->
   Tree = dialyzer_codeserver:lookup_mod_code(M, Codeserver),
   Attrs = cerl:module_attrs(Tree),
   {Behaviours, _BehLines} = get_behaviours(Attrs),
-  {Known, Unknown} = call_behaviours(Behaviours),
-  get_behaviours(Rest, Codeserver, Known ++ KnownAcc, Unknown ++ UnknownAcc).
+  {Known, Unknown} = find_behaviours(Behaviours, Codeserver, Plt),
+  scan_behaviours(Rest, Codeserver, Plt,
+		  Known ++ KnownAcc, Unknown ++ UnknownAcc).
 
-call_behaviours(Behaviours) ->
-  call_behaviours(Behaviours, [], []).
-call_behaviours([], KnownAcc, UnknownAcc) ->
+find_behaviours(Behaviours, Codeserver, Plt) ->
+  find_behaviours(Behaviours, Codeserver, Plt, [], []).
+
+find_behaviours([], _Codeserver, _Plt, KnownAcc, UnknownAcc) ->
   {lists:reverse(KnownAcc), lists:reverse(UnknownAcc)};
-call_behaviours([Behaviour|Rest], KnownAcc, UnknownAcc) ->
-  try
-    Callbacks = Behaviour:behaviour_info(callbacks),
-    Fun = fun({_,_,_}) -> true;
-	     (_)       -> false
-	  end,
-    case lists:any(Fun, Callbacks) of
-      false -> call_behaviours(Rest, KnownAcc, [Behaviour | UnknownAcc]);
-      true  -> call_behaviours(Rest, [Behaviour | KnownAcc], UnknownAcc)
-    end
-  catch
-    _:_ -> call_behaviours(Rest, KnownAcc, [Behaviour | UnknownAcc])
+find_behaviours([Behaviour|Rest], Codeserver, Plt, KnownAcc, UnknownAcc) ->
+  Found = 
+    case dialyzer_plt:get_callbacks(Behaviour, Plt) of
+      [_|_] -> true;
+      [] ->
+	{_, CBContDict} = dialyzer_codeserver:get_temp_contracts(Codeserver),
+	case dict:find(Behaviour, CBContDict) of
+	  error -> false;
+	  {ok, Dict} ->
+	    case dict:to_list(Dict) of
+	      [_|_] -> true;
+	      []    -> false
+	    end
+	end
+    end,
+  case Found of
+      false -> find_behaviours(Rest, Codeserver, Plt, 
+			       KnownAcc, [Behaviour | UnknownAcc]);
+      true  -> find_behaviours(Rest, Codeserver, Plt, 
+			       [Behaviour | KnownAcc], UnknownAcc)
   end.
 
 %-------------------------------------------------------------------------------

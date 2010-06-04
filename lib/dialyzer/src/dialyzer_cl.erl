@@ -668,8 +668,7 @@ print_unknown_behaviours(#cl_state{output = Output,
       end,
       case Format of
 	formatted ->
-	  io:put_chars(Output, "Unknown behaviours (behaviour_info(callbacks)"
-		       " does not return any specs):\n"),
+	  io:put_chars(Output, "Unknown behaviours:\n"),
 	  do_print_unknown_behaviours(Output, Behaviours, "  ");
 	raw ->
 	  io:put_chars(Output, "%% Unknown behaviours:\n"),

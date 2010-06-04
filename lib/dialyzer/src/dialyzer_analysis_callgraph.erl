@@ -123,8 +123,7 @@ analysis_start(Parent, Analysis) ->
 			  parent = Parent,
 			  start_from = Analysis#analysis.start_from,
 			  use_contracts = Analysis#analysis.use_contracts,
-			  behaviours = {Analysis#analysis.behaviours_chk,
-					    []}
+			  behaviours = {Analysis#analysis.behaviours_chk,[]}
 			 },
   Files = ordsets:from_list(Analysis#analysis.files),
   {Callgraph, NoWarn, TmpCServer0} = compile_and_store(Files, State),
@@ -134,20 +133,24 @@ analysis_start(Parent, Analysis) ->
       NewRecords = dialyzer_codeserver:get_temp_records(TmpCServer0),
       OldRecords = dialyzer_plt:get_types(State#analysis_state.plt),
       MergedRecords = dialyzer_utils:merge_records(NewRecords, OldRecords),
-      TmpCServer1 = dialyzer_codeserver:set_temp_records(MergedRecords, TmpCServer0),
+      TmpCServer1 =
+	dialyzer_codeserver:set_temp_records(MergedRecords, TmpCServer0),
       TmpCServer2 = dialyzer_utils:process_record_remote_types(TmpCServer1),
       dialyzer_contracts:process_contract_remote_types(TmpCServer2)
     catch
       throw:{error, _ErrorMsg} = Error -> exit(Error)
     end,
-  NewPlt = dialyzer_plt:insert_types(Plt, dialyzer_codeserver:get_records(NewCServer)),
-  State0 = State#analysis_state{plt = NewPlt},
+  NewPlt = 
+    dialyzer_plt:insert_types(Plt, dialyzer_codeserver:get_records(NewCServer)),
+  CBContracts = dialyzer_codeserver:get_callback_contracts(NewCServer),
+  NewPlt1 = dialyzer_plt:insert_callback_contracts(NewPlt, CBContracts),
+  State0 = State#analysis_state{plt = NewPlt1},
   dump_callgraph(Callgraph, State0, Analysis),
   State1 = State0#analysis_state{codeserver = NewCServer},
   State2 = State1#analysis_state{no_warn_unused = NoWarn},
   %% Remove all old versions of the files being analyzed
   AllNodes = dialyzer_callgraph:all_nodes(Callgraph),
-  Plt1 = dialyzer_plt:delete_list(NewPlt, AllNodes),
+  Plt1 = dialyzer_plt:delete_list(NewPlt1, AllNodes),
   Exports = dialyzer_codeserver:get_exports(NewCServer),
   NewCallgraph =
     case Analysis#analysis.race_detection of
@@ -197,6 +200,7 @@ compile_and_store(Files, #analysis_state{codeserver = CServer,
 					 parent = Parent,
 					 use_contracts = UseContracts,
 					 start_from = StartFrom,
+					 plt = Plt,
 					 behaviours = {BehChk, _}
 					} = State) ->
   send_log(Parent, "Reading files and computing callgraph... "),
@@ -247,7 +251,7 @@ compile_and_store(Files, #analysis_state{codeserver = CServer,
   Msg1 = io_lib:format("done in ~.2f secs\nRemoving edges... ", [(T2-T1)/1000]),
   send_log(Parent, Msg1),
   {KnownBehaviours, UnknownBehaviours} =
-    dialyzer_behaviours:get_behaviours(Modules, NewCServer),
+    dialyzer_behaviours:scan_behaviours(Modules, NewCServer, Plt),
   if UnknownBehaviours =:= [] -> ok;
      true -> send_unknown_behaviours(Parent, UnknownBehaviours)
   end,
@@ -336,9 +340,10 @@ compile_common(File, AbstrCode, CompOpts, Callgraph, CServer, UseContracts) ->
 	    true ->
 	      case dialyzer_utils:get_spec_info(Mod, AbstrCode, RecInfo) of
 		{error, _} = Error -> Error;
-		{ok, SpecInfo} ->
+		{ok, SpecInfo, CallbackInfo} ->
 		  CServer2 = 
 		    dialyzer_codeserver:store_temp_contracts(Mod, SpecInfo,
+							     CallbackInfo,
 							     CServer1),
 		  store_core(Mod, Core, NoWarn, Callgraph, CServer2)
 	      end;

@@ -139,7 +139,8 @@ sequence([H|T], Delimiter) -> H ++ Delimiter ++ sequence(T, Delimiter).
 	  dialyzer_codeserver:codeserver().
 
 process_contract_remote_types(CodeServer) ->
-  TmpContractDict = dialyzer_codeserver:get_temp_contracts(CodeServer),
+  {TmpContractDict, TmpCbContractDict} =
+    dialyzer_codeserver:get_temp_contracts(CodeServer),  
   RecordDict = dialyzer_codeserver:get_records(CodeServer),
   ContractFun =
     fun({_M, _F, _A}, {File, #tmp_contract{contract_funs = CFuns, forms = Forms}}) ->
@@ -152,7 +153,9 @@ process_contract_remote_types(CodeServer) ->
 	dict:map(ContractFun, ContractDict)
     end,
   NewContractDict = dict:map(ModuleFun, TmpContractDict),
-  dialyzer_codeserver:finalize_contracts(NewContractDict, CodeServer).
+  NewCbContractDict = dict:map(ModuleFun, TmpCbContractDict),
+  dialyzer_codeserver:finalize_contracts(NewContractDict, NewCbContractDict,
+					 CodeServer).
   
 -spec check_contracts([{mfa(), file_contract()}],
 		      dialyzer_callgraph:callgraph(), dict()) -> plt_contracts().
@@ -248,13 +251,15 @@ check_extraneous_1(Contract, SuccType) ->
   CRngs = erl_types:t_elements(erl_types:t_fun_range(Contract)),
   STRng = erl_types:t_fun_range(SuccType),
   %% io:format("CR = ~p\nSR = ~p\n", [CRngs, STRng]),
-  case [CR || CR <- CRngs, erl_types:t_is_none(erl_types:t_inf(CR, STRng, opaque))] of
+  case [CR || CR <- CRngs, 
+	      erl_types:t_is_none(erl_types:t_inf(CR, STRng, opaque))] of
     [] -> ok;
     CRs -> {error, {extra_range, erl_types:t_sup(CRs), STRng}}
   end.
 
 %% This is the heart of the "range function"
--spec process_contracts([contract_pair()], [erl_types:erl_type()]) -> erl_types:erl_type().
+-spec process_contracts([contract_pair()], [erl_types:erl_type()]) -> 
+    erl_types:erl_type().
 
 process_contracts(OverContracts, Args) ->
   process_contracts(OverContracts, Args, erl_types:t_none()).
@@ -269,7 +274,8 @@ process_contracts([OverContract|Left], Args, AccRange) ->
 process_contracts([], _Args, AccRange) ->
   AccRange.
 
--spec process_contract(contract_pair(), [erl_types:erl_type()]) -> 'error' | {'ok', erl_types:erl_type()}.
+-spec process_contract(contract_pair(), [erl_types:erl_type()]) ->
+    'error' | {'ok', erl_types:erl_type()}.
 
 process_contract({Contract, Constraints}, CallTypes0) ->
   CallTypesFun = erl_types:t_fun(CallTypes0, erl_types:t_any()),
@@ -306,7 +312,8 @@ solve_constraints(Contract, Call, Constraints) ->
   %%  erl_types:t_assign_variables_to_subtype(Contract, Inf).
 
 %% Checks the contracts for functions that are not implemented
--spec contracts_without_fun(dict(), [_], dialyzer_callgraph:callgraph()) -> [dial_warning()].
+-spec contracts_without_fun(dict(), [_], dialyzer_callgraph:callgraph()) ->
+    [dial_warning()].
 
 contracts_without_fun(Contracts, AllFuns0, Callgraph) ->
   AllFuns1 = [{dialyzer_callgraph:lookup_name(Label, Callgraph), Arity} 

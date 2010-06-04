@@ -28,8 +28,9 @@
 -module(dialyzer_codeserver).
 
 -export([delete/1,
-	 finalize_contracts/2,
+	 finalize_contracts/3,
 	 finalize_records/2,
+	 get_callback_contracts/1,
 	 get_contracts/1,
 	 get_exports/1, 
 	 get_records/1,
@@ -50,19 +51,21 @@
 	 store_records/3,
 	 store_temp_records/3,
 	 store_contracts/3,
-	 store_temp_contracts/3]).
+	 store_temp_contracts/4]).
 
 -include("dialyzer.hrl").
 
 %%--------------------------------------------------------------------
 
--record(codeserver, {table_pid		          :: pid(),
-		     exports         = sets:new() :: set(), % set(mfa())
-		     next_core_label = 0          :: label(),
-		     records         = dict:new() :: dict(),
-		     temp_records    = dict:new() :: dict(),
-		     contracts       = dict:new() :: dict(),
-		     temp_contracts  = dict:new() :: dict()}).
+-record(codeserver, {table_pid		             :: pid(),
+		     exports            = sets:new() :: set(), % set(mfa())
+		     next_core_label    = 0          :: label(),
+		     records            = dict:new() :: dict(),
+		     temp_records       = dict:new() :: dict(),
+		     contracts          = dict:new() :: dict(),
+		     temp_contracts     = dict:new() :: dict(),
+		     callback_contracts = dict:new() :: dict(),
+		     temp_cb_contracts  = dict:new() :: dict()}).
 
 -opaque codeserver() :: #codeserver{}.
 
@@ -144,6 +147,11 @@ lookup_mod_records(Mod, #codeserver{records = RecDict})
 get_records(#codeserver{records = RecDict}) ->
   RecDict.
 
+-spec get_callback_contracts(codeserver()) -> dict().
+
+get_callback_contracts(#codeserver{callback_contracts = CBContracts}) ->
+  CBContracts.
+
 -spec store_temp_records(module(), dict(), codeserver()) -> codeserver().
 
 store_temp_records(Mod, Dict, #codeserver{temp_records = TempRecDict} = CS)
@@ -199,24 +207,29 @@ lookup_mfa_contract({M,_F,_A} = MFA, #codeserver{contracts = ContDict}) ->
 get_contracts(#codeserver{contracts = ContDict}) ->
   ContDict.
 
--spec store_temp_contracts(module(), dict(), codeserver()) -> codeserver(). 
+-spec store_temp_contracts(module(), dict(), dict(), codeserver()) -> 
+    codeserver(). 
 
-store_temp_contracts(Mod, Dict, #codeserver{temp_contracts = C} = CS)
+store_temp_contracts(Mod, SpecDict, CBSpecDict, 
+		     #codeserver{temp_contracts = TContr,
+				 temp_cb_contracts = TCBContr} = CS)
   when is_atom(Mod) ->
-  case dict:size(Dict) =:= 0 of
-    true -> CS;
-    false -> CS#codeserver{temp_contracts = dict:store(Mod, Dict, C)}
-  end.
+  CS#codeserver{temp_contracts = dict:store(Mod, SpecDict, TContr),
+		temp_cb_contracts = dict:store(Mod, CBSpecDict, TCBContr)}.
 
--spec get_temp_contracts(codeserver()) -> dict().
+-spec get_temp_contracts(codeserver()) -> {dict(), dict()}.
 
-get_temp_contracts(#codeserver{temp_contracts = TempContDict}) ->
-  TempContDict.
+get_temp_contracts(#codeserver{temp_contracts    = TempContDict,
+			       temp_cb_contracts = TempCBContDict}) ->
+  {TempContDict, TempCBContDict}.
 
--spec finalize_contracts(dict(), codeserver()) -> codeserver().
+-spec finalize_contracts(dict(), dict(), codeserver()) -> codeserver().
 
-finalize_contracts(Dict, CS)  ->
-  CS#codeserver{contracts = Dict, temp_contracts = dict:new()}.
+finalize_contracts(CDict, CBCDict, CS)  ->
+  CS#codeserver{contracts = CDict, 
+		temp_contracts = dict:new(),
+		callback_contracts = CBCDict,
+		temp_cb_contracts = dict:new()}.
 
 table__new() ->
   spawn_link(fun() -> table__loop(none, dict:new()) end).
