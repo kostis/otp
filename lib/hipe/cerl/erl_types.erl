@@ -757,9 +757,8 @@ t_solve_remote_type(#remote{mod = RemMod, name = Name, args = Args} = RemType,
               throw({error, Msg})
           end;
         false ->
-          Msg = io_lib:format("Unable to find exported type ~w:~w/~w\n",
-                              [RemMod, Name, ArgsLen]),
-          throw({error, Msg})
+          self() ! {self(), ext_types, {RemMod, Name, ArgsLen}},
+          {t_any(), []}
       end
   end.
 

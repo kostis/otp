@@ -1192,12 +1192,11 @@ erts_smp_port_unlock(Port *prt)
 {
 #ifdef ERTS_SMP
     long refc;
+    erts_smp_mtx_unlock(prt->lock);
     refc = erts_smp_atomic_dectest(&prt->refc);
     ASSERT(refc >= 0);
     if (refc == 0)
 	erts_port_cleanup(prt);
-    else
-	erts_smp_mtx_unlock(prt->lock);
 #endif
 }
 
@@ -1720,7 +1719,6 @@ int erts_print_system_version(int to, void *arg, Process *c_p);
  * Interface to erl_init
  */
 void erl_init(void);
-void erts_first_process(Eterm modname, void* code, unsigned size, int argc, char** argv);
 
 #define seq_trace_output(token, msg, type, receiver, process) \
 seq_trace_output_generic((token), (msg), (type), (receiver), (process), NIL)
