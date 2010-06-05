@@ -211,6 +211,7 @@
 	]).
 
 %%-define(DO_ERL_TYPES_TEST, true).
+-compile({no_auto_import,[min/2,max/2]}).
 
 -ifdef(DO_ERL_TYPES_TEST).
 -export([test/0]).
@@ -652,7 +653,7 @@ module_builtin_opaques(Module) ->
 %% Remote types: these types are used for preprocessing;
 %% they should never reach the analysis stage.
 
--spec t_remote(module(), atom(), [_]) -> erl_type().
+-spec t_remote(atom(), atom(), [erl_type()]) -> erl_type().
 
 t_remote(Mod, Name, Args) ->
   ?remote(set_singleton(#remote{mod = Mod, name = Name, args = Args})).
@@ -1606,7 +1607,7 @@ t_set() ->
 t_tid() ->
   t_opaque(ets, tid, [], t_integer()).
 
--spec all_opaque_builtins() -> [erl_type()].
+-spec all_opaque_builtins() -> [erl_type(),...].
 
 all_opaque_builtins() ->
   [t_array(), t_dict(), t_digraph(), t_gb_set(),
@@ -3366,7 +3367,7 @@ sequence([], [], _Delimiter) ->
   [];
 sequence([T], Acc, _Delimiter) ->
   lists:flatten(lists:reverse([T|Acc]));
-sequence([T|Ts], Acc, Delimiter) -> 
+sequence([T|Ts], Acc, Delimiter) ->
   sequence(Ts, [T ++ Delimiter|Acc], Delimiter).
 
 %%=============================================================================
@@ -3414,6 +3415,18 @@ t_from_form({atom, _L, Atom}, _TypeNames, _RecDict, _VarDict) ->
   {t_atom(Atom), []};
 t_from_form({integer, _L, Int}, _TypeNames, _RecDict, _VarDict) ->
   {t_integer(Int), []};
+t_from_form({op, _L, _Op, _Arg} = Op, _TypeNames, _RecDict, _VarDict) ->
+  case erl_eval:partial_eval(Op) of
+    {integer, _, Val} ->
+      {t_integer(Val), []};
+    _ -> throw({error, io_lib:format("Unable evaluate type ~w\n", [Op])})
+  end;
+t_from_form({op, _L, _Op, _Arg1, _Arg2} = Op, _TypeNames, _RecDict, _VarDict) ->
+  case erl_eval:partial_eval(Op) of
+    {integer, _, Val} ->
+      {t_integer(Val), []};
+    _ -> throw({error, io_lib:format("Unable evaluate type ~w\n", [Op])})
+  end;
 t_from_form({type, _L, any, []}, _TypeNames, _RecDict, _VarDict) ->
   {t_any(), []};
 t_from_form({type, _L, arity, []}, _TypeNames, _RecDict, _VarDict) ->
@@ -3424,9 +3437,15 @@ t_from_form({type, _L, atom, []}, _TypeNames, _RecDict, _VarDict) ->
   {t_atom(), []};
 t_from_form({type, _L, binary, []}, _TypeNames, _RecDict, _VarDict) ->
   {t_binary(), []};
-t_from_form({type, _L, binary, [{integer, _, Base}, {integer, _, Unit}]}, 
+t_from_form({type, _L, binary, [Base, Unit]} = Type,
 	    _TypeNames, _RecDict, _VarDict) ->
-  {t_bitstr(Unit, Base), []};
+  case {erl_eval:partial_eval(Base), erl_eval:partial_eval(Unit)} of
+    {{integer, _, BaseVal},
+     {integer, _, UnitVal}}
+      when BaseVal >= 0, UnitVal >= 0 ->
+      {t_bitstr(UnitVal, BaseVal), []};
+    _ -> throw({error, io_lib:format("Unable evaluate type ~w\n", [Type])})
+  end;
 t_from_form({type, _L, bitstring, []}, _TypeNames, _RecDict, _VarDict) ->
   {t_bitstr(), []};
 t_from_form({type, _L, bool, []}, _TypeNames, _RecDict, _VarDict) ->
@@ -3530,9 +3549,14 @@ t_from_form({type, _L, product, Elements}, TypeNames, RecDict, VarDict) ->
   {t_product(L), R};
 t_from_form({type, _L, queue, []}, _TypeNames, _RecDict, _VarDict) ->
   {t_queue(), []};
-t_from_form({type, _L, range, [{integer, _, From}, {integer, _, To}]}, 
+t_from_form({type, _L, range, [From, To]} = Type,
 	    _TypeNames, _RecDict, _VarDict) ->
-  {t_from_range(From, To), []};
+  case {erl_eval:partial_eval(From), erl_eval:partial_eval(To)} of
+    {{integer, _, FromVal},
+     {integer, _, ToVal}} ->
+      {t_from_range(FromVal, ToVal), []};      
+    _ -> throw({error, io_lib:format("Unable evaluate type ~w\n", [Type])})
+  end;
 t_from_form({type, _L, record, [Name|Fields]}, TypeNames, RecDict, VarDict) ->
   record_from_form(Name, Fields, TypeNames, RecDict, VarDict);
 t_from_form({type, _L, reference, []}, _TypeNames, _RecDict, _VarDict) ->
@@ -3707,6 +3731,16 @@ t_form_to_string({var, _L, Name}) -> atom_to_list(Name);
 t_form_to_string({atom, _L, Atom}) -> 
   io_lib:write_string(atom_to_list(Atom), $'); % To quote or not to quote... '
 t_form_to_string({integer, _L, Int}) -> integer_to_list(Int);
+t_form_to_string({op, _L, _Op, _Arg} = Op) ->
+  case erl_eval:partial_eval(Op) of
+    {integer, _, _} = Int -> t_form_to_string(Int);
+    _ -> io_lib:format("Bad formed type ~w",[Op])
+  end;
+t_form_to_string({op, _L, _Op, _Arg1, _Arg2} = Op) ->
+  case erl_eval:partial_eval(Op) of
+    {integer, _, _} = Int -> t_form_to_string(Int);
+    _ -> io_lib:format("Bad formed type ~w",[Op])
+  end;
 t_form_to_string({ann_type, _L, [Var, Type]}) ->
   t_form_to_string(Var) ++ "::" ++ t_form_to_string(Type);
 t_form_to_string({paren_type, _L, [Type]}) ->
@@ -3733,8 +3767,12 @@ t_form_to_string({type, _L, nonempty_list, [Type]}) ->
 t_form_to_string({type, _L, nonempty_string, []}) -> "nonempty_string()";
 t_form_to_string({type, _L, product, Elements}) ->
   "<" ++ sequence(t_form_to_string_list(Elements), ",") ++ ">";
-t_form_to_string({type, _L, range, [{integer, _, From}, {integer, _, To}]}) ->
-  io_lib:format("~w..~w", [From, To]);
+t_form_to_string({type, _L, range, [From, To]} = Type) ->
+  case {erl_eval:partial_eval(From), erl_eval:partial_eval(To)} of
+    {{integer, _, FromVal}, {integer, _, ToVal}} ->
+      io_lib:format("~w..~w", [FromVal, ToVal]);
+    _ -> io_lib:format("Bad formed type ~w",[Type])
+  end;
 t_form_to_string({type, _L, record, [{atom, _, Name}]}) ->
   io_lib:format("#~w{}", [Name]);
 t_form_to_string({type, _L, record, [{atom, _, Name}|Fields]}) ->
@@ -3753,13 +3791,17 @@ t_form_to_string({type, _L, Name, []} = T) ->
   try t_to_string(t_from_form(T))
   catch throw:{error, _} -> atom_to_list(Name) ++ "()"
   end;
-t_form_to_string({type, _L, binary, [{integer, _, X}, {integer, _, Y}]}) ->
-  case Y of
-    0 ->
-      case X of
-	0 -> "<<>>";
-	_ -> io_lib:format("<<_:~w>>", [X])
-      end
+t_form_to_string({type, _L, binary, [X,Y]} = Type) ->
+  case {erl_eval:partial_eval(X), erl_eval:partial_eval(Y)} of
+    {{integer, _, XVal}, {integer, _, YVal}} ->
+      case YVal of
+	0 ->
+	  case XVal of
+	    0 -> "<<>>";
+	    _ -> io_lib:format("<<_:~w>>", [XVal])
+	  end
+      end;
+    _ -> io_lib:format("Bad formed type ~w",[Type])
   end;
 t_form_to_string({type, _L, Name, List}) -> 
   io_lib:format("~w(~s)", [Name, sequence(t_form_to_string_list(List), ",")]).

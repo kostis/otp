@@ -91,11 +91,11 @@
 -type startlink_err() :: {'already_started', pid()} | 'shutdown' | term().
 -type startlink_ret() :: {'ok', pid()} | 'ignore' | {'error', startlink_err()}.
 
--spec start_link(module(), term()) -> startlink_ret().    
+-spec start_link(module(), term()) -> startlink_ret().
 start_link(Mod, Args) ->
     gen_server:start_link(supervisor, {self, Mod, Args}, []).
  
--spec start_link(sup_name(), module(), term()) -> startlink_ret().    
+-spec start_link(sup_name(), module(), term()) -> startlink_ret().
 start_link(SupName, Mod, Args) ->
     gen_server:start_link(SupName, supervisor, {SupName, Mod, Args}, []).
  
@@ -186,7 +186,7 @@ init({SupName, Mod, Args}) ->
 	Error ->
 	    {stop, {bad_return, {Mod, init, Error}}}
     end.
-	
+
 init_children(State, StartSpec) ->
     SupName = State#state.name,
     case check_startspec(StartSpec) of
@@ -478,7 +478,7 @@ check_flags({Strategy, MaxIntensity, Period}) ->
 check_flags(What) ->
     {bad_flags, What}.
 
-update_childspec(State, StartSpec) when ?is_simple(State) -> 
+update_childspec(State, StartSpec) when ?is_simple(State) ->
     case check_startspec(StartSpec) of                        
         {ok, [Child]} ->                                      
             {ok, State#state{children = [Child]}};            
