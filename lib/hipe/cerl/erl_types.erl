@@ -303,7 +303,7 @@
 %% Auxiliary types and convenient macros
 %%
 
--type parse_form() :: {atom(), _, _} | {atom(), _, _, _}. %% XXX: Temporarily
+-type parse_form() :: {atom(), _, _} | {atom(), _, _, _} | {'op', _, _, _, _}. %% XXX: Temporarily
 -type rng_elem()   :: 'pos_inf' | 'neg_inf' | integer().
 
 -record(int_set, {set :: [integer()]}).
