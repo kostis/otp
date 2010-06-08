@@ -169,7 +169,7 @@ analysis_start(Parent, Analysis) ->
   State2 = State1#analysis_state{no_warn_unused = NoWarn},
   %% Remove all old versions of the files being analyzed
   AllNodes = dialyzer_callgraph:all_nodes(Callgraph),
-  Plt1 = dialyzer_plt:delete_list(NewPlt1, AllNodes),
+  Plt1 = dialyzer_plt:delete_list(NewPlt2, AllNodes),
   Exports = dialyzer_codeserver:get_exports(NewCServer),
   NewCallgraph =
     case Analysis#analysis.race_detection of

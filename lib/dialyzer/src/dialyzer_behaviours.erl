@@ -32,7 +32,7 @@
 
 -export([check_callbacks/4,
 	 get_behaviour_apis/1,
-     get_registering_apis/1,
+	 get_registering_apis/1,
 	 scan_behaviours/3,
 	 translatable_behaviours/0,
 	 translate_behaviour_api_call/5,
