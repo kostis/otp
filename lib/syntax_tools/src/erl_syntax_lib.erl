@@ -46,6 +46,8 @@
          new_variable_names/2, new_variable_names/3, strip_comments/1,
          to_comment/1, to_comment/2, to_comment/3, variables/1]).
 
+-export_type([info_pair/0]).
+
 %% =====================================================================
 
 -type ordset(X) :: [X].  % XXX: TAKE ME OUT
@@ -400,10 +402,7 @@ new_variable_name(N, R, _T, F, S) ->
 %% implementation of `sets'.
 
 start_range(S) ->
-    max(sets:size(S) * ?START_RANGE_FACTOR, ?MINIMUM_RANGE).
-
-max(X, Y) when X > Y -> X;
-max(_, Y) -> Y.
+    erlang:max(sets:size(S) * ?START_RANGE_FACTOR, ?MINIMUM_RANGE).
 
 %% The previous number might or might not be used to compute the
 %% next number to be tried. It is currently not used.

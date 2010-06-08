@@ -53,7 +53,7 @@
 -export([file_info/1, file_info_basic_file/1, file_info_basic_directory/1,
 	 file_info_bad/1, file_info_times/1, file_write_file_info/1]).
 -export([rename/1, access/1, truncate/1, datasync/1, sync/1,
-	 read_write/1, pread_write/1, append/1]).
+	 read_write/1, pread_write/1, append/1, exclusive/1]).
 -export([errors/1, e_delete/1, e_rename/1, e_make_dir/1, e_del_dir/1]).
 -export([otp_5814/1]).
 
@@ -84,6 +84,8 @@
 
 -export([advise/1]).
 
+-export([standard_io/1,mini_server/1]).
+
 %% Debug exports
 -export([create_file_slow/2, create_file/2, create_bin/2]).
 -export([verify_file/2, verify_bin/3]).
@@ -103,7 +105,8 @@ all(suite) ->
       compression, links, copy,
       delayed_write, read_ahead, segment_read, segment_write,
       ipread, pid2name, interleaved_read_write, 
-      otp_5814, large_file, read_line_1, read_line_2, read_line_3, read_line_4],
+      otp_5814, large_file, read_line_1, read_line_2, read_line_3, read_line_4,
+      standard_io],
      fini}.
 
 init(Config) when is_list(Config) ->
@@ -170,6 +173,85 @@ time_dist(DT, {YY, MM, DD, H, M, S}) ->
 time_dist({_D1, _T1} = DT1, {_D2, _T2} = DT2) ->
     calendar:datetime_to_gregorian_seconds(DT2)
 	- calendar:datetime_to_gregorian_seconds(DT1).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+mini_server(Parent) ->
+    receive
+	die ->
+	    ok;
+	{io_request,From,To,{put_chars,Data}} ->
+	    Parent ! {io_request,From,To,{put_chars,Data}},
+	    From ! {io_reply, To, ok},
+	    mini_server(Parent);
+	{io_request,From,To,{get_chars,'',N}} ->
+	    Parent ! {io_request,From,To,{get_chars,'',N}},
+	    From ! {io_reply, To, {ok, lists:duplicate(N,$a)}},
+	    mini_server(Parent);
+	{io_request,From,To,{get_line,''}} ->
+	    Parent ! {io_request,From,To,{get_line,''}},
+	    From ! {io_reply, To, {ok, "hej\n"}},
+	    mini_server(Parent)
+    end.
+
+standard_io(suite) ->
+    [];
+standard_io(doc) ->
+    ["Test that standard i/o-servers work with file module"];
+standard_io(Config) when is_list(Config) ->
+    %% Really just a smoke test
+    ?line Pid = spawn(?MODULE,mini_server,[self()]),
+    ?line register(mini_server,Pid),
+    ?line ok = file:write(mini_server,<<"hej\n">>),
+    ?line receive
+	     {io_request,_,_,{put_chars,<<"hej\n">>}} ->
+		  ok
+	  after 1000 ->
+		  exit(noreply)
+	  end,
+    ?line {ok,"aaaaa"} = file:read(mini_server,5),
+    ?line receive
+	     {io_request,_,_,{get_chars,'',5}} ->
+		  ok
+	  after 1000 ->
+		  exit(noreply)
+	  end,
+    ?line {ok,"hej\n"} = file:read_line(mini_server),
+    ?line receive
+	     {io_request,_,_,{get_line,''}} ->
+		  ok
+	  after 1000 ->
+		  exit(noreply)
+	  end,
+    ?line OldGL = group_leader(),
+    ?line group_leader(Pid,self()),
+    ?line ok = file:write(standard_io,<<"hej\n">>),
+    ?line group_leader(OldGL,self()),
+    ?line receive
+	     {io_request,_,_,{put_chars,<<"hej\n">>}} ->
+		  ok
+	  after 1000 ->
+		  exit(noreply)
+	  end,
+    ?line group_leader(Pid,self()),
+    ?line {ok,"aaaaa"} = file:read(standard_io,5),
+    ?line group_leader(OldGL,self()),
+    ?line receive
+	     {io_request,_,_,{get_chars,'',5}} ->
+		  ok
+	  after 1000 ->
+		  exit(noreply)
+	  end,
+    ?line group_leader(Pid,self()),
+    ?line {ok,"hej\n"} = file:read_line(standard_io),
+    ?line group_leader(OldGL,self()),
+    ?line receive
+	     {io_request,_,_,{get_line,''}} ->
+		  ok
+	  after 1000 ->
+		  exit(noreply)
+	  end,
+    Pid ! die,
+    receive after 1000 -> ok end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -384,7 +466,7 @@ files(suite) ->
      sync,datasync,advise].
 
 open(suite) -> [open1,old_modes,new_modes,path_open,close,access,read_write,
-	       pread_write,append,open_errors].
+	       pread_write,append,open_errors,exclusive].
 
 open1(suite) -> [];
 open1(doc) -> [];
@@ -755,6 +837,22 @@ open_errors(Config) when is_list(Config) ->
     ?line {eisdir,eisdir,eisdir,eisdir} = {E1,E2,E3,E4},
 
     ?line [] = flush(),
+    ?line test_server:timetrap_cancel(Dog),
+    ok.
+
+exclusive(suite) -> [];
+exclusive(doc) -> "Test exclusive access to a file.";
+exclusive(Config) when is_list(Config) ->
+    ?line Dog = test_server:timetrap(test_server:seconds(5)),
+    ?line RootDir = ?config(priv_dir,Config),
+    ?line NewDir = filename:join(RootDir,
+				 atom_to_list(?MODULE)
+				 ++"_exclusive"),
+    ?line ok = ?FILE_MODULE:make_dir(NewDir),
+    ?line Name = filename:join(NewDir, "ex_file.txt"),
+    ?line {ok, Fd} = ?FILE_MODULE:open(Name, [write, exclusive]),
+    ?line {error, eexist} = ?FILE_MODULE:open(Name, [write, exclusive]),
+    ?line ok = ?FILE_MODULE:close(Fd),
     ?line test_server:timetrap_cancel(Dog),
     ok.
 

@@ -96,6 +96,9 @@ loop(#server_state{parent = Parent, legal_warnings = LegalWarnings} = State,
       end;
     {AnalPid, ext_calls, NewExtCalls} ->
       loop(State, Analysis, NewExtCalls);
+    {AnalPid, ext_types, ExtTypes} ->
+      send_ext_types(Parent, ExtTypes),
+      loop(State, Analysis, ExtCalls);
     {AnalPid, unknown_behaviours, UnknownBehaviour} ->
       send_unknown_behaviours(Parent, UnknownBehaviour),
       loop(State, Analysis, ExtCalls);
@@ -131,12 +134,23 @@ analysis_start(Parent, Analysis) ->
   NewCServer =
     try
       NewRecords = dialyzer_codeserver:get_temp_records(TmpCServer0),
-      OldRecords = dialyzer_plt:get_types(State#analysis_state.plt),
+      NewExpTypes = dialyzer_codeserver:get_temp_exported_types(TmpCServer0),
+      OldRecords = dialyzer_plt:get_types(Plt),
+      OldExpTypes0 = dialyzer_plt:get_exported_types(Plt),
       MergedRecords = dialyzer_utils:merge_records(NewRecords, OldRecords),
-      TmpCServer1 =
-	dialyzer_codeserver:set_temp_records(MergedRecords, TmpCServer0),
-      TmpCServer2 = dialyzer_utils:process_record_remote_types(TmpCServer1),
-      dialyzer_contracts:process_contract_remote_types(TmpCServer2)
+      RemMods =
+        [case Analysis#analysis.start_from of
+           byte_code -> list_to_atom(filename:basename(F, ".beam"));
+           src_code -> list_to_atom(filename:basename(F, ".erl"))
+         end || F <- Files],
+      OldExpTypes1 = dialyzer_utils:sets_filter(RemMods, OldExpTypes0),
+      MergedExpTypes = sets:union(NewExpTypes, OldExpTypes1),
+      TmpCServer1 = dialyzer_codeserver:set_temp_records(MergedRecords, TmpCServer0),
+      TmpCServer2 =
+        dialyzer_codeserver:insert_temp_exported_types(MergedExpTypes,
+                                                       TmpCServer1),
+      TmpCServer3 = dialyzer_utils:process_record_remote_types(TmpCServer2),
+      dialyzer_contracts:process_contract_remote_types(TmpCServer3)
     catch
       throw:{error, _ErrorMsg} = Error -> exit(Error)
     end,
@@ -158,6 +172,7 @@ analysis_start(Parent, Analysis) ->
       false -> Callgraph
     end,
   State3 = analyze_callgraph(NewCallgraph, State2#analysis_state{plt = Plt1}),
+  rcv_and_send_ext_types(Parent),
   NonExports = sets:subtract(sets:from_list(AllNodes), Exports),
   NonExportsList = sets:to_list(NonExports),
   Plt3 = dialyzer_plt:delete_list(State3#analysis_state.plt, NonExportsList),
@@ -355,13 +370,27 @@ compile_common(File, AbstrCode, CompOpts, Callgraph, CServer, UseContracts) ->
 
 store_core(Mod, Core, NoWarn, Callgraph, CServer) ->
   Exp = get_exports_from_core(Core),
+  OldExpTypes = dialyzer_codeserver:get_temp_exported_types(CServer),
+  NewExpTypes = get_exported_types_from_core(Core),
+  MergedExpTypes = sets:union(NewExpTypes, OldExpTypes),
   CServer1 = dialyzer_codeserver:insert_exports(Exp, CServer),
-  {LabeledCore, CServer2} = label_core(Core, CServer1),
-  store_code_and_build_callgraph(Mod, LabeledCore, Callgraph, CServer2, NoWarn).
+  CServer2 = dialyzer_codeserver:insert_temp_exported_types(MergedExpTypes,
+                                                            CServer1),
+  {LabeledCore, CServer3} = label_core(Core, CServer2),
+  store_code_and_build_callgraph(Mod, LabeledCore, Callgraph, CServer3, NoWarn).
 
 abs_get_nowarn(Abs, M) ->
   [{M, F, A} 
    || {attribute, _, compile, {nowarn_unused_function, {F, A}}} <- Abs].
+
+get_exported_types_from_core(Core) ->
+  Attrs = cerl:module_attrs(Core),
+  ExpTypes1 = [cerl:concrete(L2) || {L1, L2} <- Attrs, cerl:is_literal(L1),
+                                    cerl:is_literal(L2),
+                                    cerl:concrete(L1) =:= 'export_type'],
+  ExpTypes2 = lists:flatten(ExpTypes1),
+  M = cerl:atom_val(cerl:module_name(Core)),
+  sets:from_list([{M, F, A} || {F, A} <- ExpTypes2]).
 
 get_exports_from_core(Core) ->
   Tree = cerl:from_records(Core),
@@ -438,6 +467,19 @@ default_includes(Dir) ->
 %% Handle Messages
 %%-------------------------------------------------------------------
 
+rcv_and_send_ext_types(Parent) ->
+  Self = self(),
+  Self ! {Self, done},
+  ExtTypes = rcv_ext_types(Self, []),
+  Parent ! {Self, ext_types, ExtTypes}.
+
+rcv_ext_types(Self, ExtTypes) ->
+  receive
+    {Self, ext_types, ExtType} ->
+      rcv_ext_types(Self, [ExtType|ExtTypes]);
+    {Self, done} -> lists:usort(ExtTypes)
+  end.
+
 send_log(Parent, Msg) ->
   Parent ! {self(), log, Msg},
   ok.
@@ -458,6 +500,10 @@ send_analysis_done(Parent, Plt, DocPlt) ->
   
 send_ext_calls(Parent, ExtCalls) ->
   Parent ! {self(), ext_calls, ExtCalls},
+  ok.
+
+send_ext_types(Parent, ExtTypes) ->
+  Parent ! {self(), ext_types, ExtTypes},
   ok.
 
 send_unknown_behaviours(Parent, UnknownBehaviours) ->
