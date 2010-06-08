@@ -121,7 +121,7 @@
     {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
 -callback handle_cast(Request :: term(), State :: term()) ->
-    {noreply, NewState :: term} |
+    {noreply, NewState :: term()} |
     {noreply, NewState :: term(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: term()}.
 -callback handle_info(Info :: timeout() | term(), State :: term()) ->
