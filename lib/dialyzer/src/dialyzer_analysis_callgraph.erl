@@ -131,7 +131,8 @@ analysis_start(Parent, Analysis) ->
 			  use_contracts = Analysis#analysis.use_contracts,
 			  behaviours = {Analysis#analysis.behaviours_chk,[]},
 			  diff_mods = Analysis#analysis.diff_mods,
-			  fast_plt = Analysis#analysis.fast_plt},
+			  fast_plt = Analysis#analysis.fast_plt
+			 },
   Files = ordsets:from_list(Analysis#analysis.files),
   {Callgraph, NoWarn, TmpCServer0} = compile_and_store(Files, State),
   %% Remote type postprocessing
@@ -158,18 +159,17 @@ analysis_start(Parent, Analysis) ->
     catch
       throw:{error, _ErrorMsg} = Error -> exit(Error)
     end,
-  NewPlt0 = dialyzer_plt:insert_types(Plt, dialyzer_codeserver:get_records(NewCServer)),
-  ExpTypes =  dialyzer_codeserver:get_exported_types(NewCServer),
-  NewPlt1 = dialyzer_plt:insert_exported_types(NewPlt0, ExpTypes),
+  NewPlt = 
+    dialyzer_plt:insert_types(Plt, dialyzer_codeserver:get_records(NewCServer)),
   CBContracts = dialyzer_codeserver:get_callback_contracts(NewCServer),
-  NewPlt2 = dialyzer_plt:insert_callback_contracts(NewPlt1, CBContracts),
-  State0 = State#analysis_state{plt = NewPlt2, old_plt = NewPlt2},
+  NewPlt1 = dialyzer_plt:insert_callback_contracts(NewPlt, CBContracts),
+  State0 = State#analysis_state{plt = NewPlt1, old_plt = NewPlt1},
   dump_callgraph(Callgraph, State0, Analysis),
   State1 = State0#analysis_state{codeserver = NewCServer},
   State2 = State1#analysis_state{no_warn_unused = NoWarn},
   %% Remove all old versions of the files being analyzed
   AllNodes = dialyzer_callgraph:all_nodes(Callgraph),
-  Plt1 = dialyzer_plt:delete_list(NewPlt2, AllNodes),
+  Plt1 = dialyzer_plt:delete_list(NewPlt1, AllNodes),
   Exports = dialyzer_codeserver:get_exports(NewCServer),
   NewCallgraph =
     case Analysis#analysis.race_detection of

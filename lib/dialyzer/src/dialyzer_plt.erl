@@ -39,8 +39,8 @@
 	 from_file/1,
 	 get_default_plt/0,
 	 get_types/1,
-	 get_exported_types/1,
 	 get_callbacks/2,
+	 get_exported_types/1,
 	 %% insert/3,
 	 insert_list/2,
 	 insert_contract_list/2,
@@ -112,13 +112,13 @@ new() ->
 -spec delete_module(plt(), atom()) -> plt().
 
 delete_module(#plt{info = Info, types = Types, contracts = Contracts,
-		           callback_contracts = CBContracts, 
-                   exported_types = ExpTypes}, Mod) ->
+                   callback_contracts = CBContracts,
+		   exported_types = ExpTypes}, Mod) ->
   #plt{info = table_delete_module(Info, Mod),
        types = table_delete_module2(Types, Mod),
+       exported_types = table_delete_module1(ExpTypes, Mod),
        contracts = table_delete_module(Contracts, Mod),
-       callback_contracts = table_delete_module(CBContracts, Mod),
-       exported_types = table_delete_module1(ExpTypes, Mod)}.
+       callback_contracts = table_delete_module(CBContracts, Mod)}.
 
 -spec delete_list(plt(), [mfa() | integer()]) -> plt().
 
@@ -127,9 +127,9 @@ delete_list(#plt{info = Info, types = Types, contracts = Contracts,
                  exported_types = ExpTypes}, List) ->
   #plt{info = table_delete_list(Info, List),
        types = Types,
+       exported_types = ExpTypes,
        contracts = table_delete_list(Contracts, List),
-       callback_contracts = CBContracts,
-       exported_types = ExpTypes}.
+       callback_contracts = CBContracts}.
 
 -spec insert_contract_list(plt(), dialyzer_contracts:plt_contracts()) -> plt().
 
@@ -270,13 +270,12 @@ from_file(FileName, ReturnInfo) ->
 	error ->
 	  Msg = io_lib:format("Old PLT file ~s\n", [FileName]),
 	  error(Msg);
-	ok ->
-	  Plt = 
-        #plt{info = Rec#file_plt.info,
-             types = Rec#file_plt.types,
-             contracts = Rec#file_plt.contracts,
-             callback_contracts = Rec#file_plt.callback_contracts,
-             exported_types = Rec#file_plt.exported_types},
+	ok -> 
+	  Plt = #plt{info = Rec#file_plt.info,
+		     types = Rec#file_plt.types,
+		     exported_types = Rec#file_plt.exported_types,
+		     contracts = Rec#file_plt.contracts,
+		     callback_contracts = Rec#file_plt.callback_contracts},
 	  case ReturnInfo of
 	    false -> Plt;
 	    true ->
@@ -341,9 +340,9 @@ merge_plts(List) ->
 
 to_file(FileName,
 	#plt{info = Info, types = Types, contracts = Contracts,
-         callback_contracts = CBContracts, exported_types = ExpTypes},
-	ModDeps, {MD5, OldModDeps}) ->
-  NewModDeps = dict:merge(fun(_Key, OldVal, NewVal) ->
+	     callback_contracts = CBContracts,
+	     exported_types = ExpTypes}, ModDeps, {MD5, OldModDeps}) ->
+  NewModDeps = dict:merge(fun(_Key, OldVal, NewVal) -> 
 			      ordsets:union(OldVal, NewVal)
 			  end,
 			  OldModDeps, ModDeps),
