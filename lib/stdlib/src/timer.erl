@@ -319,7 +319,7 @@ next_timeout() ->
 
 %% Help functions
 do_apply({M,F,A}) ->
-    case {M,F,A} of
+    case {M, F, A} of
 	{?MODULE, send, A} -> 
 	    %% If send op. send directly, (faster than spawn)
 	    catch send(A);

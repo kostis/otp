@@ -318,6 +318,35 @@ cert_options(Config) ->
      | Config].
 
 
+make_dsa_cert(Config) ->
+    
+    {ServerCaCertFile, ServerCertFile, ServerKeyFile} = make_dsa_cert_files("server", Config),
+    {ClientCaCertFile, ClientCertFile, ClientKeyFile} = make_dsa_cert_files("client", Config),
+    [{server_dsa_opts, [{ssl_imp, new},{reuseaddr, true}, 
+				 {cacertfile, ServerCaCertFile},
+				 {certfile, ServerCertFile}, {keyfile, ServerKeyFile}]},
+     {client_dsa_opts, [{ssl_imp, new},{reuseaddr, true}, 
+			{cacertfile, ClientCaCertFile},
+			{certfile, ClientCertFile}, {keyfile, ClientKeyFile}]}
+     | Config].
+
+
+    
+make_dsa_cert_files(RoleStr, Config) ->    
+    CaInfo = {CaCert, _} = erl_make_certs:make_cert([{key, dsa}]),
+    {Cert, CertKey} = erl_make_certs:make_cert([{key, dsa}, {issuer, CaInfo}]),
+    CaCertFile = filename:join([?config(priv_dir, Config), 
+				RoleStr, "dsa_cacerts.pem"]),
+    CertFile = filename:join([?config(priv_dir, Config), 
+			      RoleStr, "dsa_cert.pem"]),
+    KeyFile = filename:join([?config(priv_dir, Config), 
+				   RoleStr, "dsa_key.pem"]),
+    
+    public_key:der_to_pem(CaCertFile, [{cert, CaCert, not_encrypted}]),
+    public_key:der_to_pem(CertFile, [{cert, Cert, not_encrypted}]),
+    public_key:der_to_pem(KeyFile, [CertKey]),
+    {CaCertFile, CertFile, KeyFile}.
+
 start_upgrade_server(Args) ->
     Result = spawn_link(?MODULE, run_upgrade_server, [Args]),
     receive
@@ -529,3 +558,42 @@ send_selected_port(Pid, 0, Socket) ->
     Pid ! {self(), {port, NewPort}};
 send_selected_port(_,_,_) ->
     ok.
+
+rsa_suites() ->
+    lists:filter(fun({dhe_dss, _, _}) ->
+			 false;
+		    (_) ->
+			 true
+		 end,
+		 ssl:cipher_suites()).
+
+dsa_suites() ->
+     lists:filter(fun({dhe_dss, _, _}) ->
+			 true;
+		    (_) ->
+			 false
+		 end,
+		 ssl:cipher_suites()).
+
+
+openssl_rsa_suites() ->
+    Ciphers = ssl:cipher_suites(openssl),
+    lists:filter(fun(Str) ->
+			 case re:run(Str,"DSS",[]) of
+			     nomatch ->
+				 true;
+			     _ ->
+				 false
+			 end 
+		 end, Ciphers).
+
+openssl_dsa_suites() ->
+    Ciphers = ssl:cipher_suites(openssl),
+    lists:filter(fun(Str) ->
+			 case re:run(Str,"DSS",[]) of
+			     nomatch ->
+				 false;
+			     _ ->
+				 true
+			 end 
+		 end, Ciphers).

@@ -2698,7 +2698,6 @@ default_types() ->
 		{set, 0},
 		{string, 0},
 		{term, 0},
-		{tid, 0},
 		{timeout, 0},
 		{var, 1}],
     dict:from_list([{T, -1} || T <- DefTypes]).
@@ -2720,7 +2719,6 @@ is_newly_introduced_builtin_type({gb_tree, 0}) -> true; % opaque
 is_newly_introduced_builtin_type({iodata, 0}) -> true;
 is_newly_introduced_builtin_type({queue, 0}) -> true; % opaque
 is_newly_introduced_builtin_type({set, 0}) -> true; % opaque
-is_newly_introduced_builtin_type({tid, 0}) -> true; % opaque
 %% R13B01
 is_newly_introduced_builtin_type({boolean, 0}) -> true;
 is_newly_introduced_builtin_type({Name, _}) when is_atom(Name) -> false.
