@@ -3555,7 +3555,7 @@ t_from_form({type, _L, range, [From, To]} = Type,
   case {erl_eval:partial_eval(From), erl_eval:partial_eval(To)} of
     {{integer, _, FromVal},
      {integer, _, ToVal}} ->
-      {t_from_range(FromVal, ToVal), []};      
+      {t_from_range(FromVal, ToVal), []};
     _ -> throw({error, io_lib:format("Unable evaluate type ~w\n", [Type])})
   end;
 t_from_form({type, _L, record, [Name|Fields]}, TypeNames, RecDict, VarDict) ->
