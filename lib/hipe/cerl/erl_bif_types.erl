@@ -2337,8 +2337,7 @@ type(lists, flatten, 1, Xs) ->
 		     t_list();
 		   false ->
 		     X2 = type(lists, flatten, 1, [t_inf(X1, t_list())]),
-		     t_sup(t_list(t_subtract(X1, t_list())),
-			   X2)
+		     t_sup(t_list(t_subtract(X1, t_list())), X2)
 		 end
 	     end
 	 end);
@@ -2349,10 +2348,20 @@ type(lists, flatmap, 2, Xs) ->
 	       true -> t_nil();
 	       false ->
 		 case check_fun_application(F, [t_list_elements(List)]) of
-		   ok -> 
-		     case t_is_cons(List) of
-		       true -> t_nonempty_list(t_list_elements(t_fun_range(F)));
-		       false -> t_list(t_list_elements(t_fun_range(F)))
+		   ok ->
+		     R = t_fun_range(F),
+		     case t_is_nil(R) of
+		       true -> t_nil();
+		       false ->
+			 Elems = t_list_elements(R),
+			 case t_is_cons(List) of
+			   true ->
+			     case t_is_subtype(t_nil(), R) of
+			       true -> t_list(Elems);
+			       false -> t_nonempty_list(Elems)
+			     end;
+			   false -> t_list(Elems)
+			 end
 		     end;
 		   error ->
 		     case t_is_cons(List) of
@@ -4026,7 +4035,8 @@ arg_types(erlang, trace_info, 2) ->
 	  t_atom('flags'), t_atom('tracer'),
 	  %% while the following are items about a func
 	  t_atom('traced'), t_atom('match_spec'), t_atom('meta'),
-	  t_atom('meta_match_spec'), t_atom('call_count'), t_atom('all')])];
+	  t_atom('meta_match_spec'), t_atom('call_count'),
+	  t_atom('call_time'), t_atom('all')])];
 arg_types(erlang, trace_pattern, 2) ->
   [t_sup(t_tuple([t_atom(), t_atom(), t_sup(t_arity(), t_atom('_'))]),
 	 t_atom('on_load')),
@@ -4035,7 +4045,7 @@ arg_types(erlang, trace_pattern, 3) ->
   arg_types(erlang, trace_pattern, 2) ++
     [t_list(t_sup([t_atom('global'), t_atom('local'),
 		   t_atom('meta'), t_tuple([t_atom('meta'), t_pid()]),
-		   t_atom('call_count')]))];
+		   t_atom('call_count'), t_atom('call_time')]))];
 arg_types(erlang, trunc, 1) ->
   [t_number()];
 arg_types(erlang, tuple_size, 1) ->
