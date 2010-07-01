@@ -77,12 +77,13 @@
 
 %%----------------------------------------------------------------------
 
--record(plt, 
-         {info               = table_new() :: dict(),
-          types              = table_new() :: dict(),
-          contracts          = table_new() :: dict(),
-          callback_contracts = table_new() :: dict(),
-          exported_types     = sets:new()  :: set()}).
+-record(plt,
+	     {info               = table_new() :: dict(),
+	      types              = table_new() :: dict(),
+	      exported_types     = sets:new()  :: set(),
+	      contracts          = table_new() :: dict(),
+	      callback_contracts = table_new() :: dict()}).
+
 -opaque plt() :: #plt{}.
 
 -include("dialyzer.hrl").
@@ -90,17 +91,16 @@
 -type file_md5() :: {file:filename(), binary()}.
 -type plt_info() :: {[file_md5()], dict()}.
 
--record(file_plt, 
-          {version            = ""         :: string(),
+-record(file_plt,
+		  {version            = ""         :: string(),
 		   file_md5_list      = []         :: [file_md5()],
 		   info               = dict:new() :: dict(),
 		   contracts          = dict:new() :: dict(),
 		   callback_contracts = dict:new() :: dict(),
 		   types              = dict:new() :: dict(),
-           exported_types     = sets:new() :: set(),
+		   exported_types     = sets:new() :: set(),
 		   mod_deps                        :: mod_deps(),
-		   implementation_md5 = []         :: [file_md5()]
-          }).
+		   implementation_md5 = []         :: [file_md5()]}).
 
 %%----------------------------------------------------------------------
 
@@ -111,9 +111,10 @@ new() ->
 
 -spec delete_module(plt(), atom()) -> plt().
 
-delete_module(#plt{info = Info, types = Types, contracts = Contracts,
-                   callback_contracts = CBContracts,
-		   exported_types = ExpTypes}, Mod) ->
+delete_module(#plt{info = Info, types = Types,
+                   exported_types = ExpTypes,
+                   contracts = Contracts,
+                   callback_contracts = CBContracts}, Mod) ->
   #plt{info = table_delete_module(Info, Mod),
        types = table_delete_module2(Types, Mod),
        exported_types = table_delete_module1(ExpTypes, Mod),
@@ -122,9 +123,8 @@ delete_module(#plt{info = Info, types = Types, contracts = Contracts,
 
 -spec delete_list(plt(), [mfa() | integer()]) -> plt().
 
-delete_list(#plt{info = Info, types = Types, contracts = Contracts,
-		         callback_contracts = CBContracts,
-                 exported_types = ExpTypes}, List) ->
+delete_list(#plt{info = Info, types = Types, exported_types = ExpTypes,
+		contracts = Contracts, callback_contracts = CBContracts}, List) ->
   #plt{info = table_delete_list(Info, List),
        types = Types,
        exported_types = ExpTypes,
@@ -339,10 +339,10 @@ merge_plts(List) ->
 -spec to_file(file:filename(), plt(), mod_deps(), {[file_md5()], mod_deps()}) -> 'ok'.
 
 to_file(FileName,
-	#plt{info = Info, types = Types, contracts = Contracts,
-	     callback_contracts = CBContracts,
-	     exported_types = ExpTypes}, ModDeps, {MD5, OldModDeps}) ->
-  NewModDeps = dict:merge(fun(_Key, OldVal, NewVal) -> 
+		#plt{info = Info, types = Types, exported_types = ExpTypes,
+		     contracts = Contracts, callback_contracts = CBContracts},
+		ModDeps, {MD5, OldModDeps}) ->
+  NewModDeps = dict:merge(fun(_Key, OldVal, NewVal) ->
 			      ordsets:union(OldVal, NewVal)
 			  end,
 			  OldModDeps, ModDeps),
@@ -353,7 +353,7 @@ to_file(FileName,
 		     contracts = Contracts,
 		     callback_contracts = CBContracts,
 		     types = Types,
-             exported_types = ExpTypes,
+		     exported_types = ExpTypes,
 		     mod_deps = NewModDeps,
 		     implementation_md5 = ImplMd5},
   Bin = term_to_binary(Record, [compressed]),

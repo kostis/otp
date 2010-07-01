@@ -236,7 +236,7 @@ lookup_mfa_contract({M,_F,_A} = MFA, #codeserver{contracts = ContDict}) ->
 get_contracts(#codeserver{contracts = ContDict}) ->
   ContDict.
 
--spec store_temp_contracts(module(), dict(), dict(), codeserver()) -> 
+-spec store_temp_contracts(atom(), dict(), dict(), codeserver()) -> 
     codeserver(). 
 
 store_temp_contracts(Mod, SpecDict, CBSpecDict, 
