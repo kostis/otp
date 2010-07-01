@@ -881,6 +881,8 @@ Eterm copy_object(Eterm, Process*);
 Uint size_object(Eterm);
 Eterm copy_struct(Eterm, Uint, Eterm**, ErlOffHeap*);
 Eterm copy_shallow(Eterm*, Uint, Eterm**, ErlOffHeap*);
+void move_multi_frags(Eterm** hpp, ErlOffHeap*, ErlHeapFragment* first,
+		      Eterm* refs, unsigned nrefs);
 
 #ifdef HYBRID
 #define RRMA_DEFAULT_SIZE 256
@@ -1078,6 +1080,7 @@ Eterm erts_heap_sizes(Process* p);
 void erts_offset_off_heap(ErlOffHeap *, Sint, Eterm*, Eterm*);
 void erts_offset_heap_ptr(Eterm*, Uint, Sint, Eterm*, Eterm*);
 void erts_offset_heap(Eterm*, Uint, Sint, Eterm*, Eterm*);
+void erts_free_heap_frags(Process* p);
 
 #ifdef HYBRID
 int erts_global_garbage_collect(Process*, int, Eterm*, int);
@@ -1192,12 +1195,11 @@ erts_smp_port_unlock(Port *prt)
 {
 #ifdef ERTS_SMP
     long refc;
+    erts_smp_mtx_unlock(prt->lock);
     refc = erts_smp_atomic_dectest(&prt->refc);
     ASSERT(refc >= 0);
     if (refc == 0)
 	erts_port_cleanup(prt);
-    else
-	erts_smp_mtx_unlock(prt->lock);
 #endif
 }
 
@@ -1720,7 +1722,6 @@ int erts_print_system_version(int to, void *arg, Process *c_p);
  * Interface to erl_init
  */
 void erl_init(void);
-void erts_first_process(Eterm modname, void* code, unsigned size, int argc, char** argv);
 
 #define seq_trace_output(token, msg, type, receiver, process) \
 seq_trace_output_generic((token), (msg), (type), (receiver), (process), NIL)
@@ -1740,8 +1741,10 @@ struct trace_pattern_flags {
     unsigned int local      : 1; /* Local call trace breakpoint */
     unsigned int meta       : 1; /* Metadata trace breakpoint */
     unsigned int call_count : 1; /* Fast call count breakpoint */
+    unsigned int call_time  : 1; /* Fast call time breakpoint */
 };
 extern const struct trace_pattern_flags erts_trace_pattern_flags_off;
+extern int erts_call_time_breakpoint_tracing;
 int erts_set_trace_pattern(Eterm* mfa, int specified, 
 			   Binary* match_prog_set, Binary *meta_match_prog_set,
 			   int on, struct trace_pattern_flags,
@@ -1785,18 +1788,20 @@ extern void erts_match_prog_foreach_offheap(Binary *b,
 					    void (*)(ErlOffHeap *, void *),
 					    void *);
 
-#define MATCH_SET_RETURN_TRACE 0x1 /* return trace requested */
-#define MATCH_SET_RETURN_TO_TRACE 0x2 /* Misleading name, it is not actually
-					 set by the match program, but by the
-					 breakpoint functions */
-#define MATCH_SET_EXCEPTION_TRACE 0x4 /* exception trace requested */
+#define MATCH_SET_RETURN_TRACE    (0x1) /* return trace requested */
+#define MATCH_SET_RETURN_TO_TRACE (0x2) /* Misleading name, it is not actually
+					   set by the match program, but by the
+					   breakpoint functions */
+#define MATCH_SET_EXCEPTION_TRACE (0x4) /* exception trace requested */
 #define MATCH_SET_RX_TRACE (MATCH_SET_RETURN_TRACE|MATCH_SET_EXCEPTION_TRACE)
 /*
  * Flag values when tracing bif
+ * Future note: flag field is 8 bits
  */
-#define BIF_TRACE_AS_LOCAL  0x1
-#define BIF_TRACE_AS_GLOBAL 0x2
-#define BIF_TRACE_AS_META   0x4
+#define BIF_TRACE_AS_LOCAL      (0x1)
+#define BIF_TRACE_AS_GLOBAL     (0x2)
+#define BIF_TRACE_AS_META       (0x4)
+#define BIF_TRACE_AS_CALL_TIME  (0x8)
 
 extern erts_driver_t vanilla_driver;
 extern erts_driver_t spawn_driver;

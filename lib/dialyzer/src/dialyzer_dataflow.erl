@@ -101,7 +101,7 @@
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
 		module               :: module(),
-                behaviour_api_dict = [] ::
+		behaviour_api_dict = [] :: 
 		  dialyzer_behaviours:behaviour_api_dict(),
 		callback_assocs    = [] :: [{atom(),module()}]}).
 
@@ -799,7 +799,8 @@ get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes,
 	false ->
 	  SigArgs = t_fun_args(Sig),
 	  case is_opaque_related_problem(ArgNs, ArgTypes) of
-	    true ->  %% an opaque term is used where a structured term is expected
+	    true ->  
+	      %% an opaque term is used where a structured term is expected
 	      ExpectedArgs =
 		case FailReason of
 		  only_sig -> SigArgs;
@@ -809,7 +810,8 @@ get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes,
 	    false ->
 	      case is_opaque_related_problem(ArgNs, SigArgs) orelse
 		is_opaque_related_problem(ArgNs, ContrArgs) of
-		true ->  %% a structured term is used where an opaque is expected
+		true ->  
+		  %% a structured term is used where an opaque is expected
 		  ExpectedTriples =
 		    case FailReason of
 		      only_sig -> expected_arg_triples(ArgNs, SigArgs, State);
@@ -1301,7 +1303,8 @@ handle_tuple(Tree, Map, State) ->
 			      Msg = {record_constr,
 				     [TagVal, format_patterns(ErrorPat),
 				      format_type(ErrorType, State1)]},
-			      State2 = state__add_warning(State1, ?WARN_MATCHING,
+			      State2 = state__add_warning(State1, 
+							  ?WARN_MATCHING,
 							  Tree, Msg),
 			      {State2, Map1, t_none()};
 			    {Map2, ETypes} ->
@@ -1675,7 +1678,8 @@ bind_pat_vars([Pat|PatLeft], [Type|TypeLeft], Acc, Map, State, Rev) ->
 		  Maps ->
 		    Map1 = join_maps(Maps, Map),
 		    TupleType = t_sup([t_tuple(EsTypes)
-				       || {M, EsTypes} <- Results, M =/= error]),
+				       || {M, EsTypes} <- Results,
+					  M =/= error]),
 		    {Map1, TupleType}
 		end
 	    end

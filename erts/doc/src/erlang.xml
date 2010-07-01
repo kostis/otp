@@ -407,7 +407,7 @@ iolist() = [char() | binary() | iolist()]
       </desc>
     </func>
     <func>
-      <name>erlang:binary_to_term(Binary, Opts) -> term()</name>
+      <name>binary_to_term(Binary, Opts) -> term()</name>
       <fsummary>Decode an Erlang external term format binary</fsummary>
       <type>
         <v>Opts = [safe]</v>
@@ -2209,7 +2209,7 @@ os_prompt%</pre>
       </desc>
     </func>
     <func>
-      <name>erlang:max(Term1, Term2) -> Maximum</name>
+      <name>max(Term1, Term2) -> Maximum</name>
       <fsummary>Return the largest of two term</fsummary>
       <type>
         <v>Term1 = Term2 = Maximum = term()</v>
@@ -2458,7 +2458,7 @@ os_prompt%</pre>
       </desc>
     </func>
     <func>
-      <name>erlang:min(Term1, Term2) -> Minimum</name>
+      <name>min(Term1, Term2) -> Minimum</name>
       <fsummary>Return the smallest of two term</fsummary>
       <type>
         <v>Term1 = Term2 = Minimum = term()</v>
@@ -2641,6 +2641,37 @@ os_prompt%</pre>
         </note>
         <p>Failure: <c>badarg</c> if the local node is not alive or the
           option list is malformed.</p>
+      </desc>
+    </func>
+    <func>
+      <name>erlang:nif_error(Reason)</name>
+      <fsummary>Stop execution with a given reason</fsummary>
+      <type>
+        <v>Reason = term()</v>
+      </type>
+      <desc>
+        <p>Works exactly like
+	 <seealso marker="#error/1">erlang:error/1</seealso>,
+	 but Dialyzer thinks that this BIF will return an arbitrary term.
+	 When used in a stub function for a NIF to generate an
+	 exception when the NIF library is not loaded, Dialyzer
+	 will not generate false warnings.</p>
+      </desc>
+    </func>
+    <func>
+      <name>erlang:nif_error(Reason, Args)</name>
+      <fsummary>Stop execution with a given reason</fsummary>
+      <type>
+        <v>Reason = term()</v>
+        <v>Args = [term()]</v>
+      </type>
+      <desc>
+        <p>Works exactly like
+	 <seealso marker="#error/2">erlang:error/2</seealso>,
+	 but Dialyzer thinks that this BIF will return an arbitrary term.
+	 When used in a stub function for a NIF to generate an
+	 exception when the NIF library is not loaded, Dialyzer
+	 will not generate false warnings.</p>
       </desc>
     </func>
     <func>
@@ -3200,7 +3231,7 @@ os_prompt%</pre>
       </desc>
     </func>
     <func>
-      <name>erlang:port_command(Port, Data, OptionList) -> true|false</name>
+      <name>port_command(Port, Data, OptionList) -> true|false</name>
       <fsummary>Send data to a port</fsummary>
       <type>
         <v>Port = port() | atom()</v>
@@ -3235,10 +3266,6 @@ os_prompt%</pre>
         </taglist>
         <note>
           <p>More options may be added in the future.</p>
-        </note>
-        <note>
-          <p><c>erlang:port_command/3</c> is currently not auto imported, but
-	     it is planned to be auto imported in OTP R14.</p>
         </note>
         <p>Failures:</p>
         <taglist>
@@ -5156,10 +5183,21 @@ true</pre>
 	       For more information on how to define the CPU topology, see 
 	       <seealso marker="#system_flag_cpu_topology">erlang:system_flag(cpu_topology, CpuTopology)</seealso>.
 	    </p>
-	    <p><em>NOTE:</em> If other programs on the system have bound
-	       to processors, e.g. another Erlang runtime system, you
-	       may lose performance when binding schedulers. Therefore,
-	       schedulers are by default not bound.</p>
+            <p>The runtime system will by default bind schedulers to logical
+	       processors using the <c>default_bind</c> bind type if the amount
+	       of schedulers are at least equal to the amount of logical
+	       processors configured, binding of schedulers is supported,
+	       and a CPU topology is available at startup.
+	    </p>
+	    <p><em>NOTE:</em> If the Erlang runtime system is the only
+	       operating system process that binds threads to logical processors,
+	       this improves the performance of the runtime system. However,
+	       if other operating system processes (as for example another Erlang
+	       runtime system) also bind threads to logical processors, there
+	       might be a performance penalty instead. If this is the case you,
+	       are are advised to unbind the schedulers using the
+	       <seealso marker="erl#+sbt">+sbtu</seealso> command line argument,
+	       or <c>erlang:system_flag(scheduler_bind_type, unbound)</c>.</p>
 	    <p>Schedulers can be bound in different ways. The <c>How</c>
 	       argument determines how schedulers are bound. <c>How</c> can
 	       currently be one of:</p>
@@ -6712,6 +6750,17 @@ true</pre>
               See also
               <seealso marker="#trace_pattern/3">erlang:trace_pattern/3</seealso>.</p>
           </item>
+          <tag><c>call_time</c></tag>
+          <item>
+	      <p>Return the call time values for this function or
+              <c>true</c> for the pseudo function <c>on_load</c> if call
+	      time tracing is active. Returns <c>false</c> otherwise.
+	      The call time values returned, <c>[{Pid, Count, S, Us}]</c>,
+	      is a list of each process that has executed the function and its specific counters.
+              See also
+              <seealso marker="#trace_pattern/3">erlang:trace_pattern/3</seealso>.</p>
+          </item>
+
           <tag><c>all</c></tag>
           <item>
             <p>Return a list containing the <c>{Item, Value}</c> tuples
@@ -6814,13 +6863,13 @@ true</pre>
           </item>
           <tag><c>restart</c></tag>
           <item>
-            <p>For the <c>FlagList</c> option <c>call_count</c>:
+	      <p>For the <c>FlagList</c> option <c>call_count</c> and <c>call_time</c>:
               restart the existing counters. The behaviour is undefined
               for other <c>FlagList</c> options.</p>
           </item>
           <tag><c>pause</c></tag>
           <item>
-            <p>For the <c>FlagList</c> option <c>call_count</c>: pause
+	      <p>For the <c>FlagList</c> option <c>call_count</c> and <c>call_time</c>: pause
               the existing counters. The behaviour is undefined for
               other <c>FlagList</c> options.</p>
           </item>
@@ -6875,6 +6924,23 @@ true</pre>
             <p>The counter value can be read with
               <seealso marker="#trace_info/2">erlang:trace_info/2</seealso>.</p>
           </item>
+          <tag><c>call_time</c></tag>
+          <item>
+            <p>Starts (<c>MatchSpec == true</c>) or stops
+              (<c>MatchSpec == false</c>) call time tracing for all
+              types of function calls. For every function a counter is
+	      incremented when the function is called. Time spent in the function
+	      is accumulated in two other counters, seconds and micro-seconds.
+	      The counters are stored for each call traced process.</p>
+            <p>If call time tracing is started while already running,
+              the count and time is restarted from zero. Running counters can be
+              paused with <c>MatchSpec == pause</c>. Paused and running
+              counters can be restarted from zero with
+              <c>MatchSpec == restart</c>.</p>
+            <p>The counter value can be read with
+              <seealso marker="#trace_info/2">erlang:trace_info/2</seealso>.</p>
+          </item>
+
         </taglist>
         <p>The <c>global</c> and <c>local</c> options are mutually
           exclusive and <c>global</c> is the default (if no options are
@@ -6882,7 +6948,7 @@ true</pre>
           perform a kind of local tracing, and can also not be combined
           with <c>global</c>. A function can be either globally or
           locally traced. If global tracing is specified for a
-          specified set of functions; local, meta and call count
+          specified set of functions; local, meta, call time and call count
           tracing for the matching set of local functions will be
           disabled, and vice versa.</p>
         <p>When disabling trace, the option must match the type of trace

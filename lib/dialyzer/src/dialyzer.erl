@@ -426,13 +426,7 @@ message_to_string({callback_arg_type_mismatch, [B, F, A, N, O]}) ->
 		"\n", [ordinal(N), F, A, erl_types:t_to_string(O), B]);
 message_to_string({callback_missing, [B, F, A]}) ->
   io_lib:format("Undefined callback function ~w/~w (behaviour '~w')\n",
-		[F, A, B]);
-message_to_string({invalid_spec, [B, F, A, R]}) ->
-  io_lib:format("The spec for the ~w:~w/~w callback is not correct: ~s\n",
-		[B, F, A, R]);
-message_to_string({spec_missing, [B, F, A]}) ->
-  io_lib:format("Type info about ~w:~w/~w callback is not available\n",
-		[B, F, A]).
+		[F, A, B]).
 
 %%-----------------------------------------------------------------------------
 %% Auxiliary functions below

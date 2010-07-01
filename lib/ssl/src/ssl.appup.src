@@ -1,6 +1,8 @@
 %% -*- erlang -*-
 {"%VSN%",
  [
+  {"3.11.1", [{restart_application, ssl}]},
+  {"3.11", [{restart_application, ssl}]},			
   {"3.10", [{restart_application, ssl}]},			
   {"3.10.1", [{restart_application, ssl}]},
   {"3.10.2", [{restart_application, ssl}]},
@@ -13,6 +15,8 @@
   {"3.10.9", [{restart_application, ssl}]}
  ], 
  [
+  {"3.11.1", [{restart_application, ssl}]},
+  {"3.11", [{restart_application, ssl}]},			
   {"3.10", [{restart_application, ssl}]},	
   {"3.10.1", [{restart_application, ssl}]},		
   {"3.10.2", [{restart_application, ssl}]},

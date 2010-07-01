@@ -127,19 +127,29 @@
 %%      |
 %%      v
 %%    3.14.1
+%%      |
+%%      v
+%%   3.14.1.1
 %%
 %%
 {"%VSN%",
  [
+  {"3.14.1", 
+   [
+   ]
+  }, 
   {"3.14", 
    [
+    {load_module, megaco_messenger, soft_purge, soft_purge, [megaco_monitor]},
+    {update,      megaco_monitor, soft, soft_purge, soft_purge, []}, 
     {update, megaco_config, soft, soft_purge, soft_purge, []}
    ]
   }, 
   {"3.13", 
    [
-    {load_module, megaco_messenger, soft_purge, soft_purge, []}, 
+    {load_module, megaco_messenger, soft_purge, soft_purge, [megaco_monitor]}, 
     {load_module, megaco_filter, soft_purge, soft_purge, []}, 
+    {update, megaco_monitor, soft, soft_purge, soft_purge, []}, 
     {update, megaco_config, soft, soft_purge, soft_purge, []}, 
     {update, megaco_flex_scanner_handler, {advanced, downgrade_to_pre_3_13_1}, 
      soft_purge, soft_purge, []}
@@ -171,15 +181,22 @@
   }
  ],
  [
+  {"3.14.1", 
+   [
+   ]
+  }, 
   {"3.14", 
    [
+    {load_module, megaco_messenger, soft_purge, soft_purge, [megaco_monitor]},
+    {update,      megaco_monitor, soft, soft_purge, soft_purge, []}, 
     {update, megaco_config, soft, soft_purge, soft_purge, []}
    ]
   }, 
   {"3.13", 
    [
-    {load_module, megaco_messenger, soft_purge, soft_purge, []}, 
+    {load_module, megaco_messenger, soft_purge, soft_purge, [megaco_monitor]}, 
     {load_module, megaco_filter, soft_purge, soft_purge, []}, 
+    {update,      megaco_monitor, soft, soft_purge, soft_purge, []}, 
     {update, megaco_config, soft, soft_purge, soft_purge, []}, 
     {update, megaco_flex_scanner_handler, {advanced, upgrade_from_pre_3_13_1}, 
      soft_purge, soft_purge, []}

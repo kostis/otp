@@ -512,6 +512,8 @@ dnl
 AC_DEFUN(LM_CHECK_THR_LIB,
 [
 
+NEED_NPTL_PTHREAD_H=no
+
 dnl win32?
 AC_MSG_CHECKING([for native win32 threads])
 if test "X$host_os" = "Xwin32"; then
@@ -585,7 +587,9 @@ dnl On ofs1 the '-pthread' switch should be used
 		fi
 		if test $nptl = yes; then
 		    need_nptl_incldir=no
-		    AC_CHECK_HEADER(nptl/pthread.h, need_nptl_incldir=yes)
+		    AC_CHECK_HEADER(nptl/pthread.h,
+				    [need_nptl_incldir=yes
+				     NEED_NPTL_PTHREAD_H=yes])
 		    if test $need_nptl_incldir = yes; then
 			# Ahh...
 			nptl_path="$C_INCLUDE_PATH:$CPATH"
@@ -799,6 +803,11 @@ case "$THR_LIB_NAME" in
 			AC_DEFINE(ETHR_HAVE_MIT_PTHREAD_H, 1, \
 [Define if the pthread.h header file is in pthread/mit directory.]))
 
+	if test $NEED_NPTL_PTHREAD_H = yes; then
+	    AC_DEFINE(ETHR_NEED_NPTL_PTHREAD_H, 1, \
+[Define if you need the <nptl/pthread.h> header file.])
+	fi
+
 	AC_CHECK_HEADER(sys/time.h, \
 			AC_DEFINE(ETHR_HAVE_SYS_TIME_H, 1, \
 [Define if you have the <sys/time.h> header file.]))
@@ -826,22 +835,69 @@ case "$THR_LIB_NAME" in
 	AC_CHECK_FUNC(pthread_spin_lock, \
 			AC_DEFINE(ETHR_HAVE_PTHREAD_SPIN_LOCK, 1, \
 [Define if you have the pthread_spin_lock function.]))
-	test "$force_linux_pthread_rwlocks" = "yes" || {
-	    force_linux_pthread_rwlocks=no
-	}
-	case "$force_linux_pthread_rwlocks-$host_os" in
-		no-linux*) # Writers may get starved
-			# TODO: write a test that tests the implementation
-			;;
-		*)
-			AC_CHECK_FUNC(pthread_rwlock_init, \
-				AC_DEFINE(ETHR_HAVE_PTHREAD_RWLOCK_INIT, 1, \
-[Define if you have a pthread_rwlock implementation that can be used.]))
-			;;
-	esac
+
+	have_pthread_rwlock_init=no
+	AC_CHECK_FUNC(pthread_rwlock_init, [have_pthread_rwlock_init=yes])
+	if test $have_pthread_rwlock_init = yes; then
+
+	    AC_DEFINE(ETHR_HAVE_PTHREAD_RWLOCK_INIT, 1, \
+[Define if you have a pthread_rwlock implementation that can be used.])
+
+	    ethr_have_pthread_rwlockattr_setkind_np=no
+	    AC_CHECK_FUNC(pthread_rwlockattr_setkind_np,
+			  [ethr_have_pthread_rwlockattr_setkind_np=yes])
+
+	    if test $ethr_have_pthread_rwlockattr_setkind_np = yes; then
+		AC_DEFINE(ETHR_HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP, 1, \
+[Define if you have the pthread_rwlockattr_setkind_np() function.])
+
+		AC_MSG_CHECKING([for PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP])
+		ethr_pthread_rwlock_writer_nonrecursive_initializer_np=no
+		AC_TRY_LINK([
+				#if defined(ETHR_NEED_NPTL_PTHREAD_H)
+				#include <nptl/pthread.h>
+				#elif defined(ETHR_HAVE_MIT_PTHREAD_H)
+				#include <pthread/mit/pthread.h>
+				#elif defined(ETHR_HAVE_PTHREAD_H)
+				#include <pthread.h>
+				#endif
+			    ],
+			    [
+				pthread_rwlockattr_t *attr;
+				return pthread_rwlockattr_setkind_np(attr,
+				    PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
+			    ],
+			    [ethr_pthread_rwlock_writer_nonrecursive_initializer_np=yes])
+		AC_MSG_RESULT([$ethr_pthread_rwlock_writer_nonrecursive_initializer_np])
+		if test $ethr_pthread_rwlock_writer_nonrecursive_initializer_np = yes; then
+		    AC_DEFINE(ETHR_HAVE_PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP, 1, \
+[Define if you have the PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP rwlock attribute.])
+		fi
+	    fi
+	fi
+
+
+
 	AC_CHECK_FUNC(pthread_attr_setguardsize, \
 			AC_DEFINE(ETHR_HAVE_PTHREAD_ATTR_SETGUARDSIZE, 1, \
 [Define if you have the pthread_attr_setguardsize function.]))
+
+	AC_MSG_CHECKING([for GCC atomic operations])
+	ethr_have_gcc_atomic_ops=no
+	AC_TRY_LINK([],
+		    [
+			long res;
+			volatile long val;
+			res = __sync_val_compare_and_swap(&val, (long) 1, (long) 0);
+			res = __sync_add_and_fetch(&val, (long) 1);
+			res = __sync_sub_and_fetch(&val, (long) 1);
+			res = __sync_fetch_and_and(&val, (long) 1);
+			res = __sync_fetch_and_or(&val, (long) 1);
+		    ],
+		    [ethr_have_native_atomics=yes
+		     ethr_have_gcc_atomic_ops=yes])
+	AC_MSG_RESULT([$ethr_have_gcc_atomic_ops])
+	test $ethr_have_gcc_atomic_ops = yes && AC_DEFINE(ETHR_HAVE_GCC_ATOMIC_OPS, 1, [Define if you have gcc atomic operations])
 
 	dnl Restore LIBS
 	LIBS=$saved_libs
@@ -872,6 +928,17 @@ AC_DEFINE_UNQUOTED(ETHR_SIZEOF_PTR, $ac_cv_sizeof_void_p, [Define to the size of
 if test "X$disable_native_ethr_impls" = "Xyes"; then
 	AC_DEFINE(ETHR_DISABLE_NATIVE_IMPLS, 1, [Define if you want to disable native ethread implementations])
 fi
+
+AC_ARG_ENABLE(prefer-gcc-native-ethr-impls,
+	      AS_HELP_STRING([--enable-prefer-gcc-native-ethr-impls],
+			     [enable prefer gcc native ethread implementations]),
+[ case "$enableval" in
+    yes) enable_prefer_gcc_native_ethr_impls=yes ;;
+    *)  enable_prefer_gcc_native_ethr_impls=no ;;
+  esac ], enable_prefer_gcc_native_ethr_impls=no)
+
+test $enable_prefer_gcc_native_ethr_impls = yes &&
+  AC_DEFINE(ETHR_PREFER_GCC_NATIVE_IMPLS, 1, [Define if you prefer gcc native ethread implementations])
 
 AC_DEFINE(ETHR_HAVE_ETHREAD_DEFINES, 1, \
 [Define if you have all ethread defines])

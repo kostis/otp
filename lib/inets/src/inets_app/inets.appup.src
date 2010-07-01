@@ -18,19 +18,24 @@
 
 {"%VSN%",
  [
+  {"5.3.3",
+   [
+    {restart_application, inets}
+   ]
+  }, 
+  {"5.3.2",
+   [
+    {restart_application, inets}
+   ]
+  }, 
   {"5.3.1",
    [
-    {load_module, httpc, soft_purge, soft_purge, []}, 
-    {update, httpc_handler, soft, soft_purge, soft_purge, [httpc_manager]},
-    {update, httpc_manager, soft, soft_purge, soft_purge, []}
+    {restart_application, inets}
    ]
   }, 
   {"5.3",
    [
-    {load_module, httpc, soft_purge, soft_purge, []}, 
-    {update, httpc_handler, soft, soft_purge, soft_purge, [httpc_manager]},
-    {update, httpc_manager, soft, soft_purge, soft_purge, []},
-    {load_module, mod_esi, soft_purge, soft_purge, []}
+    {restart_application, inets}
    ]
   }, 
   {"5.2",
@@ -50,19 +55,24 @@
   }     
  ],
  [	
+  {"5.3.3",
+   [
+    {restart_application, inets}
+   ]
+  }, 
+  {"5.3.2",
+   [
+    {restart_application, inets}
+   ]
+  }, 
   {"5.3.1",
    [
-    {load_module, httpc, soft_purge, soft_purge, []}, 
-    {update, httpc_handler, soft, soft_purge, soft_purge, [httpc_manager]},
-    {update, httpc_manager, soft, soft_purge, soft_purge, []}
+    {restart_application, inets}
    ]
   }, 
   {"5.3",
    [
-    {load_module, httpc, soft_purge, soft_purge, []}, 
-    {update, httpc_handler, soft, soft_purge, soft_purge, [httpc_manager]},
-    {update, httpc_manager, soft, soft_purge, soft_purge, []},
-    {load_module, mod_esi, soft_purge, soft_purge, []}
+    {restart_application, inets}
    ]
   }, 
   {"5.2",

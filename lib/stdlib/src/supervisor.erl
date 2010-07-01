@@ -27,8 +27,6 @@
 	 which_children/1, count_children/1,
 	 check_childspecs/1]).
 
--export([behaviour_info/1]).
-
 %% Internal exports
 -export([init/1, handle_call/3, handle_info/2, terminate/2, code_change/3]).
 -export([handle_cast/2]).
@@ -77,10 +75,12 @@
 
 -define(is_simple(State), State#state.strategy =:= simple_one_for_one).
 
-behaviour_info(callbacks) ->
-    [{init,1}];
-behaviour_info(_Other) ->
-    undefined.
+-callback init(Args :: term()) ->
+    {ok, {{RestartStrategy :: strategy(),
+           MaxR            :: non_neg_integer(),
+           MaxT            :: non_neg_integer()}, 
+           [ChildSpec :: child_spec()]}}
+    | ignore.
 
 %%% ---------------------------------------------------
 %%% This is a general process supervisor built upon gen_server.erl.
@@ -91,11 +91,11 @@ behaviour_info(_Other) ->
 -type startlink_err() :: {'already_started', pid()} | 'shutdown' | term().
 -type startlink_ret() :: {'ok', pid()} | 'ignore' | {'error', startlink_err()}.
 
--spec start_link(module(), term()) -> startlink_ret().    
+-spec start_link(module(), term()) -> startlink_ret().
 start_link(Mod, Args) ->
     gen_server:start_link(supervisor, {self, Mod, Args}, []).
  
--spec start_link(sup_name(), module(), term()) -> startlink_ret().    
+-spec start_link(sup_name(), module(), term()) -> startlink_ret().
 start_link(SupName, Mod, Args) ->
     gen_server:start_link(SupName, supervisor, {SupName, Mod, Args}, []).
  
@@ -186,7 +186,7 @@ init({SupName, Mod, Args}) ->
 	Error ->
 	    {stop, {bad_return, {Mod, init, Error}}}
     end.
-	
+
 init_children(State, StartSpec) ->
     SupName = State#state.name,
     case check_startspec(StartSpec) of
@@ -478,7 +478,7 @@ check_flags({Strategy, MaxIntensity, Period}) ->
 check_flags(What) ->
     {bad_flags, What}.
 
-update_childspec(State, StartSpec) when ?is_simple(State) -> 
+update_childspec(State, StartSpec) when ?is_simple(State) ->
     case check_startspec(StartSpec) of                        
         {ok, [Child]} ->                                      
             {ok, State#state{children = [Child]}};            

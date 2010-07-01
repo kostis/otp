@@ -94,8 +94,6 @@
 	 multi_call/2, multi_call/3, multi_call/4,
 	 enter_loop/3, enter_loop/4, enter_loop/5, wake_hib/5]).
 
--export([behaviour_info/1]).
-
 %% System exports
 -export([system_continue/3,
 	 system_terminate/4,
@@ -111,13 +109,32 @@
 %%%  API
 %%%=========================================================================
 
--spec behaviour_info(atom()) -> 'undefined' | [{atom(), arity()}].
-
-behaviour_info(callbacks) ->
-    [{init,1},{handle_call,3},{handle_cast,2},{handle_info,2},
-     {terminate,2},{code_change,3}];
-behaviour_info(_Other) ->
-    undefined.
+-callback init(Args :: term()) ->
+    {ok, State :: term()} | {ok, State :: term(), timeout() | hibernate} |
+    {stop, Reason :: term()} | ignore.
+-callback handle_call(Request :: term(), From :: {pid(), Tag :: term()}, 
+                      State :: term()) ->
+    {reply, Reply :: term(), NewState :: term()} | 
+    {reply, Reply :: term(), NewState :: term(), timeout() | hibernate} |
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback handle_cast(Request :: term(), State :: term()) ->
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback handle_info(Info :: timeout() | term(), State :: term()) ->
+    {noreply, NewState :: term()} | 
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback terminate(Reason :: (normal | shutdown | {shutdown, term()} |
+                               term()), 
+                    State :: term()) -> 
+    term().
+-callback code_change(OldVsn :: (term() | {down, term()}), State :: term(), 
+                      Extra :: term()) ->
+    {ok, NewState :: term()}.
 
 %%%  -----------------------------------------------------------------
 %%% Starts a generic server.
@@ -840,12 +857,15 @@ name_to_pid(Name) ->
 %%-----------------------------------------------------------------
 format_status(Opt, StatusData) ->
     [PDict, SysState, Parent, Debug, [Name, State, Mod, _Time]] = StatusData,
-    NameTag = if is_pid(Name) ->
-		      pid_to_list(Name);
-		 is_atom(Name) ->
-		      Name
-	      end,
-    Header = lists:concat(["Status for generic server ", NameTag]),
+    StatusHdr = "Status for generic server",
+    Header = if
+		 is_pid(Name) ->
+		     lists:concat([StatusHdr, " ", pid_to_list(Name)]);
+		 is_atom(Name); is_list(Name) ->
+		     lists:concat([StatusHdr, " ", Name]);
+		 true ->
+		     {StatusHdr, Name}
+	     end,
     Log = sys:get_debug(log, Debug, []),
     DefaultStatus = [{data, [{"State", State}]}],
     Specfic =

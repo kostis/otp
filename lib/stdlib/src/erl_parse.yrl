@@ -47,7 +47,7 @@ opt_bit_size_expr bit_size_expr opt_bit_type_list bit_type_list bit_type
 top_type top_type_100 top_types type typed_expr typed_attr_val
 type_sig type_sigs type_guard type_guards fun_type fun_type_100 binary_type
 type_spec spec_fun typed_exprs typed_record_fields field_types field_type
-bin_base_type bin_unit_type int_type.
+bin_base_type bin_unit_type type_200 type_300 type_400 type_500.
 
 Terminals
 char integer float atom string var
@@ -61,8 +61,8 @@ char integer float atom string var
 '++' '--'
 '==' '/=' '=<' '<' '>=' '>' '=:=' '=/=' '<='
 '<<' '>>'
-'!' '=' '::'
-'spec' % helper
+'!' '=' '::' '..' '...'
+'spec' 'callback' % helper
 dot.
 
 Expect 2.
@@ -77,6 +77,7 @@ attribute -> '-' atom attr_val               : build_attribute('$2', '$3').
 attribute -> '-' atom typed_attr_val         : build_typed_attribute('$2','$3').
 attribute -> '-' atom '(' typed_attr_val ')' : build_typed_attribute('$2','$4').
 attribute -> '-' 'spec' type_spec            : build_type_spec('$2', '$3').
+attribute -> '-' 'callback' type_spec        : build_type_spec('$2', '$3').
 
 type_spec -> spec_fun type_sigs : {'$1', '$2'}.
 type_spec -> '(' spec_fun type_sigs ')' : {'$2', '$3'}.
@@ -120,8 +121,24 @@ top_types -> top_type ',' top_types       : ['$1'|'$3'].
 top_type -> var '::' top_type_100         : {ann_type, ?line('$1'), ['$1','$3']}.
 top_type -> top_type_100                  : '$1'.
 
-top_type_100 -> type                      : '$1'.
-top_type_100 -> type '|' top_type_100     : lift_unions('$1','$3').
+top_type_100 -> type_200                  : '$1'.
+top_type_100 -> type_200 '|' top_type_100 : lift_unions('$1','$3').
+
+type_200 -> type_300 '..' type_300        : {type, ?line('$1'), range,
+                                             [skip_paren('$1'),
+                                              skip_paren('$3')]}.
+type_200 -> type_300                      : '$1'.
+
+type_300 -> type_300 add_op type_400      : ?mkop2(skip_paren('$1'),
+                                                   '$2', skip_paren('$3')).
+type_300 -> type_400                      : '$1'.
+
+type_400 -> type_400 mult_op type_500     : ?mkop2(skip_paren('$1'),
+                                                   '$2', skip_paren('$3')).
+type_400 -> type_500                      : '$1'.
+
+type_500 -> prefix_op type                : ?mkop1('$1', skip_paren('$2')).
+type_500 -> type                          : '$1'.
 
 type -> '(' top_type ')'                  : {paren_type, ?line('$2'), ['$2']}.
 type -> var                               : '$1'.
@@ -135,7 +152,7 @@ type -> atom ':' atom '(' top_types ')'   : {remote_type, ?line('$1'),
                                              ['$1', '$3', '$5']}.
 type -> '[' ']'                           : {type, ?line('$1'), nil, []}.
 type -> '[' top_type ']'                  : {type, ?line('$1'), list, ['$2']}.
-type -> '[' top_type ',' '.' '.' '.' ']'  : {type, ?line('$1'),
+type -> '[' top_type ',' '...' ']'        : {type, ?line('$1'),
                                              nonempty_list, ['$2']}.
 type -> '{' '}'                           : {type, ?line('$1'), tuple, []}.
 type -> '{' top_types '}'                 : {type, ?line('$1'), tuple, '$2'}.
@@ -143,19 +160,13 @@ type -> '#' atom '{' '}'                  : {type, ?line('$1'), record, ['$2']}.
 type -> '#' atom '{' field_types '}'      : {type, ?line('$1'),
                                              record, ['$2'|'$4']}.
 type -> binary_type                       : '$1'.
-type -> int_type                          : '$1'.
-type -> int_type '.' '.' int_type         : {type, ?line('$1'), range,
-                                             ['$1', '$4']}.
+type -> integer                           : '$1'.
 type -> 'fun' '(' ')'                     : {type, ?line('$1'), 'fun', []}.
 type -> 'fun' '(' fun_type_100 ')'        : '$3'.
 
-int_type -> integer                       : '$1'.
-int_type -> '-' integer                   : abstract(-normalise('$2'),
-                                                     ?line('$2')).
-
-fun_type_100 -> '(' '.' '.' '.' ')' '->' top_type
+fun_type_100 -> '(' '...' ')' '->' top_type
                                           : {type, ?line('$1'), 'fun',
-                                             [{type, ?line('$1'), any}, '$7']}.
+                                             [{type, ?line('$1'), any}, '$5']}.
 fun_type_100 -> fun_type                  : '$1'.
 
 fun_type -> '(' ')' '->' top_type  : {type, ?line('$1'), 'fun',
@@ -180,9 +191,9 @@ binary_type -> '<<' bin_unit_type '>>'    : {type, ?line('$1'),binary,
 binary_type -> '<<' bin_base_type ',' bin_unit_type '>>'
                                     : {type, ?line('$1'), binary, ['$2', '$4']}.
 
-bin_base_type -> var ':' integer          : build_bin_type(['$1'], '$3').
+bin_base_type -> var ':' type          : build_bin_type(['$1'], '$3').
 
-bin_unit_type -> var ':' var '*' integer  : build_bin_type(['$1', '$3'], '$5').
+bin_unit_type -> var ':' var '*' type  : build_bin_type(['$1', '$3'], '$5').
 
 attr_val -> expr                     : ['$1'].
 attr_val -> expr ',' exprs           : ['$1' | '$3'].
@@ -526,6 +537,8 @@ Erlang code.
 
 parse_form([{'-',L1},{atom,L2,spec}|Tokens]) ->
     parse([{'-',L1},{'spec',L2}|Tokens]);
+parse_form([{'-',L1},{atom,L2,callback}|Tokens]) ->
+    parse([{'-',L1},{'callback',L2}|Tokens]);
 parse_form(Tokens) ->
     parse(Tokens).
 
@@ -572,7 +585,8 @@ build_typed_attribute({atom,La,Attr},_) ->
         _      -> ret_err(La, "bad attribute")
     end.
 
-build_type_spec({spec,La}, {SpecFun, TypeSpecs}) ->
+build_type_spec({Kind,La}, {SpecFun, TypeSpecs}) 
+  when (Kind =:= spec) or (Kind =:= callback) ->
     NewSpecFun =
 	case SpecFun of
 	    {atom, _, Fun} ->
@@ -586,7 +600,7 @@ build_type_spec({spec,La}, {SpecFun, TypeSpecs}) ->
 		%% Old style spec. Allow this for now.
 		{Mod,Fun,Arity}
 	    end,
-    {attribute,La,spec,{NewSpecFun, TypeSpecs}}.
+    {attribute,La,Kind,{NewSpecFun, TypeSpecs}}.
 
 find_arity_from_specs([Spec|_]) ->
     %% Use the first spec to find the arity. If all are not the same,
@@ -607,6 +621,11 @@ lift_unions(T1, {type, _La, union, List}) ->
 lift_unions(T1, T2) ->
     {type, ?line(T1), union, [T1, T2]}.
 
+skip_paren({paren_type,_L,[Type]}) ->
+    skip_paren(Type);
+skip_paren(Type) ->
+    Type.
+
 build_gen_type({atom, La, tuple}) ->
     {type, La, tuple, any};
 build_gen_type({atom, La, Name}) ->
@@ -615,7 +634,7 @@ build_gen_type({atom, La, Name}) ->
 build_bin_type([{var, _, '_'}|Left], Int) ->
     build_bin_type(Left, Int);
 build_bin_type([], Int) ->
-    Int;
+    skip_paren(Int);
 build_bin_type([{var, La, _}|_], _) ->
     ret_err(La, "Bad binary type").
 

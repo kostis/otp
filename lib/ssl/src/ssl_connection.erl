@@ -65,13 +65,14 @@
           ssl_options,        % #ssl_options{}
           socket_options,     % #socket_options{}
           connection_states,  % #connection_states{} from ssl_record.hrl
+	  tls_packets = [],        % Not yet handled decode ssl/tls packets.
           tls_record_buffer,  % binary() buffer of incomplete records
           tls_handshake_buffer, % binary() buffer of incomplete handshakes
 	  %% {{md5_hash, sha_hash}, {prev_md5, prev_sha}} (binary())
           tls_handshake_hashes, % see above 
           tls_cipher_texts,     % list() received but not deciphered yet
           own_cert,             % binary()  
-          session,              % #session{} from ssl_handshake.erl
+          session,              % #session{} from ssl_handshake.hrl
 	  session_cache,        % 
 	  session_cache_cb,     %
           negotiated_version,   % #protocol_version{}
@@ -124,8 +125,12 @@ recv(Pid, Length, Timeout) ->
 %% Description: Connect to a ssl server.
 %%--------------------------------------------------------------------
 connect(Host, Port, Socket, Options, User, CbInfo, Timeout) ->
-    start_fsm(client, Host, Port, Socket, Options, User, CbInfo,
-	      Timeout).
+    try start_fsm(client, Host, Port, Socket, Options, User, CbInfo,
+		  Timeout)
+    catch
+	exit:{noproc, _} ->
+	    {error, ssl_not_started}
+    end.
 %%--------------------------------------------------------------------
 %% Function: accept(Port, Socket, Opts, User, 
 %%                  CbInfo, Timeout) -> {ok, Socket} | {error, Reason}
@@ -134,8 +139,12 @@ connect(Host, Port, Socket, Options, User, CbInfo, Timeout) ->
 %%              ssl handshake. 
 %%--------------------------------------------------------------------
 ssl_accept(Port, Socket, Opts, User, CbInfo, Timeout) ->
-    start_fsm(server, "localhost", Port, Socket, Opts, User, 
-	      CbInfo, Timeout).
+    try start_fsm(server, "localhost", Port, Socket, Opts, User, 
+		  CbInfo, Timeout)
+    catch
+	exit:{noproc, _} ->
+	    {error, ssl_not_started}
+    end.	
 
 %%--------------------------------------------------------------------
 %% Function: handshake(SslSocket, Timeout) -> ok | {error, Reason}
@@ -280,12 +289,12 @@ start_link(Role, Host, Port, Socket, Options, User, CbInfo) ->
 %% gen_fsm:start_link/3,4, this function is called by the new process to 
 %% initialize. 
 %%--------------------------------------------------------------------
-init([Role, Host, Port, Socket, {SSLOpts, _} = Options, 
+init([Role, Host, Port, Socket, {SSLOpts0, _} = Options, 
       User, CbInfo]) ->
     State0 = initial_state(Role, Host, Port, Socket, Options, User, CbInfo),
     Hashes0 = ssl_handshake:init_hashes(),    
 
-    try ssl_init(SSLOpts, Role) of
+    try ssl_init(SSLOpts0, Role) of
 	{ok, Ref, CacheRef, OwnCert, Key, DHParams} ->	   
 	    State = State0#state{tls_handshake_hashes = Hashes0,
 				 own_cert = OwnCert,
@@ -317,10 +326,14 @@ hello(start, #state{host = Host, port = Port, role = client,
 		    ssl_options = SslOpts, 
 		    transport_cb = Transport, socket = Socket,
 		    connection_states = ConnectionStates,
+		    own_cert = Cert,
 		    renegotiation = {Renegotiation, _}}
       = State0) ->
+
     Hello = ssl_handshake:client_hello(Host, Port, 
-				       ConnectionStates, SslOpts, Renegotiation),
+				       ConnectionStates, 
+				       SslOpts, Cert,
+				       Renegotiation),
 
     Version = Hello#client_hello.client_version,
     Hashes0 = ssl_handshake:init_hashes(),
@@ -401,10 +414,11 @@ hello(Hello = #client_hello{client_version = ClientVersion},
 		     renegotiation = {Renegotiation, _},
 		     session_cache = Cache,		  
 		     session_cache_cb = CacheCb,
-		     ssl_options = SslOpts}) ->
+		     ssl_options = SslOpts,
+		     own_cert = Cert}) ->
     
     case ssl_handshake:hello(Hello, SslOpts, {Port, Session0, Cache, CacheCb,
-				     ConnectionStates0}, Renegotiation) of
+				     ConnectionStates0, Cert}, Renegotiation) of
         {Version, {Type, Session}, ConnectionStates} ->       
             do_server_hello(Type, State#state{connection_states  = 
 					      ConnectionStates,
@@ -700,13 +714,14 @@ connection(#hello_request{}, #state{host = Host, port = Port,
 				    socket = Socket,
 				    ssl_options = SslOpts,
 				    negotiated_version = Version,
+				    own_cert = Cert,
 				    transport_cb = Transport,
 				    connection_states = ConnectionStates0,
 				    renegotiation = {Renegotiation, _},
 				    tls_handshake_hashes = Hashes0} = State0) ->
    
     Hello = ssl_handshake:client_hello(Host, Port, 
-				       ConnectionStates0, SslOpts, Renegotiation),
+				       ConnectionStates0, SslOpts, Cert, Renegotiation),
   
     {BinMsg, ConnectionStates1, Hashes1} =
         encode_handshake(Hello, Version, ConnectionStates0, Hashes0),
@@ -1137,6 +1152,8 @@ sync_send_all_state_event(FsmPid, Event, Timeout) ->
  	exit:{timeout, _} ->
  	    {error, timeout};
 	exit:{normal, _} ->
+	    {error, closed};
+	exit:{shutdown, _} -> 
 	    {error, closed}
     end.
 
@@ -1284,7 +1301,6 @@ server_hello(ServerHello, #state{transport_cb = Transport,
                                  tls_handshake_hashes = Hashes0} = State) ->
     CipherSuite = ServerHello#server_hello.cipher_suite,
     {KeyAlgorithm, _, _} = ssl_cipher:suite_definition(CipherSuite),
-    %% Version = ServerHello#server_hello.server_version, TODO ska kontrolleras
     {BinMsg, ConnectionStates1, Hashes1} = 
         encode_handshake(ServerHello, Version, ConnectionStates0, Hashes0),
     Transport:send(Socket, BinMsg),
@@ -1516,14 +1532,18 @@ handle_server_key(
 	    ?ALERT_REC(?FATAL,?HANDSHAKE_FAILURE)
     end.
 
-verify_dh_params(Signed, Hash, {?rsaEncryption, PubKey, _PubKeyparams}) ->
+
+verify_dh_params(Signed, Hashes, {?rsaEncryption, PubKey, _PubKeyParams}) ->
     case public_key:decrypt_public(Signed, PubKey, 
 				   [{rsa_pad, rsa_pkcs1_padding}]) of
-	Hash ->
+	Hashes ->
 	    true;
 	_ ->
 	    false
-    end.
+    end;
+verify_dh_params(Signed, Hash, {?'id-dsa', PublicKey, PublicKeyParams}) ->
+    public_key:verify_signature(Hash, none, Signed, PublicKey, PublicKeyParams). 
+
 
 encode_alert(#alert{} = Alert, Version, ConnectionStates) ->
     ?DBG_TERM(Alert),
@@ -1726,6 +1746,23 @@ opposite_role(server) ->
 send_user(Pid, Msg) ->
     Pid ! Msg.
 
+handle_tls_handshake(Handle, StateName, #state{tls_packets = [Packet]} = State) ->
+    FsmReturn = {next_state, StateName, State#state{tls_packets = []}},
+    Handle(Packet, FsmReturn);
+
+handle_tls_handshake(Handle, StateName, #state{tls_packets = [Packet | Packets]} = State0) ->
+    FsmReturn = {next_state, StateName, State0#state{tls_packets = Packets}},
+    case Handle(Packet, FsmReturn) of
+	{next_state, NextStateName, State} ->
+	    handle_tls_handshake(Handle, NextStateName, State);
+	{stop, _,_} = Stop ->
+	    Stop
+    end.
+
+next_state(_, #alert{} = Alert, #state{negotiated_version = Version} = State) ->
+    handle_own_alert(Alert, Version, decipher_error, State),
+    {stop, normal, State};
+
 next_state(Next, no_record, State) ->
     {next_state, Next, State};
 
@@ -1760,8 +1797,8 @@ next_state(StateName, #ssl_tls{type = ?HANDSHAKE, fragment = Data},
    	end,
     try
    	{Packets, Buf} = ssl_handshake:get_tls_handshake(Data,Buf0, KeyAlg,Version),
-   	Start = {next_state, StateName, State0#state{tls_handshake_buffer = Buf}},
-	lists:foldl(Handle, Start, Packets)
+	State = State0#state{tls_packets = Packets, tls_handshake_buffer = Buf},
+	handle_tls_handshake(Handle, StateName, State)
     catch throw:#alert{} = Alert ->
    	    handle_own_alert(Alert, Version, StateName, State0), 
    	    {stop, normal, State0}
@@ -1798,13 +1835,19 @@ next_tls_record(Data, #state{tls_record_buffer = Buf0,
 	    Alert
     end.
 
-next_record(#state{tls_cipher_texts = [], socket = Socket} = State) ->
+next_record(#state{tls_packets = [], tls_cipher_texts = [], socket = Socket} = State) ->
     inet:setopts(Socket, [{active,once}]),
     {no_record, State};
-next_record(#state{tls_cipher_texts = [CT | Rest], 
+next_record(#state{tls_packets = [], tls_cipher_texts = [CT | Rest],
 		   connection_states = ConnStates0} = State) ->
-    {Plain, ConnStates} = ssl_record:decode_cipher_text(CT, ConnStates0),
-    {Plain, State#state{tls_cipher_texts = Rest, connection_states = ConnStates}}.
+    case ssl_record:decode_cipher_text(CT, ConnStates0) of
+	{Plain, ConnStates} ->		      
+	    {Plain, State#state{tls_cipher_texts = Rest, connection_states = ConnStates}};
+	#alert{} = Alert ->
+	    {Alert, State}
+    end;
+next_record(State) ->
+    {no_record, State}.
 
 next_record_if_active(State = 
 		      #state{socket_options = 
@@ -2049,6 +2092,7 @@ handle_own_alert(Alert, Version, Info,
     try %% Try to tell the other side
 	{BinMsg, _} =
 	encode_alert(Alert, Version, ConnectionStates),
+	linux_workaround_transport_delivery_problems(Alert, Socket),
 	Transport:send(Socket, BinMsg)
     catch _:_ ->  %% Can crash if we are in a uninitialized state
 	    ignore
@@ -2122,6 +2166,19 @@ notify_renegotiater(_) ->
     ok.
 
 workaround_transport_delivery_problems(Socket, Transport) ->
+    %% Standard trick to try to make sure all
+    %% data sent to to tcp port is really sent
+    %% before tcp port is closed.
     inet:setopts(Socket, [{active, false}]),
     Transport:shutdown(Socket, write),
     Transport:recv(Socket, 0).
+
+linux_workaround_transport_delivery_problems(#alert{level = ?FATAL}, Socket) ->
+    case os:type() of
+	{unix, linux} ->
+	    inet:setopts(Socket, [{nodelay, true}]);
+	_ ->
+	    ok
+    end;
+linux_workaround_transport_delivery_problems(_, _) ->
+    ok.

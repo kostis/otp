@@ -457,6 +457,10 @@ thr_create_prepare_child(void *vtcdp)
 {
     erts_thr_create_data_t *tcdp = (erts_thr_create_data_t *) vtcdp;
 
+#ifdef ERTS_ENABLE_LOCK_COUNT
+    erts_lcnt_thread_setup();
+#endif
+
 #ifndef NO_FPE_SIGNALS
     /*
      * We do not want fp exeptions in other threads than the
@@ -1324,10 +1328,18 @@ static char **build_unix_environment(char *block)
 	}
     }
 
-    for (j = 0; j < i; j++) {
+    for (j = 0; j < i; ) {
         size_t last = strlen(cpp[j])-1;
 	if (cpp[j][last] == '=' && strchr(cpp[j], '=') == cpp[j]+last) {
 	    cpp[j] = cpp[--len];
+	    if (len < i) {
+		i--;
+	    } else {
+		j++;
+	    }
+	}
+	else {
+	    j++;
 	}
     }
 
