@@ -285,8 +285,8 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
   MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
   BehTranslation = dialyzer_callgraph:get_behaviour_translation(Callgraph),
   BehaviourTranslations =
-    case (RaceDetection andalso BehTranslation) orelse DLDetection orelse
-      MsgAnalysis of
+    case (RaceDetection orelse DLDetection orelse MsgAnalysis) andalso
+      BehTranslation of
       true -> dialyzer_behaviours:translatable_behaviours();
       false -> []
     end,
