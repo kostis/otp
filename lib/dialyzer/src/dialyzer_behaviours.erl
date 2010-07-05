@@ -93,13 +93,11 @@ translatable_behaviours() ->
 get_behaviour_apis(Behaviours) ->
   get_behaviour_apis(Behaviours, []).
 
--spec translate_behaviour_api_call(dialyzer_races:mfa_or_funlbl(),
-				   [erl_types:erl_type()],
+-spec translate_behaviour_api_call(mfa_or_funlbl(), [erl_types:erl_type()],
 				   [dialyzer_races:core_vars()],
 				   behaviour_api_dict(),
-				   [{atom(), module()}]) ->
-				      {{dialyzer_races:mfa_or_funlbl(),
-					[erl_types:erl_type()],
+                                   [{atom(), module()}]) ->
+				      {{mfa_or_funlbl(), [erl_types:erl_type()],
 					[dialyzer_races:core_vars()]},
 				       [{atom(), module()}]}
 					| 'plain_call'.
