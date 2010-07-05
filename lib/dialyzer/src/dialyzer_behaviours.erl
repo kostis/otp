@@ -119,27 +119,44 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 	  case Directive of
 	    {create, no, _} -> plain_call;
 	    {create,  N, M} ->
-	      case cerl:concrete(nth_or_0(M, Args, foo)) of
-		CallbackModule when is_atom(CallbackModule) ->
-		  CM = CallbackModule,
-		  case cerl:concrete(nth_or_0(N, Args, foo)) of
-		    {_,Name} when is_atom(Name) -> {CM, TI, [{Name,CM}|CA]};
-		    Name when is_atom(Name)     -> {CM, TI, [{Name,CM}|CA]};
-		    _                           -> plain_call
+	      CMCandidate = nth_or_0(M, Args, foo),
+	      case cerl:is_literal(CMCandidate) of
+		true ->
+		  case cerl:concrete(CMCandidate) of
+		    CallbackModule when is_atom(CallbackModule) ->
+		      CM = CallbackModule,
+		      NameCandidate = nth_or_0(N, Args, foo),
+		      case cerl:is_literal(NameCandidate) of
+			true ->
+			  case cerl:concrete(NameCandidate) of
+			    {_,Name} when is_atom(Name) ->
+			      {CM, TI, add_reference({Name,CM},CA)};
+			    Name when is_atom(Name) ->
+			      {CM, TI, add_reference({Name,CM},CA)};
+			    _ -> plain_call
+			  end;
+			false -> plain_call
+		      end;
+		    _ -> plain_call
 		  end;
-		_ -> plain_call
+		false -> plain_call
 	      end;
 	    {refer, N} ->
 	      case CA of
 		[] -> plain_call;
 		 _ ->
-		  case cerl:concrete(nth_or_0(N, Args, foo)) of
-		    Name when is_atom(Name) ->
-		      case lists:keyfind(Name,1,CA) of
-			{_,CM} -> {CM, TI, CA};
-			false  -> plain_call
+		  NameCandidate = nth_or_0(N, Args, foo),
+		  case cerl:is_literal(NameCandidate) of
+		    true ->
+		      case cerl:concrete(NameCandidate) of
+			Name when is_atom(Name) ->
+			  case lists:keyfind(Name,1,CA) of
+			    {_,CM} -> {CM, TI, CA};
+			    false  -> plain_call
+			  end;
+			_ -> plain_call
 		      end;
-		    _ -> plain_call
+		    false -> plain_call
 		  end
 	      end
 	  end
@@ -157,6 +174,12 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
 			     _CallbackAssocs) ->
   plain_call.
+
+add_reference({Name,CM},CA) ->
+  case lists:member({Name,CM},CA) of
+    true  -> CA;
+    false -> [{Name,CM}|CA]
+  end.
 
 -spec translate_callgraph(behaviour_api_dict(), atom(),
 			  dialyzer_callgraph:callgraph()) ->
