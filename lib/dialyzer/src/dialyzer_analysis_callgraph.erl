@@ -33,23 +33,21 @@
 -include("dialyzer.hrl").
 
 -record(analysis_state,
-	{
-	  codeserver                    :: dialyzer_codeserver:codeserver(),
-	  analysis_type  = succ_typings :: anal_type(),
-	  defines        = []           :: [dial_define()],
-	  doc_plt                       :: dialyzer_plt:plt(),
-	  include_dirs   = []           :: [file:filename()],
-	  no_warn_unused                :: set(),
-	  parent                        :: pid(),
-	  plt                           :: dialyzer_plt:plt(),
-	  old_plt                       :: dialyzer_plt:plt(),
-	  start_from     = byte_code    :: start_from(),
-	  use_contracts  = true         :: boolean(),
-	  behaviours     = {false,[]}   :: {boolean(),
-					    [dialyzer_behaviours:behaviour()]},
-	  diff_mods      = []           :: [atom()],
-	  fast_plt       = true         :: boolean()
-	 }).
+	{codeserver                    :: dialyzer_codeserver:codeserver(),
+	 analysis_type  = succ_typings :: anal_type(),
+	 defines        = []           :: [dial_define()],
+	 doc_plt                       :: dialyzer_plt:plt(),
+	 include_dirs   = []           :: [file:filename()],
+	 no_warn_unused                :: set(),
+	 parent                        :: pid(),
+	 plt                           :: dialyzer_plt:plt(),
+	 old_plt        = dialyzer_plt:new() :: dialyzer_plt:plt(),
+	 start_from     = byte_code    :: start_from(),
+	 use_contracts  = true         :: boolean(),
+	 behaviours     = {false,[]}   :: {boolean(),
+                                           [dialyzer_behaviours:behaviour()]},
+	 diff_mods      = []           :: [atom()],
+	 fast_plt       = true         :: boolean()}).
 
 -record(server_state, {parent :: pid(), legal_warnings :: [dial_warn_tag()]}).
 
