@@ -101,9 +101,12 @@
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
 		module               :: module(),
-		behaviour_api_dict = [] :: 
-		  dialyzer_behaviours:behaviour_api_dict(),
-		callback_assocs    = [] :: [{atom(),module()}]}).
+		behaviour_api_dict = 
+		  dialyzer_behaviours:new_behaviour_api_dict() :: 
+		    dialyzer_behaviours:behaviour_api_dict(),
+		translation_table =
+		  dialyzer_behaviours:new_translation_table() ::
+		    dialyzer_behaviours:translation_table()}).
 
 %% Exported Types
 
@@ -309,8 +312,8 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
             dialyzer_races:race(State4)));
 	Behaviours ->
 	  TempCG =
-            dialyzer_behaviours:translate_callgraph(Behaviours, Module,
-						    State4#state.callgraph),
+            dialyzer_behaviours:translate_callgraph(
+	      State4#state.translation_table, State4#state.callgraph),
           St =
             dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
               dialyzer_races:race(State4#state{callgraph = TempCG}))),
@@ -693,17 +696,19 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	%%               respective callback module's function.
 
 	BehApiDict = State#state.behaviour_api_dict,
-	CBAssocs = State#state.callback_assocs,
+	Translations = State#state.translation_table,
+	CurFun = dialyzer_races:get_curr_fun(Races),
 	{RealFun, RealArgTypes, RealArgs, State0} =
 	  case dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
                                                                 Args,
                                                                 BehApiDict,
-                                                                CBAssocs) of
+                                                                Translations,
+								CurFun) of
 	    plain_call -> 
 	      {Fun, ArgTypes, Args, State};
 	    {{TransFun, TransArgTypes, TransArgs}, NewCallbackAssocs} ->
 	      {TransFun, TransArgTypes, TransArgs,
-	       State#state{callback_assocs = NewCallbackAssocs}}
+	       State#state{translation_table = NewCallbackAssocs}}
 	  end,
         State1 =
           case RaceDetection orelse MsgAnalysis of

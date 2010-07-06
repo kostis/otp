@@ -30,15 +30,17 @@
 
 -module(dialyzer_behaviours).
 
--export([check_callbacks/4,
+-export([new_behaviour_api_dict/0,
+	 new_translation_table/0,
+	 check_callbacks/4,
 	 get_behaviour_apis/1,
 	 get_registering_apis/1,
 	 scan_behaviours/3,
 	 translatable_behaviours/0,
-	 translate_behaviour_api_call/5,
-	 translate_callgraph/3]).
+	 translate_behaviour_api_call/6,
+	 translate_callgraph/2]).
 
--export_type([behaviour/0, behaviour_api_dict/0]).
+-export_type([behaviour/0, behaviour_api_dict/0, translation_table/0]).
 
 -define(TRANSLATABLE_BEHAVIOURS, [gen_server]).
 
@@ -49,6 +51,12 @@
 %%--------------------------------------------------------------------
 
 -type behaviour() :: atom().
+
+-record(translation_table, {
+	  module_refs  = [] :: [{atom(), module()}],
+	  translations = [] :: [{mfa_or_funlbl(), mfa_or_funlbl()}]}).
+
+-type translation_table() :: #translation_table{}.
 
 -record(state, {plt        :: dialyzer_plt:plt(),
 		codeserver :: dialyzer_codeserver:codeserver(),
@@ -93,21 +101,28 @@ translatable_behaviours() ->
 get_behaviour_apis(Behaviours) ->
   get_behaviour_apis(Behaviours, []).
 
+-spec new_translation_table() -> translation_table().
+
+new_translation_table() ->
+  #translation_table{}.
+
 -spec translate_behaviour_api_call(mfa_or_funlbl(), [erl_types:erl_type()],
 				   [dialyzer_races:core_vars()],
 				   behaviour_api_dict(),
-                                   [{atom(), module()}]) ->
+                                   translation_table(),
+				   mfa_or_funlbl()) ->
 				      {{mfa_or_funlbl(), [erl_types:erl_type()],
 					[dialyzer_races:core_vars()]},
-				       [{atom(), module()}]}
+				       translation_table()}
 					| 'plain_call'.
 
-translate_behaviour_api_call(_Fun, _ArgTypes, _Args, [], _CallbackAssocs) ->
+translate_behaviour_api_call(_Fun, _ArgTypes, _Args, [], _Translations,
+			     _CurFun) ->
   plain_call;
 translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
-			     BehApiInfo, CallbackAssocs) ->
+			     BehApiInfo, Translations, CurFun) ->
 %  io:format("\nCheck:~p",[{Module, Fun, Arity}]),
-  CA = CallbackAssocs,
+  CA = Translations#translation_table.module_refs,
   Query =
   case lists:keyfind(Module, 1, BehApiInfo) of
     false -> plain_call;
@@ -164,15 +179,20 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
   end,
   case Query of
     plain_call -> Query;
-    {Callback, {CFun, CArity, COrder}, NewCallbackAssocs} ->
+    {Callback, {CFun, CArity, COrder}, NewModuleRefs} ->
       Call = {{Callback, CFun, CArity},
 	      [nth_or_0(N, ArgTypes, erl_types:t_any()) || N <-COrder],
 	      [nth_or_0(N, Args, bypassed) || N <-COrder]},
+      OldTranslations = Translations#translation_table.translations,
 %      io:format("\nTranslation: ~p",[Call]),
-      {Call, NewCallbackAssocs}
+      {Call, 
+       #translation_table{
+	 module_refs = NewModuleRefs,
+	 translations = [{CurFun,{Callback,CFun,CArity}}|
+			 OldTranslations]}}
   end;
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
-			     _CallbackAssocs) ->
+			     _Translations, _CurFun) ->
   plain_call.
 
 add_reference({Name,CM},CA) ->
@@ -181,23 +201,13 @@ add_reference({Name,CM},CA) ->
     false -> [{Name,CM}|CA]
   end.
 
--spec translate_callgraph(behaviour_api_dict(), atom(),
+-spec translate_callgraph(translation_table(),
 			  dialyzer_callgraph:callgraph()) ->
 			     dialyzer_callgraph:callgraph().
 
-translate_callgraph([{Behaviour,_}|Behaviours], Module, Callgraph) ->
-  UsedCalls = [Call || {_From, {M, _F, _A}} = Call <-
-			 dialyzer_callgraph:get_behaviour_api_calls(Callgraph),
-		       M =:= Behaviour],
-  Calls = [{{Behaviour, API, Arity}, Callback} ||
-	    {{API, Arity}, Callback, _} <- behaviour_api_calls(Behaviour)],
-  DirectCalls = [{From, {Module, Fun, Arity}} ||
-		  {From, To} <- UsedCalls,{API, {Fun, Arity, _Ord}} <- Calls,
-		  To =:= API],
-  NewCallgraph = dialyzer_callgraph:add_behaviour_edges(DirectCalls, Callgraph),
-  translate_callgraph(Behaviours, Module, NewCallgraph);
-translate_callgraph([], _Module, Callgraph) ->
-  Callgraph.
+translate_callgraph(Translations, Callgraph) ->
+  DirectCalls = Translations#translation_table.translations,
+  dialyzer_callgraph:add_behaviour_edges(DirectCalls, Callgraph).
 
 %%--------------------------------------------------------------------
 
@@ -370,6 +380,11 @@ get_registering_apis([], Acc) -> Acc.
 -type name_arg()::'no' | original_fun_arg().
 -type callback_module_arg()::original_fun_arg().
 -type original_fun_arg()::byte().
+
+-spec new_behaviour_api_dict() -> behaviour_api_dict().
+
+new_behaviour_api_dict() ->
+  [].
 
 -spec behaviour_api_calls(behaviour()) -> behaviour_api_info().
 
