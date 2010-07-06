@@ -72,12 +72,12 @@
 -type core_args()   :: [core_vars()] | 'empty'.
 -type op()          :: 'bind' | 'unbind'.
 
--type call()       :: 'whereis' | 'register' | 'unregister' | 'ets_new'
-                    | 'ets_lookup' | 'ets_insert' | 'mnesia_dirty_read1'
-                    | 'mnesia_dirty_read2' | 'mnesia_dirty_write1'
-                    | 'mnesia_dirty_write2' | 'function_call'. 
--type race_tags()  :: 'whereis_register' | 'whereis_unregister'
-                    | 'ets_lookup_insert' | 'mnesia_dirty_read_write'.
+-type call()        :: 'whereis' | 'register' | 'unregister' | 'ets_new'
+                     | 'ets_lookup' | 'ets_insert' | 'mnesia_dirty_read1'
+                     | 'mnesia_dirty_read2' | 'mnesia_dirty_write1'
+                     | 'mnesia_dirty_write2' | 'function_call'. 
+-type race_tags()   :: 'whereis_register' | 'whereis_unregister'
+                     | 'ets_lookup_insert' | 'mnesia_dirty_read_write'.
 -type pid_tags()    :: 'self'.
 
 -record(curr_fun,   {status     :: 'in' | 'out',
@@ -88,13 +88,13 @@
                      call_vars  :: [core_vars()],
                      var_map    :: dict()}).
 
--type case_tags()  :: 'beg_case' | #beg_clause{} | #end_clause{} | #end_case{}.
--type code()       :: [#dep_call{} | #warn_call{} | #fun_call{} |
-                       #curr_fun{} | #let_tag{} | case_tags() |
-                       race_tags() | pid_tags()].
+-type case_tags()   :: 'beg_case' | #beg_clause{} | #end_clause{} | #end_case{}.
+-type code()        :: [#dep_call{} | #warn_call{} | #fun_call{} |
+                        #curr_fun{} | #let_tag{} | case_tags() |
+                        race_tags() | pid_tags()].
 
--type table_var()  :: label() | ?no_label.
--type table()      :: {'named', table_var(), [string()]} | 'other' | 'no_t'.
+-type table_var()   :: label() | ?no_label.
+-type table()       :: {'named', table_var(), [string()]} | 'other' | 'no_t'.
 
 -record(race_fun,   {mfa        :: mfa(),
                      args       :: args(),
