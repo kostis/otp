@@ -310,7 +310,7 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
 	[] ->
           dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
             dialyzer_races:race(State4)));
-	Behaviours ->
+	_ ->
 	  TempCG =
             dialyzer_behaviours:translate_callgraph(
 	      State4#state.translation_table, State4#state.callgraph),
