@@ -157,13 +157,14 @@ get_warnings_from_modules([M|Ms], State, DocPlt, Acc) when is_atom(M) ->
       true  -> dialyzer_behaviours:check_callbacks(M, Attrs, Plt, Codeserver);
       false -> []
     end,
-  {Warnings3, FunTypes, PublicTables, NamedTables, DLs, Msgs} =
+  {Warnings3, FunTypes, PublicTables, NamedTables, DLs, Msgs, Translations} =
     dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph, Records,
                                    NoWarnUnused),
   NewDocPlt = insert_into_doc_plt(FunTypes, Callgraph, DocPlt),
   NewCallgraph =
     dialyzer_callgraph:renew_heisen_info(Callgraph, PublicTables,
-                                         NamedTables, DLs, Msgs),
+                                         NamedTables, DLs, Msgs,
+					 Translations),
   State1 = st__renew_state_calls(NewCallgraph, State),
   get_warnings_from_modules(Ms, State1, NewDocPlt,
 			    [Warnings1, Warnings2, Warnings3|Acc]);
@@ -198,11 +199,12 @@ refine_one_module(M, State) ->
   AllFuns = collect_fun_info([ModCode]),
   FunTypes = get_fun_types_from_plt(AllFuns, State),
   Records = dialyzer_codeserver:lookup_mod_records(M, CodeServer),
-  {NewFunTypes, PublicTables, NamedTables, DLs, Msgs} =
+  {NewFunTypes, PublicTables, NamedTables, DLs, Msgs, Translations} =
     dialyzer_dataflow:get_fun_types(ModCode, PLT, Callgraph, Records),
   NewCallgraph =
     dialyzer_callgraph:renew_heisen_info(Callgraph, PublicTables,
-                                         NamedTables, DLs, Msgs),
+                                         NamedTables, DLs, Msgs,
+					 Translations),
   case reached_fixpoint(FunTypes, NewFunTypes) of
     true ->
       State1 = st__renew_state_calls(NewCallgraph, State),

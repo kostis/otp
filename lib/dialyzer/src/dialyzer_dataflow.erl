@@ -104,9 +104,9 @@
 		behaviour_api_dict = 
 		  dialyzer_behaviours:new_behaviour_api_dict() :: 
 		    dialyzer_behaviours:behaviour_api_dict(),
-		translation_table =
-		  dialyzer_behaviours:new_translation_table() ::
-		    dialyzer_behaviours:translation_table()}).
+		callback_ref_list =
+		  dialyzer_behaviours:new_callback_ref_list() ::
+		    dialyzer_behaviours:callback_ref_list()}).
 
 %% Exported Types
 
@@ -117,7 +117,8 @@
 -spec get_warnings(cerl:c_module(), dialyzer_plt:plt(),
                    dialyzer_callgraph:callgraph(), dict(), set()) ->
 	{[dial_warning()], dict(), [label()], [string()],
-         dialyzer_deadlocks:dls(), dialyzer_messages:msgs()}.
+         dialyzer_deadlocks:dls(), dialyzer_messages:msgs(),
+	 [dialyzer_callgraph:callgraph_edge()]}.
 
 get_warnings(Tree, Plt, Callgraph, Records, NoWarnUnused) ->
   State1 = analyze_module(Tree, Plt, Callgraph, Records, true),
@@ -130,12 +131,14 @@ get_warnings(Tree, Plt, Callgraph, Records, NoWarnUnused) ->
    dialyzer_callgraph:get_public_tables(Callgraph1),
    dialyzer_callgraph:get_named_tables(Callgraph1),
    dialyzer_callgraph:get_deadlocks(Callgraph1),
-   dialyzer_callgraph:get_msgs(Callgraph1)}.
+   dialyzer_callgraph:get_msgs(Callgraph1),
+   dialyzer_callgraph:get_translations(Callgraph1)}.
 
 -spec get_fun_types(cerl:c_module(), dialyzer_plt:plt(),
                     dialyzer_callgraph:callgraph(), dict()) ->
 	{dict(), [label()], [string()], dialyzer_deadlocks:dls(),
-         dialyzer_messages:msgs()}.
+         dialyzer_messages:msgs(),[dialyzer_callgraph:callgraph_edge()]}.
+
 
 get_fun_types(Tree, Plt, Callgraph, Records) ->
   State = analyze_module(Tree, Plt, Callgraph, Records, false),
@@ -147,7 +150,8 @@ get_fun_types(Tree, Plt, Callgraph, Records) ->
    dialyzer_callgraph:get_public_tables(Callgraph1),
    dialyzer_callgraph:get_named_tables(Callgraph1),
    dialyzer_callgraph:get_deadlocks(Callgraph1),
-   Msgs1}.
+   Msgs1,
+   dialyzer_callgraph:get_translations(Callgraph1)}.
 
 %%--------------------------------------------------------------------
 
@@ -312,8 +316,7 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
             dialyzer_races:race(State4)));
 	_ ->
 	  TempCG =
-            dialyzer_behaviours:translate_callgraph(
-	      State4#state.translation_table, State4#state.callgraph),
+            dialyzer_behaviours:translate_callgraph(State4#state.callgraph),
           St =
             dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
               dialyzer_races:race(State4#state{callgraph = TempCG}))),
@@ -696,19 +699,29 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	%%               respective callback module's function.
 
 	BehApiDict = State#state.behaviour_api_dict,
-	Translations = State#state.translation_table,
+	CallbackRefList = State#state.callback_ref_list,
 	CurFun = dialyzer_races:get_curr_fun(Races),
 	{RealFun, RealArgTypes, RealArgs, State0} =
 	  case dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
                                                                 Args,
-                                                                BehApiDict,
-                                                                Translations,
+								BehApiDict,
+                                                                CallbackRefList,
 								CurFun) of
 	    plain_call -> 
 	      {Fun, ArgTypes, Args, State};
-	    {{TransFun, TransArgTypes, TransArgs}, NewCallbackAssocs} ->
-	      {TransFun, TransArgTypes, TransArgs,
-	       State#state{translation_table = NewCallbackAssocs}}
+	    {{TransFun, TransArgTypes, TransArgs}, NewCallbackRefList, Edge} ->
+	      Edges =
+		dialyzer_callgraph:get_translations(Callgraph),
+	      NewEdges = case lists:member(Edge, Edges) of
+			   false -> [Edge|Edges];
+			   true  -> Edges
+			 end,
+	      NewCallgraph =
+		dialyzer_callgraph:put_translations(NewEdges, Callgraph),
+	      TempState = 
+		State#state{callgraph = NewCallgraph,
+			    callback_ref_list = NewCallbackRefList},
+	      {TransFun, TransArgTypes, TransArgs, TempState}
 	  end,
         State1 =
           case RaceDetection orelse MsgAnalysis of

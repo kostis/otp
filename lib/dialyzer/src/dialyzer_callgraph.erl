@@ -46,7 +46,7 @@
 	 need_analysis/2,
 	 new/0,
 	 in_neighbours/2,
-	 renew_heisen_info/5,
+	 renew_heisen_info/6,
 	 reset_from_funs/2,
 	 scan_core_tree/2,
 	 strip_module_deps/2,
@@ -63,14 +63,15 @@
          get_race_detection/1, put_deadlock_detection/2,
          put_deadlocks/2, put_digraph/2, put_msg_analysis/2,
          put_msgs/2, put_named_tables/2, put_public_tables/2,
-         put_race_detection/2,
+         put_race_detection/2, get_translations/1,
+	 put_translations/2,
          %% behaviours
          put_behaviour_api_calls/2, get_behaviour_api_calls/1,
          put_diff_mods/2, put_fast_plt/2, get_fast_plt/1,
          put_behaviour_translation/2, get_behaviour_translation/1,
          add_behaviour_edges/2, clear_behaviour_edges/1]).
 
--export_type([callgraph/0]).
+-export_type([callgraph/0, callgraph_edge/0]).
 
 -include("dialyzer.hrl").
 
@@ -116,6 +117,7 @@
                     dl_detection    = false                   :: boolean(),
                     msg_analysis    = false                   :: boolean(),
                     beh_translation = false                   :: boolean(),
+		    translations    = []                      :: [callgraph_edge()],
 		    beh_api_calls   = []                      :: [{mfa(), mfa()}],
                     beh_edges       = []                      :: [callgraph_edge()],
 		    diff_mods       = []                      :: [atom()],
@@ -245,14 +247,16 @@ find_non_local_calls([], Set) ->
   sets:to_list(Set).
 
 -spec renew_heisen_info(callgraph(), [label()], [string()],
-                        dialyzer_deadlocks:dls(), dialyzer_messages:msgs()) ->
+                        dialyzer_deadlocks:dls(), dialyzer_messages:msgs(),
+			[callgraph_edge()]) ->
   callgraph().
 
-renew_heisen_info(CG, PublicTables, NamedTables, DLs, Msgs) ->
+renew_heisen_info(CG, PublicTables, NamedTables, DLs, Msgs, Translations) ->
   CG#callgraph{public_tables = PublicTables,
                named_tables = NamedTables,
                deadlocks = DLs,
-               msgs = Msgs}.
+               msgs = Msgs,
+	       translations = Translations}.
 
 %%----------------------------------------------------------------------
 %% Handling of modules & SCCs
@@ -714,6 +718,11 @@ get_deadlock_detection(#callgraph{dl_detection = DD}) ->
 get_deadlocks(#callgraph{deadlocks = Deadlocks}) ->
   Deadlocks.
 
+-spec get_translations(callgraph()) -> [callgraph_edge()].
+
+get_translations(#callgraph{translations = Translations}) ->
+  Translations.
+
 -spec get_digraph(callgraph()) -> digraph().
 
 get_digraph(#callgraph{digraph = Digraph}) ->
@@ -753,6 +762,11 @@ put_deadlock_detection(DeadlockDetection, Callgraph) ->
 
 put_deadlocks(Deadlocks, Callgraph) ->
   Callgraph#callgraph{deadlocks = Deadlocks}.
+
+-spec put_translations([callgraph_edge()], callgraph()) -> callgraph().
+
+put_translations(Translations, Callgraph) ->
+  Callgraph#callgraph{translations = Translations}.
 
 -spec put_digraph(digraph(), callgraph()) -> callgraph().
 
