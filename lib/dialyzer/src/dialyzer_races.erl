@@ -132,17 +132,47 @@
                  file_line(), dialyzer_dataflow:state()) -> 
   dialyzer_dataflow:state().
 
-store_call(Fun, ArgTypes, Args, FileLine, State) ->
-  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-  Races = dialyzer_dataflow:state__get_races(State),
+store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
+  Callgraph = dialyzer_dataflow:state__get_callgraph(InpState),
+  Races = dialyzer_dataflow:state__get_races(InpState),
   CurrFun = Races#races.curr_fun,
   CurrFunLabel = Races#races.curr_fun_label,
   RaceTags = Races#races.race_tags,
-  PidTags = dialyzer_dataflow:state__get_pid_tags(State),
+  PidTags = dialyzer_dataflow:state__get_pid_tags(InpState),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
   ProcReg = dialyzer_messages:get_proc_reg(Msgs),
   SendTags = dialyzer_messages:get_send_tags(Msgs),
-  CleanState = dialyzer_dataflow:state__records_only(State),
+  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+  CleanState = dialyzer_dataflow:state__records_only(InpState),
+
+  %% EXPERIMENTAL: Turn a behaviour's API call into a call to the
+  %%               respective callback module's function.
+  
+  BehApiDict = dialyzer_dataflow:state__get_behaviour_api_dict(InpState),
+  CallbackRefList = dialyzer_dataflow:state__get_callback_ref_list(InpState),
+  {Fun, ArgTypes, Args, State} =
+    case dialyzer_behaviours:translate_behaviour_api_call(InpFun, InpArgTypes,
+							  InpArgs, BehApiDict,
+							  CallbackRefList,
+							  CurrFun) of
+      plain_call -> 
+	{InpFun, InpArgTypes, InpArgs, InpState};
+      {{TransFun, TransArgTypes, TransArgs}, NewCallbackRefList, Edge} ->
+	Edges =
+	  dialyzer_callgraph:get_translations(Callgraph),
+	NewEdges = case lists:member(Edge, Edges) of
+		     false -> [Edge|Edges];
+		     true  -> Edges
+		   end,
+	NewCallgraph =
+	  dialyzer_callgraph:put_translations(NewEdges, Callgraph),
+	TempState0 = dialyzer_dataflow:state__put_callback_ref_list(
+		       NewCallbackRefList,
+		       dialyzer_dataflow:state__put_callgraph(
+			 NewCallgraph, InpState)),
+	{TransFun, TransArgTypes, TransArgs, TempState0}
+    end,
+
   {NewRaceList, NewRaceListSize, NewRaceTags, NewTable, NewPidTags,
    NewProcReg, NewSendTags} = 
     case CurrFun of

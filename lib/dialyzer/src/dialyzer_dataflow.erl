@@ -35,7 +35,11 @@
          state__get_callgraph/1, state__get_pid_tags/1,
          state__get_races/1, state__get_records/1,
          state__put_callgraph/2, state__put_pid_tags/2,
-         state__put_races/2, state__records_only/1]).
+         state__put_races/2, state__records_only/1,
+	 state__get_behaviour_api_dict/1,
+	 state__put_behaviour_api_dict/2,
+	 state__get_callback_ref_list/1,
+	 state__put_callback_ref_list/2]).
 
 %% Debug and test interfaces.
 -export([get_top_level_signatures/2, pp/1]).
@@ -694,44 +698,17 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
         Ann = cerl:get_ann(Tree),
         File = get_file(Ann),
         Line = abs(get_line(Ann)),
-
-	%% EXPERIMENTAL: Turn a behaviour's API call into a call to the
-	%%               respective callback module's function.
-
-	BehApiDict = State#state.behaviour_api_dict,
-	CallbackRefList = State#state.callback_ref_list,
-	CurFun = dialyzer_races:get_curr_fun(Races),
-	{RealFun, RealArgTypes, RealArgs, State0} =
-	  case dialyzer_behaviours:translate_behaviour_api_call(Fun, ArgTypes,
-                                                                Args,
-								BehApiDict,
-                                                                CallbackRefList,
-								CurFun) of
-	    plain_call -> 
-	      {Fun, ArgTypes, Args, State};
-	    {{TransFun, TransArgTypes, TransArgs}, NewCallbackRefList, Edge} ->
-	      Edges =
-		dialyzer_callgraph:get_translations(Callgraph),
-	      NewEdges = case lists:member(Edge, Edges) of
-			   false -> [Edge|Edges];
-			   true  -> Edges
-			 end,
-	      NewCallgraph =
-		dialyzer_callgraph:put_translations(NewEdges, Callgraph),
-	      TempState = 
-		State#state{callgraph = NewCallgraph,
-			    callback_ref_list = NewCallbackRefList},
-	      {TransFun, TransArgTypes, TransArgs, TempState}
-	  end,
         State1 =
           case RaceDetection orelse MsgAnalysis of
-            true -> dialyzer_races:store_call(RealFun, RealArgTypes, RealArgs,
-                                              {File, Line}, State0);
-            false -> State0
+            true -> dialyzer_races:store_call(Fun, ArgTypes, Args, {File, Line},
+					      State);
+            false -> State
           end,
         case DLDetection of
-          true -> dialyzer_deadlocks:store_call(Fun, RealFun, Args, ArgTypes,
-                                                {File, Line}, State1);
+          true ->
+	    CurrFun = dialyzer_races:get_curr_fun(Races),
+	    dialyzer_deadlocks:store_call(Fun, CurrFun, Args, ArgTypes,
+					  {File, Line}, State1);
           false -> State1
         end;
       false -> State
@@ -3386,6 +3363,30 @@ state__put_races(Races, State) ->
 
 state__records_only(#state{records = Records}) ->
   #state{records = Records}.
+
+-spec state__get_behaviour_api_dict(state()) ->
+				       dialyzer_behaviours:behaviour_api_dict().
+
+state__get_behaviour_api_dict(#state{behaviour_api_dict = BehApiDict}) ->
+  BehApiDict.
+
+-spec state__put_behaviour_api_dict(dialyzer_behaviours:behaviour_api_dict(),
+				    state()) -> state().
+
+state__put_behaviour_api_dict(BehApiDict, State) ->
+  State#state{behaviour_api_dict = BehApiDict}.
+
+-spec state__get_callback_ref_list(state()) ->
+				      dialyzer_behaviours:callback_ref_list().
+
+state__get_callback_ref_list(#state{callback_ref_list = CallbackRefList}) ->
+  CallbackRefList.
+
+-spec state__put_callback_ref_list(dialyzer_behaviours:callback_ref_list(),
+				   state()) -> state().
+
+state__put_callback_ref_list(CallbackRefList, State) ->
+  State#state{callback_ref_list = CallbackRefList}.
 
 %%% ===========================================================================
 %%%
