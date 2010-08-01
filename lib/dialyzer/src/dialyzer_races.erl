@@ -45,6 +45,8 @@
          put_curr_fun_lbl_args/3, put_fun_args/2, put_heisen_anal/2,
          put_race_list/3]).
 
+%% Exported Types
+
 -export_type([code/0, core_vars/0, races/0]).
 
 -include("dialyzer.hrl").
@@ -64,21 +66,23 @@
 
 %%% ===========================================================================
 %%%
-%%%  Local Types
+%%%  Types and Records
 %%%
 %%% ===========================================================================
 
--type var_to_map2() :: cerl:cerl() | [cerl:cerl()] | ?bypassed.
 -type core_args()   :: [core_vars()] | 'empty'.
 -type op()          :: 'bind' | 'unbind'.
+-type var_to_map2() :: cerl:cerl() | [cerl:cerl()] | ?bypassed.
 
 -type call()        :: 'whereis' | 'register' | 'unregister' | 'ets_new'
                      | 'ets_lookup' | 'ets_insert' | 'mnesia_dirty_read1'
                      | 'mnesia_dirty_read2' | 'mnesia_dirty_write1'
-                     | 'mnesia_dirty_write2' | 'function_call'. 
+                     | 'mnesia_dirty_write2' | 'function_call'.
+
+-type case_tags()   :: 'beg_case' | #beg_clause{} | #end_clause{} | #end_case{}.
+-type pid_tags()    :: 'self'.
 -type race_tags()   :: 'whereis_register' | 'whereis_unregister'
                      | 'ets_lookup_insert' | 'mnesia_dirty_read_write'.
--type pid_tags()    :: 'self'.
 
 -record(curr_fun,   {status     :: 'in' | 'out',
                      mfa        :: mfa_or_funlbl(),
@@ -88,10 +92,9 @@
                      call_vars  :: [core_vars()],
                      var_map    :: dict()}).
 
--type case_tags()   :: 'beg_case' | #beg_clause{} | #end_clause{} | #end_case{}.
 -type code()        :: [#dep_call{} | #warn_call{} | #fun_call{} |
                         #curr_fun{} | #let_tag{} | case_tags() |
-                        race_tags() | pid_tags()].
+                        pid_tags() | race_tags()].
 
 -type table_var()   :: label() | ?no_label.
 -type table()       :: {'named', table_var(), [string()]} | 'other' | 'no_t'.
@@ -115,12 +118,6 @@
                 %% true for fun types and warning mode
                 heisen_anal = false     :: boolean(),
                 race_warnings = []      :: [dial_warning()]}).
-
-%%% ===========================================================================
-%%%
-%%%  Exported Types
-%%%
-%%% ===========================================================================
 
 -opaque races() :: #races{}.
 

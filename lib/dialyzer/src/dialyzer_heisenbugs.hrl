@@ -62,10 +62,13 @@
 -record(beg_clause, {arg        :: var_to_map1(),
                      pats       :: var_to_map1(),
                      guard      :: cerl:cerl()}).
+
 -record(end_clause, {arg        :: var_to_map1(),
                      pats       :: var_to_map1(),
                      guard      :: cerl:cerl()}).
+
 -record(end_case,   {clauses    :: [#end_clause{}]}).
+
 -record(dep_call,   {call_name  :: dep_calls(),
                      args       :: args(),
                      arg_types  :: [erl_types:erl_type()],
@@ -73,12 +76,15 @@
                      state      :: _, %% XXX: recursive 
                      file_line  :: file_line(),
                      var_map    :: dict()}).
+
 -record(fun_call,   {caller     :: mfa_or_funlbl(),
                      callee     :: mfa_or_funlbl(),
                      arg_types  :: [erl_types:erl_type()],
                      vars       :: [core_vars()]}).
+
 -record(let_tag,    {var        :: var_to_map1(),
                      arg        :: var_to_map1()}).
+
 -record(warn_call,  {call_name  :: warn_calls(),
                      args       :: args(),
                      var_map    :: dict()}).
