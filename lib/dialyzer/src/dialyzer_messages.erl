@@ -39,6 +39,8 @@
          get_rcv_tags/1, get_send_tags/1, new/0,
          put_rcv_tags/2, put_send_tags/2]).
 
+%% Exported Types
+
 -export_type([msgs/0, pid_fun/0]).
 
 -include("dialyzer.hrl").
