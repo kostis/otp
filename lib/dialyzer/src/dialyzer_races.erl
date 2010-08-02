@@ -92,7 +92,7 @@
                      call_vars  :: [core_vars()],
                      var_map    :: dict()}).
 
--type code()        :: [#dep_call{} | #warn_call{} | #fun_call{} |
+-type code()        :: [#dep_call{} | #fun_call{} | #warn_call{} |
                         #curr_fun{} | #let_tag{} | case_tags() |
                         pid_tags() | race_tags()].
 
@@ -558,23 +558,11 @@ fixup_race_forward(CurrFun, CurrFunLabel, Calls, Code, RaceList,
               _Other ->
                 {RaceList, [], NestingLevel, false}
             end;
-          #dep_call{call_name = 'ets_lookup', args = DepCallArgs} ->
+          #dep_call{call_name = 'ets_lookup'} ->
             case RaceWarnTag of
               ?WARN_ETS_LOOKUP_INSERT ->
-                [Tab, Names, _, _] = DepCallArgs,
-                case compare_var_list(Tab,
-                  dialyzer_callgraph:get_public_tables(Callgraph),
-                  RaceVarMap)
-                  orelse
-                  length(Names --
-                  dialyzer_callgraph:get_named_tables(Callgraph)) <
-                  length(Names) of
-                  true ->
-                    {[Head#dep_call{var_map = RaceVarMap}|RaceList],
-                     [], NestingLevel, false};
-                  false ->
-                    {RaceList, [], NestingLevel, false}
-                end;
+                {[Head#dep_call{var_map = RaceVarMap}|RaceList],
+                 [], NestingLevel, false};
               _Other ->
                 {RaceList, [], NestingLevel, false}
             end;
@@ -596,23 +584,11 @@ fixup_race_forward(CurrFun, CurrFunLabel, Calls, Code, RaceList,
               _Other ->
                 {RaceList, [], NestingLevel, false}
             end;
-  	  #warn_call{call_name = 'ets_insert', args = WarnCallArgs} ->
+  	  #warn_call{call_name = 'ets_insert'} ->
             case RaceWarnTag of
               ?WARN_ETS_LOOKUP_INSERT ->
-                [Tab, Names, _, _] = WarnCallArgs,
-                case compare_var_list(Tab,
-                  dialyzer_callgraph:get_public_tables(Callgraph),
-                  RaceVarMap)
-                  orelse
-                  length(Names --
-                  dialyzer_callgraph:get_named_tables(Callgraph)) <
-                  length(Names) of
-                  true ->
-                    {[Head#warn_call{var_map = RaceVarMap}|RaceList],
-                     [], NestingLevel, false};
-                  false ->
-                    {RaceList, [], NestingLevel, false}
-                end;
+                {[Head#warn_call{var_map = RaceVarMap}|RaceList],
+                 [], NestingLevel, false};
               _Other ->
                 {RaceList, [], NestingLevel, false}
             end;
