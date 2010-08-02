@@ -46,13 +46,7 @@
 
 %%% ===========================================================================
 %%%
-%%%  Definitions
-%%%
-%%% ===========================================================================
-
-%%% ===========================================================================
-%%%
-%%%  Local Types
+%%%  Types and Records
 %%%
 %%% ===========================================================================
 
@@ -132,15 +126,15 @@ msg1(PidTagGroups, State) ->
     end,
   dialyzer_dataflow:state__put_pid_tags([], RetState).
 
-go_from_pid_tags([], [], _SendTags, _Digraph) ->
+go_from_pid_tags([], _Pids, _SendTags, _Digraph) ->
   [];
-go_from_pid_tags([T|Tags], [P|Pids], SendTags, Digraph) ->
+go_from_pid_tags([T|Tags], Pids, SendTags, Digraph) ->
   Code =
     case ets:lookup(cfgs, T) of
       [] -> [];
       [{T, _Args, _Ret, C}] -> C
     end,
-  PidSendTags = forward_msg_analysis(P, Code, SendTags, Digraph),
+  PidSendTags = forward_msg_analysis(Pids, Code, SendTags, Digraph),
   PidSendTags ++ go_from_pid_tags(Tags, Pids, SendTags, Digraph).
 
 %%% ===========================================================================
@@ -149,17 +143,17 @@ go_from_pid_tags([T|Tags], [P|Pids], SendTags, Digraph) ->
 %%%
 %%% ===========================================================================
 
-forward_msg_analysis(_Pid, _Code, [], _Digraph) ->
+forward_msg_analysis(_Pids, _Code, [], _Digraph) ->
   [];
-forward_msg_analysis(Pid, Code, SendTags, Digraph) ->
+forward_msg_analysis(Pids, Code, SendTags, Digraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
-  forward_msg_analysis(Pid, Code, SendTags, SendMFAs, [], dict:new(),
+  forward_msg_analysis(Pids, Code, SendTags, SendMFAs, [], dict:new(),
                        Digraph).
 
-forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
+forward_msg_analysis(Pids, Code, SendTags, SendMFAs, Calls, MsgVarMap,
                      Digraph) ->
   case Code of
-    [] -> find_pid_send_tags(Pid, SendTags, MsgVarMap);
+    [] -> find_pid_send_tags(Pids, SendTags, MsgVarMap);
     [Head|Tail] ->
       {NewPidSendTags, NewMsgVarMap} =
         case Head of
@@ -178,8 +172,8 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
                       MsgVarMap1 =
                         dialyzer_races:race_var_map(DefVars, CallVars,
                                                     MsgVarMap, 'bind'),
-                      forward_msg_analysis(Pid, CalleeCode, SendTags, SendMFAs,
-                                           [{Caller, Callee}|Calls],
+                      forward_msg_analysis(Pids, CalleeCode, SendTags,
+                                           SendMFAs, [{Caller, Callee}|Calls],
                                            MsgVarMap1, Digraph)
                   end;
                 false -> []
@@ -202,8 +196,8 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
             {[], dialyzer_races:race_var_map(Var, Arg, MsgVarMap, 'bind')}
         end,
       NewPidSendTags ++
-        forward_msg_analysis(Pid, Tail, SendTags, SendMFAs, Calls, NewMsgVarMap,
-                             Digraph)
+        forward_msg_analysis(Pids, Tail, SendTags, SendMFAs, Calls,
+                             NewMsgVarMap, Digraph)
   end.
 
 %%% ===========================================================================
@@ -277,8 +271,9 @@ find_control_flow_send_tags(PidFun, [#send_fun{fun_mfa = SendFun} = H|T],
     end,
   find_control_flow_send_tags(PidFun, T, NewAcc, Digraph).
 
-find_pid_send_tags(Pid, CFSendTags, MsgVarMap) ->
-  find_pid_send_tags(Pid, CFSendTags, [], MsgVarMap).
+find_pid_send_tags(Pids, CFSendTags, MsgVarMap) ->
+  PidSendTags = [find_pid_send_tags(P, CFSendTags, [], MsgVarMap) || P <- Pids],
+  lists:usort(lists:flatten(PidSendTags)).
 
 find_pid_send_tags(_Pid, [], Acc, _MsgVarMap) ->
   Acc;
