@@ -155,8 +155,7 @@ forward_msg_analysis(Pids, Code, PidMFAs, SendTags, Callgraph) ->
 
 forward_msg_analysis(Pids, Code, SendTags, MFAs, Calls, MsgVarMap, Callgraph) ->
   case Code of
-    [] ->
-      find_pid_send_tags(Pids, SendTags, MsgVarMap);
+    [] -> find_pid_send_tags(Pids, SendTags, MsgVarMap);
     [Head|Tail] ->
       {NewPidSendTags, NewMsgVarMap} =
         case Head of
