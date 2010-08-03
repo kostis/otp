@@ -116,7 +116,8 @@ msg1(PidTagGroups, State) ->
         Msgs = dialyzer_callgraph:get_msgs(Callgraph),
         SendTags = lists:usort(Msgs#msgs.send_tags),
         CFSendTags = find_control_flow_send_tags(CurrFuns, SendTags, Digraph),
-        PidSendTags = go_from_pid_tags(CurrFuns, Pids, CFSendTags, Digraph),
+        PidSendTags = go_from_pid_tags(CurrFuns, CurrFuns, Pids, CFSendTags,
+                                       Callgraph),
         RcvTags =  lists:usort(Msgs#msgs.rcv_tags),
         UniquePidMFAs = lists:usort(PidMFAs),
         FilteredPidMFAs = filter_parents(UniquePidMFAs, Digraph),
@@ -128,16 +129,16 @@ msg1(PidTagGroups, State) ->
     end,
   dialyzer_dataflow:state__put_pid_tags([], RetState).
 
-go_from_pid_tags([], _Pids, _SendTags, _Digraph) ->
+go_from_pid_tags([], _PidMFAs, _Pids, _SendTags, _Callgraph) ->
   [];
-go_from_pid_tags([T|Tags], Pids, SendTags, Digraph) ->
+go_from_pid_tags([MFA|MFAs], PidMFAs, Pids, SendTags, Callgraph) ->
   Code =
-    case ets:lookup(cfgs, T) of
+    case ets:lookup(cfgs, MFA) of
       [] -> [];
-      [{T, _Args, _Ret, C}] -> C
+      [{MFA, _Args, _Ret, C}] -> C
     end,
-  PidSendTags = forward_msg_analysis(Pids, Code, SendTags, Digraph),
-  PidSendTags ++ go_from_pid_tags(Tags, Pids, SendTags, Digraph).
+  PidSendTags = forward_msg_analysis(Pids, Code, PidMFAs, SendTags, Callgraph),
+  PidSendTags ++ go_from_pid_tags(MFAs, PidMFAs, Pids, SendTags, Callgraph).
 
 %%% ===========================================================================
 %%%
@@ -145,38 +146,50 @@ go_from_pid_tags([T|Tags], Pids, SendTags, Digraph) ->
 %%%
 %%% ===========================================================================
 
-forward_msg_analysis(_Pids, _Code, [], _Digraph) ->
+forward_msg_analysis(_Pids, _Code, _PidMFAs, [], _Callgraph) ->
   [];
-forward_msg_analysis(Pids, Code, SendTags, Digraph) ->
+forward_msg_analysis(Pids, Code, PidMFAs, SendTags, Callgraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
-  forward_msg_analysis(Pids, Code, SendTags, SendMFAs, [], dict:new(),
-                       Digraph).
+  forward_msg_analysis(Pids, Code, SendTags, lists:usort(PidMFAs ++ SendMFAs),
+                       [], dict:new(), Callgraph).
 
-forward_msg_analysis(Pids, Code, SendTags, SendMFAs, Calls, MsgVarMap,
-                     Digraph) ->
+forward_msg_analysis(Pids, Code, SendTags, MFAs, Calls, MsgVarMap, Callgraph) ->
   case Code of
-    [] -> find_pid_send_tags(Pids, SendTags, MsgVarMap);
+    [] ->
+      find_pid_send_tags(Pids, SendTags, MsgVarMap);
     [Head|Tail] ->
       {NewPidSendTags, NewMsgVarMap} =
         case Head of
           'self' -> {[], MsgVarMap};
           #dep_call{} -> {[], MsgVarMap};
           #warn_call{} -> {[], MsgVarMap};
-          #fun_call{caller = Caller, callee = Callee, vars = CallVars} ->
+          #fun_call{caller = Caller, callee = MFAorLabel, vars = CallVars} ->
+            Callee =
+              case is_integer(MFAorLabel) of
+                true ->
+                  case dialyzer_callgraph:lookup_name(MFAorLabel, Callgraph) of
+                    error -> MFAorLabel;
+                    {ok, MFA} -> MFA
+                  end;
+                false -> MFAorLabel
+              end,
+            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
             PidSendTags = 
-              case follow_call(Callee, SendMFAs, Digraph) of
+              case follow_call(Callee, MFAs, Digraph) of
                 true ->
                   case lists:member({Caller, Callee}, Calls) of
                     true -> [];
                     false ->
-                      [{Callee, DefVars, _DefRet, CalleeCode}] =
-                        ets:lookup(cfgs, Callee),
-                      MsgVarMap1 =
-                        dialyzer_races:race_var_map(DefVars, CallVars,
-                                                    MsgVarMap, 'bind'),
-                      forward_msg_analysis(Pids, CalleeCode, SendTags,
-                                           SendMFAs, [{Caller, Callee}|Calls],
-                                           MsgVarMap1, Digraph)
+                      case ets:lookup(cfgs, Callee) of
+                        [] -> [];
+                        [{Callee, DefVars, _DefRet, CalleeCode}] ->
+                          MsgVarMap1 =
+                            dialyzer_races:race_var_map(DefVars, CallVars,
+                                                        MsgVarMap, 'bind'),
+                          forward_msg_analysis(Pids, CalleeCode, SendTags, MFAs,
+                                               [{Caller, Callee}|Calls],
+                                               MsgVarMap1, Callgraph)
+                      end
                   end;
                 false -> []
               end,
@@ -198,8 +211,8 @@ forward_msg_analysis(Pids, Code, SendTags, SendMFAs, Calls, MsgVarMap,
             {[], dialyzer_races:race_var_map(Var, Arg, MsgVarMap, 'bind')}
         end,
       NewPidSendTags ++
-        forward_msg_analysis(Pids, Tail, SendTags, SendMFAs, Calls,
-                             NewMsgVarMap, Digraph)
+        forward_msg_analysis(Pids, Tail, SendTags, MFAs, Calls, NewMsgVarMap,
+                             Callgraph)
   end.
 
 %%% ===========================================================================
@@ -292,10 +305,12 @@ find_pid_send_tags(Pid, [#send_fun{pid = SendPid} = H|T], Acc, MsgVarMap) ->
     end,
   find_pid_send_tags(Pid, T, NewAcc, MsgVarMap).
 
-follow_call(Callee, SendMFAs, Digraph) ->
+follow_call(Callee, MFAs, Digraph) ->
   lists:any(fun(E) -> E end,
-            [follow_call_pred(Callee, MFA, Digraph) || MFA <- SendMFAs]).
+            [follow_call_pred(Callee, MFA, Digraph) || MFA <- MFAs]).
 
+follow_call_pred(From, From, _Digraph) ->
+  true;
 follow_call_pred(From, To, Digraph) ->
   case digraph:get_path(Digraph, From, To) of
     false -> false;
