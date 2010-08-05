@@ -34,7 +34,7 @@
 %% Record Interfaces
 
 -export([add_msg/2, add_pid/3, add_pid_tag/3, add_pid_tags/2,
-         create_pid_tag_for_self/2, create_rcv_tag/2,
+         create_pid_tag_for_self/1, create_rcv_tag/2,
          create_send_tag/3, get_race_list_ret/3,
          get_rcv_tags/1, get_send_tags/1, new/0,
          put_rcv_tags/2, put_send_tags/2]).
@@ -56,7 +56,7 @@
 
 -record(pid_fun,  {kind            :: pid_kind(),
                    pid = ?no_label :: label() | ?no_label,
-                   pid_mfas        :: [mfa_or_funlbl()], % funs that own the pid
+                   pid_mfa         :: mfa_or_funlbl(), % fun that owns the pid
                    fun_mfa         :: mfa_or_funlbl()}).
 
 -record(rcv_fun,  {msgs = []       :: [erl_types:erl_type()],
@@ -99,35 +99,36 @@ msg(State) ->
   PidTags1 = PidTags -- OldPidTags,
   {OldPidTags1, PidTagGroups} = group_pid_tags(PidTags1, AllPidTags,
                                                OldPidTags, Digraph),
-  State1 = msg1(PidTagGroups, State),
+  SortedSendTags = lists:usort(Msgs#msgs.send_tags),
+  SortedRcvTags = lists:usort(Msgs#msgs.rcv_tags),
+  State1 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, State),
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
   Msgs2 = renew_analyzed_pid_tags(OldPidTags1, Msgs1),
   Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
   dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
 
-msg1(PidTagGroups, State) ->
+msg1(PidTagGroups, SendTags, RcvTags, State) ->
   RetState =
     case PidTagGroups of
       [] -> State;
       [H|T] ->
-        {#pid_fun{pid = Pid, pid_mfas = PidMFAs, fun_mfa = CurrFun},
+        {#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA, fun_mfa = CurrFun},
          MsgVarMap} = H,
         Callgraph = dialyzer_dataflow:state__get_callgraph(State),
         Digraph = dialyzer_callgraph:get_digraph(Callgraph),
-        Msgs = dialyzer_callgraph:get_msgs(Callgraph),
-        SendTags = lists:usort(Msgs#msgs.send_tags),
         CFSendTags = find_control_flow_send_tags(CurrFun, SendTags, Digraph),
         PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, MsgVarMap,
                                       Callgraph),
-        RcvTags =  lists:usort(Msgs#msgs.rcv_tags),
-        UniquePidMFAs = lists:usort(PidMFAs),
-        FilteredPidMFAs = filter_parents(UniquePidMFAs, Digraph),
-        CFRcvTags = find_control_flow_rcv_tags(FilteredPidMFAs, RcvTags,
-                                               Digraph),
+        PidMFAs =
+          case Kind =:= 'self' of
+            true -> backward_msg_analysis(CurrFun, Digraph);
+            false -> [PidMFA]
+          end,
+        CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
         State1 = warn_unused_rcv_stmts(PidSendTags, CFRcvTags, State),
         %% HERE
-        msg1(T, State1)
+        msg1(T, SendTags, RcvTags, State1)
     end,
   dialyzer_dataflow:state__put_pid_tags([], RetState).
 
@@ -221,9 +222,6 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
 %%%
 %%% ===========================================================================
 
-renew_analyzed_pid_tags(OldPidTags, Msgs) ->
-  Msgs#msgs{old_pids = OldPidTags}.
-
 backward_msg_analysis(CurrFun, Digraph) ->
   Calls = digraph:edges(Digraph),
   Parents = dialyzer_races:fixup_race_backward(CurrFun, Calls, Calls, [],
@@ -239,42 +237,46 @@ filter_parents(UParents, Digraph) ->
   dialyzer_races:filter_parents(UParents, UParents, Digraph).
 
 find_control_flow_rcv_tags(PidFuns, RcvTags, Digraph) ->
-  Accs = [find_control_flow_rcv_tags(PidFun, RcvTags, [], Digraph)
-          || PidFun <- PidFuns],
-  lists:usort(lists:flatten(Accs)).
+  ReachableFrom = digraph_utils:reachable(PidFuns, Digraph),
+  find_control_flow_rcv_tags(PidFuns, RcvTags, [], ReachableFrom).
 
-find_control_flow_rcv_tags(_PidFun, [], Acc, _Digraph) ->
+find_control_flow_rcv_tags(_PidFuns, [], Acc, _ReachableFrom) ->
   Acc;
-find_control_flow_rcv_tags(PidFun, [#rcv_fun{fun_mfa = RcvFun} = H|T],
-                           Acc, Digraph) ->
+find_control_flow_rcv_tags(_PidFuns, _RcvTags, Acc, []) ->
+  Acc;
+find_control_flow_rcv_tags(PidFuns, [#rcv_fun{fun_mfa = RcvFun} = H|T],
+                           Acc, ReachableFrom) ->
   NewAcc =
-    case PidFun =:= RcvFun of
+    case lists:member(RcvFun, PidFuns) of
       true -> [H|Acc];
       false ->
-        case digraph:get_path(Digraph, PidFun, RcvFun) of
-          false -> Acc;
-          _List when is_list(_List) -> [H|Acc]
+        case lists:member(RcvFun, ReachableFrom) of
+          true -> [H|Acc];
+          false -> Acc
         end
     end,
-  find_control_flow_rcv_tags(PidFun, T, NewAcc, Digraph).
+  find_control_flow_rcv_tags(PidFuns, T, NewAcc, ReachableFrom).
 
 find_control_flow_send_tags(PidFun, SendTags, Digraph) ->
-  find_control_flow_send_tags(PidFun, SendTags, [], Digraph).
+  ReachableFrom = digraph_utils:reachable([PidFun], Digraph),
+  find_control_flow_send_tags(PidFun, SendTags, [], ReachableFrom).
 
-find_control_flow_send_tags(_PidFun, [], Acc, _Digraph) ->
+find_control_flow_send_tags(_PidFun, [], Acc, _ReachableFrom) ->
+  Acc;
+find_control_flow_send_tags(_PidFun, _SendTags, Acc, []) ->
   Acc;
 find_control_flow_send_tags(PidFun, [#send_fun{fun_mfa = SendFun} = H|T],
-                            Acc, Digraph) ->
+                            Acc, ReachableFrom) ->
   NewAcc =
     case PidFun =:= SendFun of
       true -> [H|Acc];
       false ->
-        case digraph:get_path(Digraph, PidFun, SendFun) of
-          false -> Acc;
-          _List when is_list(_List) -> [H|Acc]
+        case lists:member(SendFun, ReachableFrom) of
+          true -> [H|Acc];
+          false -> Acc
         end
     end,
-  find_control_flow_send_tags(PidFun, T, NewAcc, Digraph).
+  find_control_flow_send_tags(PidFun, T, NewAcc, ReachableFrom).
 
 find_pid_send_tags(Pid, CFSendTags, MsgVarMap) ->
   find_pid_send_tags(Pid, CFSendTags, [], MsgVarMap).
@@ -334,10 +336,11 @@ get_clause_ret(RaceList, State) ->
   end.
 
 %% Groups self tags that refer to the same process
+%% in the form of the highest ancestor
 group_pid_tags([], _Tags, OldTags, _Digraph) ->
   {OldTags, []};
-group_pid_tags([#pid_fun{kind = Kind, pid = Pid} = H|T], Tags, OldTags,
-               Digraph) ->
+group_pid_tags([#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
+               Tags, OldTags, Digraph) ->
   {NewOldTags, Group} =
     case Kind =/= 'self' of
       true -> {OldTags, []};
@@ -348,8 +351,11 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid} = H|T], Tags, OldTags,
             case lists:member(H, OldTags) of
               true -> {OldTags, []};
               false ->
+                ReachableFrom = digraph_utils:reachable([CurrFun], Digraph),
+                ReachingTo = digraph_utils:reaching([CurrFun], Digraph),
                 {RetTags, RetDad, RetMVM} =
-                  group_pid_tags1(H, Tags, [H|OldTags], Digraph, H, dict:new()),
+                  group_pid_tags1(H, Tags, [H|OldTags], ReachableFrom,
+                                  ReachingTo, Digraph, H, dict:new()),
                 {RetTags, [{RetDad, RetMVM}]}
             end
         end
@@ -357,34 +363,43 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid} = H|T], Tags, OldTags,
   {RetOldTags, RetGroups} = group_pid_tags(T, Tags, NewOldTags, Digraph),
   {RetOldTags, Group ++ RetGroups}.
 
-group_pid_tags1(_CurrTag, [], OldTags, _Digraph, Dad, MsgVarMap) ->
+group_pid_tags1(_CurrTag, [], OldTags, _ReachableFrom, _ReachingTo, _Digraph,
+                Dad, MsgVarMap) ->
   {OldTags, Dad, MsgVarMap};
-group_pid_tags1(#pid_fun{pid = CurrPid} = CurrTag,
+group_pid_tags1(#pid_fun{pid = CurrTagPid, fun_mfa = CurrTagFun} = CurrTag,
                 [#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
-                OldTags, Digraph, #pid_fun{fun_mfa = DadCurrFun} = Dad,
-                MsgVarMap) ->
+                OldTags, ReachableFrom, ReachingTo, Digraph,
+                #pid_fun{fun_mfa = DadCurrFun} = Dad, MsgVarMap) ->
   {NewOldTags, NewDad, NewMsgVarMap} =
     case Kind =/= 'self' orelse Pid =:= ?no_label orelse CurrTag =:= H orelse
       lists:member(H, OldTags) of
       true -> {OldTags, Dad, MsgVarMap};
       false ->
-        case digraph:get_path(Digraph, CurrFun, DadCurrFun) of
+        case CurrTagFun =:= CurrFun of
+          true ->
+            {[H|OldTags], Dad, bind_dict_vars(CurrTagPid, Pid, MsgVarMap)};
           false ->
-            case digraph:get_path(Digraph, DadCurrFun, CurrFun) of
+            case lists:member(CurrFun, ReachableFrom) of
+              true ->
+                {[H|OldTags], Dad, bind_dict_vars(CurrTagPid, Pid, MsgVarMap)};
               false ->
-                case CurrFun =:= DadCurrFun of
+                case lists:member(CurrFun, ReachingTo) of
                   true ->
-                    {[H|OldTags], Dad, bind_dict_vars(CurrPid, Pid, MsgVarMap)};
+                    case digraph:get_path(Digraph, CurrFun, DadCurrFun) of
+                      false ->
+                        {[H|OldTags], Dad,
+                         bind_dict_vars(CurrTagPid, Pid, MsgVarMap)};
+                      _Vertices ->
+                        {[H|OldTags], H,
+                         bind_dict_vars(CurrTagPid, Pid, MsgVarMap)}
+                    end;
                   false -> {OldTags, Dad, MsgVarMap}
-                end;
-              _Vertices ->
-                {[H|OldTags], Dad, bind_dict_vars(CurrPid, Pid, MsgVarMap)}
-            end;
-          _Vertices ->
-            {[H|OldTags], H, bind_dict_vars(CurrPid, Pid, MsgVarMap)}
+                end
+            end
         end
     end,
-  group_pid_tags1(CurrTag, T, NewOldTags, Digraph, NewDad, NewMsgVarMap).
+  group_pid_tags1(CurrTag, T, NewOldTags, ReachableFrom, ReachingTo, Digraph,
+                  NewDad, NewMsgVarMap).
 
 -spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type(),
                         dialyzer_dataflow:state()) ->
@@ -419,6 +434,9 @@ get_race_list_ret1(RaceList, NestingLevel, State) ->
           Ret ++ get_race_list_ret1(T, NestingLevel1, State)
       end
   end.
+
+renew_analyzed_pid_tags(OldPidTags, Msgs) ->
+  Msgs#msgs{old_pids = OldPidTags}.
         
 %%% ===========================================================================
 %%%
@@ -488,14 +506,10 @@ add_pid(Kind, Label, State) ->
       dialyzer_dataflow:state().
 
 add_pid_tag(Kind, Label, State) ->
-  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
   Races = dialyzer_dataflow:state__get_races(State),
   CurrFun = dialyzer_races:get_curr_fun(Races),
-  Dads = backward_msg_analysis(CurrFun, Digraph),
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
-  NewPidTag = #pid_fun{kind = Kind, pid = Label, pid_mfas = Dads,
-                       fun_mfa = CurrFun},
+  NewPidTag = #pid_fun{kind = Kind, pid = Label, fun_mfa = CurrFun},
   dialyzer_dataflow:state__put_pid_tags([NewPidTag|PidTags], State).
 
 -spec add_pid_tags([pid_fun()], msgs()) -> msgs().
@@ -503,12 +517,10 @@ add_pid_tag(Kind, Label, State) ->
 add_pid_tags(PidTags, #msgs{pid_tags = PT} = Msgs) ->
   Msgs#msgs{pid_tags = lists:usort(PidTags ++ PT)}.
 
--spec create_pid_tag_for_self(mfa_or_funlbl(), digraph()) ->
-      pid_fun().
+-spec create_pid_tag_for_self(mfa_or_funlbl()) -> pid_fun().
 
-create_pid_tag_for_self(CurrFun, Digraph) ->
-  Dads = backward_msg_analysis(CurrFun, Digraph),
-  #pid_fun{kind = 'self', pid_mfas = Dads, fun_mfa = CurrFun}.
+create_pid_tag_for_self(CurrFun) ->
+  #pid_fun{kind = 'self', fun_mfa = CurrFun}.
 
 -spec create_rcv_tag(mfa_or_funlbl(), file_line()) -> #rcv_fun{}.
 

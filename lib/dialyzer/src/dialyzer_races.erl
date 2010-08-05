@@ -141,7 +141,6 @@ store_call(Fun, ArgTypes, Args, FileLine, State) ->
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
   SendTags = dialyzer_messages:get_send_tags(Msgs),
-  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
   CleanState = dialyzer_dataflow:state__records_only(State),
   {NewRaceList, NewRaceListSize, NewRaceTags, NewTable, NewPidTags,
    NewSendTags} = 
@@ -306,8 +305,7 @@ store_call(Fun, ArgTypes, Args, FileLine, State) ->
           {erlang, self, 0} ->
             case MsgAnalysis of
               true ->
-                PidFun = dialyzer_messages:create_pid_tag_for_self(CurrFun,
-                                                                   Digraph),
+                PidFun = dialyzer_messages:create_pid_tag_for_self(CurrFun),
                 {['self'|RaceList], RaceListSize + 1, RaceTags, 'no_t',
                  [PidFun|PidTags], SendTags};
               false ->
