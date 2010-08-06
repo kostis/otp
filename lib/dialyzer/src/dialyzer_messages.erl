@@ -444,21 +444,72 @@ renew_analyzed_pid_tags(OldPidTags, Msgs) ->
 %%%
 %%% ===========================================================================
 
+check_rcv_pats([], _FileLine, State) ->
+  State;
+check_rcv_pats([Check], FileLine, State) ->
+  warn_unused_rcv_pats(Check, FileLine, State);
+check_rcv_pats([H|T], FileLine, State) ->
+  Check = lists:foldl(fun(X, Acc) ->
+                          lists:zipwith(fun(Y, Z) -> Y orelse Z end, Acc, X)
+                      end, H, T),
+  warn_unused_rcv_pats(Check, FileLine, State).
+
 check_sent_msgs(_SentMsgs, [], State) ->
   State;
 check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine}|T],
                 State) ->
-  Checks = [lists:any(fun(Msg) -> erl_types:t_is_subtype(SentMsg, Msg) end,
-                      Msgs)
+  Checks = [[erl_types:t_is_subtype(SentMsg, Msg) || Msg <- Msgs]
             || SentMsg <- SentMsgs],
+  Checks1 = [lists:any(fun(E) -> E end, Check) || Check <- Checks],
   State1 = 
-    case lists:any(fun(E) -> E end, lists:flatten(Checks)) of
-      true -> State;
+    case lists:any(fun(E) -> E end, lists:flatten(Checks1)) of
+      true -> check_rcv_pats(Checks, FileLine, State);
       false ->
         W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_msg, []}},
         dialyzer_dataflow:state__add_warning(W, State)
     end,
   check_sent_msgs(SentMsgs, T, State1).
+
+format_suffix(Num) ->
+  Rem = Num rem 10,
+  integer_to_list(Num) ++
+    case Rem of
+      1 -> "st";
+      2 -> "nd";
+      3 -> "rd";
+      _ -> "th"
+    end.
+
+format_unused_pats(UnusedPats) ->
+  format_unused_pats(UnusedPats, "").
+
+format_unused_pats([Num], Acc) ->
+  Acc ++ format_suffix(Num);
+format_unused_pats([Num1, Num2], Acc) ->
+  Acc ++ format_suffix(Num1) ++ " and " ++ format_suffix(Num2);
+format_unused_pats([Num|Nums], Acc) ->
+  NewAcc = Acc ++ format_suffix(Num) ++ ", ",
+  format_unused_pats(Nums, NewAcc).
+
+warn_unused_rcv_pats(Bools, FileLine, State) ->
+  UnusedPats = warn_unused_rcv_pats1(Bools, length(Bools), []),
+  case UnusedPats of
+    [] -> State;
+    _Else ->
+      W = {?WARN_MESSAGE, FileLine,
+           {message_rcv_stmt_unused_pats, [format_unused_pats(UnusedPats)]}},
+      dialyzer_dataflow:state__add_warning(W, State)
+  end.
+
+warn_unused_rcv_pats1([], _Counter, Acc) ->
+  lists:sort(Acc);
+warn_unused_rcv_pats1([Bool|Bools], Counter, Acc) ->
+  NewAcc =
+    case Bool of
+      true -> Acc;
+      false -> [Counter|Acc]
+    end,
+  warn_unused_rcv_pats1(Bools, Counter - 1, NewAcc).
 
 warn_unused_rcv_stmts([], [], State) ->
   State;

@@ -406,6 +406,9 @@ message_to_string({race_condition, [M, F, Args, Reason]}) ->
   io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
 message_to_string({deadlock, [M, F, Args, Reason]}) ->
   io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
+message_to_string({message_rcv_stmt_unused_pats, [Pats]}) ->
+  io_lib:format("The ~s patterns of the receive statement are unused\n",
+                [Pats]);
 message_to_string({message_unused_rcv_stmt_no_send, []}) ->
   io_lib:format("The receive statement will block"
                 " because no messages are sent to"
