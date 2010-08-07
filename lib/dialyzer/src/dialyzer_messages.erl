@@ -35,7 +35,7 @@
 
 -export([add_msg/2, add_pid/3, add_pid_tag/3, add_pid_tags/2,
          create_pid_tag_for_self/1, create_rcv_tag/2,
-         create_send_tag/3, get_race_list_ret/3,
+         create_send_tag/4, get_race_list_ret/3,
          get_rcv_tags/1, get_send_tags/1, new/0,
          put_rcv_tags/2, put_send_tags/2]).
 
@@ -65,7 +65,8 @@
 
 -record(send_fun, {pid             :: label(),
                    msg             :: erl_types:erl_type(),
-                   fun_mfa         :: mfa_or_funlbl()}).
+                   fun_mfa         :: mfa_or_funlbl(),
+                   file_line       :: file_line()}).
 
 -record(msgs,     {old_pids  = []  :: [#pid_fun{}], % already analyzed pid tags
                    pid_tags  = []  :: [#pid_fun{}],
@@ -126,8 +127,7 @@ msg1(PidTagGroups, SendTags, RcvTags, State) ->
             false -> [PidMFA]
           end,
         CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
-        State1 = warn_unused_rcv_stmts(PidSendTags, CFRcvTags, State),
-        %% HERE
+        State1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags, State),
         msg1(T, SendTags, RcvTags, State1)
     end,
   dialyzer_dataflow:state__put_pid_tags([], RetState).
@@ -454,10 +454,14 @@ check_rcv_pats([H|T], FileLine, State) ->
                       end, H, T),
   warn_unused_rcv_pats(Check, FileLine, State).
 
-check_sent_msgs(_SentMsgs, [], State) ->
-  State;
+check_sent_msgs(SentMsgs, RcvTags, State) ->
+  NoSends = length(SentMsgs),
+  check_sent_msgs(SentMsgs, RcvTags, lists:duplicate(NoSends, true), State).
+
+check_sent_msgs(_SentMsgs, [], Checks, State) ->
+  {Checks, State};
 check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine}|T],
-                State) ->
+                PrevChecks, State) ->
   Checks = [[erl_types:t_is_subtype(SentMsg, Msg) || Msg <- Msgs]
             || SentMsg <- SentMsgs],
   Checks1 = [lists:any(fun(E) -> E end, Check) || Check <- Checks],
@@ -468,7 +472,9 @@ check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine}|T],
         W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_msg, []}},
         dialyzer_dataflow:state__add_warning(W, State)
     end,
-  check_sent_msgs(SentMsgs, T, State1).
+  Checks2 = [lists:all(fun(E) -> not E end, Check) || Check <- Checks],
+  NewChecks = lists:zipwith(fun(X, Y) -> X andalso Y end, PrevChecks, Checks2),
+  check_sent_msgs(SentMsgs, T, NewChecks, State1).
 
 format_suffix(Num) ->
   Rem = Num rem 10,
@@ -511,15 +517,29 @@ warn_unused_rcv_pats1([Bool|Bools], Counter, Acc) ->
     end,
   warn_unused_rcv_pats1(Bools, Counter - 1, NewAcc).
 
-warn_unused_rcv_stmts([], [], State) ->
+warn_unused_send_rcv_stmts([], [], State) ->
   State;
-warn_unused_rcv_stmts([], [#rcv_fun{file_line = FileLine}|T], State) ->
+warn_unused_send_rcv_stmts([], [#rcv_fun{file_line = FileLine}|T], State) ->
   W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, []}},
   State1 = dialyzer_dataflow:state__add_warning(W, State),
-  warn_unused_rcv_stmts([], T, State1);
-warn_unused_rcv_stmts(SendTags, RcvTags, State) ->
+  warn_unused_send_rcv_stmts([], T, State1);
+warn_unused_send_rcv_stmts(SendTags, RcvTags, State) ->
   SentMsgs = [T#send_fun.msg || T <- SendTags],
-  check_sent_msgs(SentMsgs, RcvTags, State).
+  {Checks, State1} = check_sent_msgs(SentMsgs, RcvTags, State),
+  warn_unused_send_stmts(Checks, SendTags, State1).
+
+warn_unused_send_stmts([], [], State) ->
+  State;
+warn_unused_send_stmts([Check|Checks], [#send_fun{file_line = FileLine}|Tags],
+                       State) ->
+  State1 =
+    case Check of
+      true ->
+        W = {?WARN_MESSAGE, FileLine, {message_unused_send_stmt, []}},
+        dialyzer_dataflow:state__add_warning(W, State);
+      false -> State
+    end,
+  warn_unused_send_stmts(Checks, Tags, State1).
 
 %%% ===========================================================================
 %%%
@@ -578,11 +598,13 @@ create_pid_tag_for_self(CurrFun) ->
 create_rcv_tag(FunMFA, FileLine) ->
   #rcv_fun{fun_mfa = FunMFA, file_line = FileLine}.
 
--spec create_send_tag(label(), erl_types:erl_type(), mfa_or_funlbl()) ->
+-spec create_send_tag(label(), erl_types:erl_type(), mfa_or_funlbl(),
+                      file_line()) ->
       #send_fun{}.
 
-create_send_tag(Pid, Msg, FunMFA) ->
-  #send_fun{pid = Pid, msg = Msg, fun_mfa = FunMFA}.
+create_send_tag(Pid, Msg, FunMFA, FileLine) ->
+  #send_fun{pid = Pid, msg = Msg, fun_mfa = FunMFA,
+            file_line = FileLine}.
 
 -spec get_rcv_tags(msgs()) -> [#rcv_fun{}].
 

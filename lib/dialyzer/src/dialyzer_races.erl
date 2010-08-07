@@ -318,7 +318,7 @@ store_call(Fun, ArgTypes, Args, FileLine, State) ->
                 [_PidType, MsgType] = ArgTypes,
                 SendFun =
                   dialyzer_messages:create_send_tag(get_var_label(PidArg),
-                                                    MsgType, CurrFun),
+                                                    MsgType, CurrFun, FileLine),
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags,
                  [SendFun|SendTags]};
               false ->

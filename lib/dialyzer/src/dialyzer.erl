@@ -418,6 +418,9 @@ message_to_string({message_unused_rcv_stmt_no_msg, []}) ->
                 " because no messages sent to the"
                 " process can match the expected "
                 "patterns\n", []);
+message_to_string({message_unused_send_stmt, []}) ->
+  io_lib:format("The message sent by the send statement"
+                " will never be received\n", []);
 %%----- Warnings for behaviour errors --------------------
 message_to_string({callback_type_mismatch, [B, F, A, O]}) ->
   io_lib:format("The inferred return type of the ~w/~w callback includes the"
