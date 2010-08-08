@@ -36,8 +36,9 @@
 -export([add_msg/2, add_pid/3, add_pid_tag/3, add_pid_tags/2,
          create_pid_tag_for_self/1, create_rcv_tag/2,
          create_send_tag/4, get_race_list_ret/3,
-         get_rcv_tags/1, get_send_tags/1, new/0,
-         put_rcv_tags/2, put_send_tags/2]).
+         get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
+         new/0, put_proc_reg/2, put_rcv_tags/2,
+         put_send_tags/2, update_proc_reg/3]).
 
 %% Exported Types
 
@@ -52,6 +53,7 @@
 %%%
 %%% ===========================================================================
 
+-type dest()     :: label() | ?no_label | [atom()].
 -type pid_kind() :: 'self'.
 
 -record(pid_fun,  {kind            :: pid_kind(),
@@ -63,7 +65,7 @@
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
 
--record(send_fun, {pid             :: label(),
+-record(send_fun, {pid             :: dest(),
                    msg             :: erl_types:erl_type(),
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
@@ -71,7 +73,8 @@
 -record(msgs,     {old_pids  = []  :: [#pid_fun{}], % already analyzed pid tags
                    pid_tags  = []  :: [#pid_fun{}],
                    rcv_tags  = []  :: [#rcv_fun{}],
-                   send_tags = []  :: [#send_fun{}]}).
+                   send_tags = []  :: [#send_fun{}],
+                   proc_reg  = dict:new() :: dict()}).
 
 %%% ===========================================================================
 %%%
@@ -102,14 +105,15 @@ msg(State) ->
                                                OldPidTags, Digraph),
   SortedSendTags = lists:usort(Msgs#msgs.send_tags),
   SortedRcvTags = lists:usort(Msgs#msgs.rcv_tags),
-  State1 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, State),
+  ProcReg = Msgs#msgs.proc_reg,
+  State1 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, ProcReg, State),
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
   Msgs2 = renew_analyzed_pid_tags(OldPidTags1, Msgs1),
   Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
   dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
 
-msg1(PidTagGroups, SendTags, RcvTags, State) ->
+msg1(PidTagGroups, SendTags, RcvTags, ProcReg, State) ->
   RetState =
     case PidTagGroups of
       [] -> State;
@@ -119,8 +123,8 @@ msg1(PidTagGroups, SendTags, RcvTags, State) ->
         Callgraph = dialyzer_dataflow:state__get_callgraph(State),
         Digraph = dialyzer_callgraph:get_digraph(Callgraph),
         CFSendTags = find_control_flow_send_tags(CurrFun, SendTags, Digraph),
-        PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, MsgVarMap,
-                                      Callgraph),
+        PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, ProcReg,
+                                      MsgVarMap, Callgraph),
         PidMFAs =
           case Kind =:= 'self' of
             true -> backward_msg_analysis(CurrFun, Digraph);
@@ -128,17 +132,17 @@ msg1(PidTagGroups, SendTags, RcvTags, State) ->
           end,
         CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
         State1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags, State),
-        msg1(T, SendTags, RcvTags, State1)
+        msg1(T, SendTags, RcvTags, ProcReg, State1)
     end,
   dialyzer_dataflow:state__put_pid_tags([], RetState).
 
-go_from_pid_tag(MFA, Pid, SendTags, MsgVarMap, Callgraph) ->
+go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
   Code =
     case ets:lookup(cfgs, MFA) of
       [] -> [];
       [{MFA, _Args, _Ret, C}] -> C
     end,
-  forward_msg_analysis(Pid, Code, SendTags, MsgVarMap, Callgraph).
+  forward_msg_analysis(Pid, Code, SendTags, ProcReg, MsgVarMap, Callgraph).
 
 %%% ===========================================================================
 %%%
@@ -146,17 +150,17 @@ go_from_pid_tag(MFA, Pid, SendTags, MsgVarMap, Callgraph) ->
 %%%
 %%% ===========================================================================
 
-forward_msg_analysis(_Pid, _Code, [], _MsgVarMap, _Callgraph) ->
+forward_msg_analysis(_Pid, _Code, [], _ProcReg, _MsgVarMap, _Callgraph) ->
   [];
-forward_msg_analysis(Pid, Code, SendTags, MsgVarMap, Callgraph) ->
+forward_msg_analysis(Pid, Code, SendTags, ProcReg, MsgVarMap, Callgraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
-  forward_msg_analysis(Pid, Code, SendTags, SendMFAs, [], MsgVarMap,
-                       Callgraph).
+  forward_msg_analysis(Pid, Code, SendTags, SendMFAs, ProcReg, [],
+                       MsgVarMap, Callgraph).
 
-forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
-                     Callgraph) ->
+forward_msg_analysis(Pid, Code, SendTags, SendMFAs, ProcReg, Calls,
+                     MsgVarMap, Callgraph) ->
   case Code of
-    [] -> find_pid_send_tags(Pid, SendTags, MsgVarMap);
+    [] -> find_pid_send_tags(Pid, SendTags, ProcReg, MsgVarMap);
     [Head|Tail] ->
       {NewPidSendTags, NewMsgVarMap} =
         case Head of
@@ -187,7 +191,7 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
                             dialyzer_races:race_var_map(DefVars, CallVars,
                                                         MsgVarMap, 'bind'),
                           forward_msg_analysis(Pid, CalleeCode, SendTags,
-                                               SendMFAs,
+                                               SendMFAs, ProcReg,
                                                [{Caller, Callee}|Calls],
                                                MsgVarMap1, Callgraph)
                       end
@@ -212,8 +216,8 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, Calls, MsgVarMap,
             {[], dialyzer_races:race_var_map(Var, Arg, MsgVarMap, 'bind')}
         end,
       NewPidSendTags ++
-        forward_msg_analysis(Pid, Tail, SendTags, SendMFAs, Calls,
-                             NewMsgVarMap, Callgraph)
+        forward_msg_analysis(Pid, Tail, SendTags, SendMFAs, ProcReg,
+                             Calls, NewMsgVarMap, Callgraph)
   end.
 
 %%% ===========================================================================
@@ -278,23 +282,37 @@ find_control_flow_send_tags(PidFun, [#send_fun{fun_mfa = SendFun} = H|T],
     end,
   find_control_flow_send_tags(PidFun, T, NewAcc, ReachableFrom).
 
-find_pid_send_tags(Pid, CFSendTags, MsgVarMap) ->
-  find_pid_send_tags(Pid, CFSendTags, [], MsgVarMap).
+find_pid_send_tags(Pid, CFSendTags, ProcReg, MsgVarMap) ->
+  find_pid_send_tags(Pid, CFSendTags, ProcReg, [], MsgVarMap).
 
-find_pid_send_tags(_Pid, [], Acc, _MsgVarMap) ->
+find_pid_send_tags(_Pid, [], _ProcReg, Acc, _MsgVarMap) ->
   Acc;
-find_pid_send_tags(Pid, [#send_fun{pid = SendPid} = H|T], Acc, MsgVarMap) ->
+find_pid_send_tags(Pid, [#send_fun{pid = SendPid} = H|T], ProcReg, Acc,
+                   MVM) ->
   NewAcc =
-    case Pid =:= SendPid of
-      true -> [H|Acc];
+    case SendPid =:= ?no_label of
+      true -> Acc;
       false ->
-        case dialyzer_races:are_bound_labels(Pid, SendPid, MsgVarMap) orelse
-          dialyzer_races:are_bound_labels(SendPid, Pid, MsgVarMap) of
-          true -> [H|Acc];
-          false -> Acc
+        case is_list(SendPid) of
+          true ->
+            Checks = [is_bound_reg_name(A, Pid, ProcReg, MVM) || A <- SendPid],
+            case lists:any(fun(E) -> E end, Checks) of
+              true -> [H|Acc];
+              false -> Acc
+            end;
+          false ->
+            case Pid =:= SendPid of
+              true -> [H|Acc];
+              false ->
+                case dialyzer_races:are_bound_labels(Pid, SendPid, MVM) orelse
+                  dialyzer_races:are_bound_labels(SendPid, Pid, MVM) of
+                  true -> [H|Acc];
+                  false -> Acc
+                end
+            end
         end
     end,
-  find_pid_send_tags(Pid, T, NewAcc, MsgVarMap).
+  find_pid_send_tags(Pid, T, ProcReg, NewAcc, MVM).
 
 follow_call(Callee, SendMFAs, Digraph) ->
   lists:any(fun(E) -> E end,
@@ -332,6 +350,40 @@ get_clause_ret(RaceList, State) ->
             [{MFA, _Args, Ret, _C}] -> Ret
           end;
         _ -> []
+      end
+  end.
+
+-spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type(),
+                        dialyzer_dataflow:state()) ->
+      dialyzer_races:code().
+
+get_race_list_ret([], _RetType, _State) -> [];
+get_race_list_ret([#end_case{}|RaceList], RetType, State) ->
+  PidType = erl_types:t_pid(),
+  case erl_types:t_is_subtype(PidType, RetType) of
+    true -> lists:flatten(get_race_list_ret1(RaceList, 0, State));
+    false -> []
+  end.
+
+get_race_list_ret1(RaceList, NestingLevel, State) ->
+  case RaceList of
+    [] -> [];
+    [H|T] ->
+      {Ret, NestingLevel1} =
+        case H of
+          'beg_case' -> {[], NestingLevel - 1};
+          #end_clause{} ->
+            case NestingLevel =:= 0 of
+              true -> {get_clause_ret(T, State), NestingLevel};
+              false -> {[], NestingLevel}
+            end;
+          #end_case{} -> {[], NestingLevel + 1};
+          _ -> {[], NestingLevel}
+        end,
+      case NestingLevel1 =:= -1 of
+        true -> Ret;
+        false ->
+          Ret ++ get_race_list_ret1(T, NestingLevel1, State)
       end
   end.
 
@@ -401,38 +453,16 @@ group_pid_tags1(#pid_fun{pid = CurrTagPid, fun_mfa = CurrTagFun} = CurrTag,
   group_pid_tags1(CurrTag, T, NewOldTags, ReachableFrom, ReachingTo, Digraph,
                   NewDad, NewMsgVarMap).
 
--spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type(),
-                        dialyzer_dataflow:state()) ->
-      dialyzer_races:code().
-
-get_race_list_ret([], _RetType, _State) -> [];
-get_race_list_ret([#end_case{}|RaceList], RetType, State) ->
-  PidType = erl_types:t_pid(),
-  case erl_types:t_is_subtype(PidType, RetType) of
-    true -> lists:flatten(get_race_list_ret1(RaceList, 0, State));
-    false -> []
-  end.
-
-get_race_list_ret1(RaceList, NestingLevel, State) ->
-  case RaceList of
-    [] -> [];
-    [H|T] ->
-      {Ret, NestingLevel1} =
-        case H of
-          'beg_case' -> {[], NestingLevel - 1};
-          #end_clause{} ->
-            case NestingLevel =:= 0 of
-              true -> {get_clause_ret(T, State), NestingLevel};
-              false -> {[], NestingLevel}
-            end;
-          #end_case{} -> {[], NestingLevel + 1};
-          _ -> {[], NestingLevel}
-        end,
-      case NestingLevel1 =:= -1 of
-        true -> Ret;
-        false ->
-          Ret ++ get_race_list_ret1(T, NestingLevel1, State)
-      end
+is_bound_reg_name(Atom, Pid, ProcReg, MVM) ->
+  case dict:find(Atom, ProcReg) of
+    'error' -> false;
+    {ok, List} ->
+      Checks = [begin
+                  E =:= Pid orelse
+                    dialyzer_races:are_bound_labels(Pid, E, MVM) orelse
+                    dialyzer_races:are_bound_labels(E, Pid, MVM)
+                end || E <- List],
+      lists:any(fun(E) -> E end, Checks)
   end.
 
 renew_analyzed_pid_tags(OldPidTags, Msgs) ->
@@ -598,13 +628,18 @@ create_pid_tag_for_self(CurrFun) ->
 create_rcv_tag(FunMFA, FileLine) ->
   #rcv_fun{fun_mfa = FunMFA, file_line = FileLine}.
 
--spec create_send_tag(label(), erl_types:erl_type(), mfa_or_funlbl(),
+-spec create_send_tag(dest(), erl_types:erl_type(), mfa_or_funlbl(),
                       file_line()) ->
       #send_fun{}.
 
 create_send_tag(Pid, Msg, FunMFA, FileLine) ->
   #send_fun{pid = Pid, msg = Msg, fun_mfa = FunMFA,
             file_line = FileLine}.
+
+-spec get_proc_reg(msgs()) -> dict().
+
+get_proc_reg(#msgs{proc_reg = ProcReg}) ->
+  ProcReg.
 
 -spec get_rcv_tags(msgs()) -> [#rcv_fun{}].
 
@@ -620,6 +655,11 @@ get_send_tags(#msgs{send_tags = SendTags}) ->
 
 new() -> #msgs{}.
 
+-spec put_proc_reg(dict(), msgs()) -> msgs().
+
+put_proc_reg(ProcReg, Msgs) ->
+  Msgs#msgs{proc_reg = ProcReg}.
+
 -spec put_rcv_tags([#rcv_fun{}], msgs()) -> msgs().
 
 put_rcv_tags(RcvTags, Msgs) ->
@@ -629,3 +669,19 @@ put_rcv_tags(RcvTags, Msgs) ->
 
 put_send_tags(SendTags, Msgs) ->
   Msgs#msgs{send_tags = SendTags}.
+
+-spec update_proc_reg(label(), [atom()], dict()) -> dict().
+
+update_proc_reg(_Label, [], ProcReg) ->
+  ProcReg;
+update_proc_reg(Label, [Atom|Atoms], ProcReg) ->
+  LabelsToStore =
+    case dict:find(Atom, ProcReg) of
+      'error' -> [Label];
+      {'ok', L} -> [Label|L]
+    end,
+  update_proc_reg(Label, Atoms,
+                  dict:store(Atom, LabelsToStore, ProcReg)).
+      
+
+  
