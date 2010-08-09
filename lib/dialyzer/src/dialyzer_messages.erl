@@ -475,6 +475,11 @@ is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
       lists:any(fun(E) -> E end, Checks)
   end.
 
+lists_intersection(List1, List2) ->
+  Diff1 = List1 -- List2, % elements that exist in List1 but not in List2
+  Diff2 = List2 -- List1, % elements that exist in List2 but not in List1
+  (List1 ++ List2) -- (Diff1 ++ Diff2).
+
 renew_analyzed_pid_tags(OldPidTags, Msgs) ->
   Msgs#msgs{old_pids = OldPidTags}.
         
@@ -486,6 +491,22 @@ renew_analyzed_pid_tags(OldPidTags, Msgs) ->
 
 add_warns([], State) ->
   State;
+add_warns([{?WARN_MESSAGE, _FL, {message_rcv_stmt_unused_pats, []}}|Warns],
+          State) ->
+  add_warns(Warns, State);
+add_warns([{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, Pats}}|Warns],
+          State) ->
+  W =
+    case lists:usort(Pats) of
+      [_] = Pat ->
+        {?WARN_MESSAGE, FL,
+         {message_rcv_stmt_unused_pats, [{one, format_unused_pats(Pat)}]}};
+      Sorted ->
+        {?WARN_MESSAGE, FL,
+         {message_rcv_stmt_unused_pats, [{more, format_unused_pats(Sorted)}]}}
+    end,
+  State1 = dialyzer_dataflow:state__add_warning(W, State),
+  add_warns(Warns, State1);
 add_warns([W|Warns], State) ->
   State1 = dialyzer_dataflow:state__add_warning(W, State),
   add_warns(Warns, State1).
@@ -566,8 +587,8 @@ prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL,
 prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL,
                            {message_unused_send_stmt, _ }} = PrioWarn) ->
   PrioWarn;
-prioritize_warns2([{?WARN_MESSAGE, _FL, {Type, _}} = H|T],
-                  {?WARN_MESSAGE, _FL, {PrioType, _}} = PrioWarn) ->
+prioritize_warns2([{?WARN_MESSAGE, FL, {Type, Pats}} = H|T],
+                  {?WARN_MESSAGE, FL, {PrioType, PrioPats}} = PrioWarn) ->
   NewPrioWarn =
     case PrioType of
       message_unused_rcv_stmt_no_msg ->
@@ -579,7 +600,8 @@ prioritize_warns2([{?WARN_MESSAGE, _FL, {Type, _}} = H|T],
         case Type of
           message_unused_rcv_stmt_no_send -> H;
           message_unused_rcv_stmt_no_msg -> H;
-          _Other -> PrioWarn
+          message_rcv_stmt_unused_pats ->
+            {?WARN_MESSAGE, FL, {PrioType, lists_intersection(PrioPats, Pats)}}
         end
     end,
   prioritize_warns2(T, NewPrioWarn).
@@ -610,7 +632,7 @@ warn_unused_rcv_pats(Bools, FileLine, Warns) ->
     [] -> Warns;
     _Else ->
       W = {?WARN_MESSAGE, FileLine,
-           {message_rcv_stmt_unused_pats, [format_unused_pats(UnusedPats)]}},
+           {message_rcv_stmt_unused_pats, UnusedPats}},
       [W|Warns]
   end.
 

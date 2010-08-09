@@ -406,7 +406,10 @@ message_to_string({race_condition, [M, F, Args, Reason]}) ->
   io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
 message_to_string({deadlock, [M, F, Args, Reason]}) ->
   io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
-message_to_string({message_rcv_stmt_unused_pats, [Pats]}) ->
+message_to_string({message_rcv_stmt_unused_pats, [{one, Pat}]}) ->
+  io_lib:format("The ~s pattern of the receive statement is unused\n",
+                [Pat]);
+message_to_string({message_rcv_stmt_unused_pats, [{more, Pats}]}) ->
   io_lib:format("The ~s patterns of the receive statement are unused\n",
                 [Pats]);
 message_to_string({message_unused_rcv_stmt_no_send, []}) ->
