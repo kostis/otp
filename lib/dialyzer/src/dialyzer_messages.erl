@@ -118,27 +118,30 @@ msg(State) ->
   dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
 
 msg1(PidTagGroups, SendTags, RcvTags, ProcReg, State) ->
-  RetState =
-    case PidTagGroups of
-      [] -> State;
-      [H|T] ->
-        {#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA, fun_mfa = CurrFun},
-         MsgVarMap} = H,
-        Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-        Digraph = dialyzer_callgraph:get_digraph(Callgraph),
-        CFSendTags = find_control_flow_send_tags(CurrFun, SendTags, Digraph),
-        PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, ProcReg,
-                                      MsgVarMap, Callgraph),
-        PidMFAs =
-          case Kind =:= 'self' of
-            true -> backward_msg_analysis(CurrFun, Digraph);
-            false -> [PidMFA]
-          end,
-        CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
-        State1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags, State),
-        msg1(T, SendTags, RcvTags, ProcReg, State1)
-    end,
-  dialyzer_dataflow:state__put_pid_tags([], RetState).
+  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
+  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, [], Callgraph),
+  State1 = prioritize_warns(Warns, State),
+  dialyzer_dataflow:state__put_pid_tags([], State1).
+
+msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Callgraph) ->
+  case PidTagGroups of
+    [] -> Warns;
+    [H|T] ->
+      {#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA, fun_mfa = CurrFun},
+       MsgVarMap} = H,
+      Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+      CFSendTags = find_control_flow_send_tags(CurrFun, SendTags, Digraph),
+      PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, ProcReg,
+                                    MsgVarMap, Callgraph),
+      PidMFAs =
+        case Kind =:= 'self' of
+          true -> backward_msg_analysis(CurrFun, Digraph);
+          false -> [PidMFA]
+        end,
+      CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
+      Warns1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags),
+      msg1(T, SendTags, RcvTags, ProcReg, Warns1 ++ Warns, Callgraph)
+  end.
 
 go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
   Code =
@@ -159,8 +162,10 @@ forward_msg_analysis(_Pid, _Code, [], _ProcReg, _MsgVarMap, _Callgraph) ->
 forward_msg_analysis(Pid, Code, SendTags, {RegDict, RegMFAs}, MsgVarMap,
                      Callgraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
-  forward_msg_analysis(Pid, Code, SendTags, lists:usort(RegMFAs ++ SendMFAs),
-                       RegDict, [], MsgVarMap, Callgraph).
+  PidSendTags = forward_msg_analysis(Pid, Code, SendTags,
+                                     lists:usort(RegMFAs ++ SendMFAs),
+                                     RegDict, [], MsgVarMap, Callgraph),
+  lists:usort(PidSendTags).
 
 forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
                      Callgraph) ->
@@ -475,41 +480,47 @@ renew_analyzed_pid_tags(OldPidTags, Msgs) ->
         
 %%% ===========================================================================
 %%%
-%%%  Warning Format Utilities
+%%%  Warning Utilities
 %%%
 %%% ===========================================================================
 
-check_rcv_pats([], _FileLine, State) ->
+add_warns([], State) ->
   State;
-check_rcv_pats([Check], FileLine, State) ->
-  warn_unused_rcv_pats(Check, FileLine, State);
-check_rcv_pats([H|T], FileLine, State) ->
+add_warns([W|Warns], State) ->
+  State1 = dialyzer_dataflow:state__add_warning(W, State),
+  add_warns(Warns, State1).
+
+check_rcv_pats([], _FileLine, Warns) ->
+  Warns;
+check_rcv_pats([Check], FileLine, Warns) ->
+  warn_unused_rcv_pats(Check, FileLine, Warns);
+check_rcv_pats([H|T], FileLine, Warns) ->
   Check = lists:foldl(fun(X, Acc) ->
                           lists:zipwith(fun(Y, Z) -> Y orelse Z end, Acc, X)
                       end, H, T),
-  warn_unused_rcv_pats(Check, FileLine, State).
+  warn_unused_rcv_pats(Check, FileLine, Warns).
 
-check_sent_msgs(SentMsgs, RcvTags, State) ->
+check_sent_msgs(SentMsgs, RcvTags, Warns) ->
   NoSends = length(SentMsgs),
-  check_sent_msgs(SentMsgs, RcvTags, lists:duplicate(NoSends, true), State).
+  check_sent_msgs(SentMsgs, RcvTags, lists:duplicate(NoSends, true), Warns).
 
-check_sent_msgs(_SentMsgs, [], Checks, State) ->
-  {Checks, State};
+check_sent_msgs(_SentMsgs, [], Checks, Warns) ->
+  {Checks, Warns};
 check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine}|T],
-                PrevChecks, State) ->
+                PrevChecks, Warns) ->
   Checks = [[erl_types:t_is_subtype(SentMsg, Msg) || Msg <- Msgs]
             || SentMsg <- SentMsgs],
   Checks1 = [lists:any(fun(E) -> E end, Check) || Check <- Checks],
-  State1 = 
+  Warns1 = 
     case lists:any(fun(E) -> E end, lists:flatten(Checks1)) of
-      true -> check_rcv_pats(Checks, FileLine, State);
+      true -> check_rcv_pats(Checks, FileLine, Warns);
       false ->
         W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_msg, []}},
-        dialyzer_dataflow:state__add_warning(W, State)
+        [W|Warns]
     end,
   Checks2 = [lists:all(fun(E) -> not E end, Check) || Check <- Checks],
   NewChecks = lists:zipwith(fun(X, Y) -> X andalso Y end, PrevChecks, Checks2),
-  check_sent_msgs(SentMsgs, T, NewChecks, State1).
+  check_sent_msgs(SentMsgs, T, NewChecks, Warns1).
 
 format_suffix(Num) ->
   Rem = Num rem 10,
@@ -532,14 +543,75 @@ format_unused_pats([Num|Nums], Acc) ->
   NewAcc = Acc ++ format_suffix(Num) ++ ", ",
   format_unused_pats(Nums, NewAcc).
 
-warn_unused_rcv_pats(Bools, FileLine, State) ->
+prioritize_warns(Warns, State) ->
+  SortedWarns = sort_warns(Warns),
+  Warns1 = prioritize_warns1(SortedWarns, []),
+  add_warns(Warns1, State).
+
+prioritize_warns1([], Acc) ->
+  Acc;
+prioritize_warns1([Ws|Warns], Acc) ->
+  NewAcc =
+    case Ws of
+      [] -> Acc;
+      [H|T] -> [prioritize_warns2(T, H)|Acc]
+    end,
+  prioritize_warns1(Warns, NewAcc).
+
+prioritize_warns2([], PrioWarn) ->
+  PrioWarn;
+prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL,
+                           {message_unused_rcv_stmt_no_send, _}} = PrioWarn) ->
+  PrioWarn;
+prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL,
+                           {message_unused_send_stmt, _ }} = PrioWarn) ->
+  PrioWarn;
+prioritize_warns2([{?WARN_MESSAGE, _FL, {Type, _}} = H|T],
+                  {?WARN_MESSAGE, _FL, {PrioType, _}} = PrioWarn) ->
+  NewPrioWarn =
+    case PrioType of
+      message_unused_rcv_stmt_no_msg ->
+        case Type of
+          message_unused_rcv_stmt_no_send -> H;
+          _Other -> PrioWarn
+        end;
+      message_rcv_stmt_unused_pats ->
+        case Type of
+          message_unused_rcv_stmt_no_send -> H;
+          message_unused_rcv_stmt_no_msg -> H;
+          _Other -> PrioWarn
+        end
+    end,
+  prioritize_warns2(T, NewPrioWarn).
+
+sort_warns(Warns) ->
+  case lists:keysort(2, Warns) of
+    [] -> [];
+    [{?WARN_MESSAGE, FileLine, _}|_Ws] = Sorted ->
+      sort_warns(Sorted, FileLine, [])
+  end.
+
+sort_warns([], _FileLine, Acc) ->
+  Acc;
+sort_warns(Warns, FileLine, Acc) ->
+  {NewWarns, NewFileLine, NewAccElem} = sort_warns1(Warns, FileLine, []),
+  sort_warns(NewWarns, NewFileLine, [NewAccElem|Acc]).
+
+sort_warns1([], FileLine, Acc) ->
+  {[], FileLine, Acc};
+sort_warns1([{?WARN_MESSAGE, FileLine, _} = W|Ws], FileLine, Acc) ->
+  sort_warns1(Ws, FileLine, [W|Acc]);
+sort_warns1([{?WARN_MESSAGE, FL, _}|_Ws] = Warns, _FileLine, Acc) ->
+  {Warns, FL, Acc}.
+
+warn_unused_rcv_pats(Bools, FileLine, Warns) ->
   UnusedPats = warn_unused_rcv_pats1(Bools, length(Bools), []),
   case UnusedPats of
-    [] -> State;
+    [] -> Warns;
     _Else ->
       W = {?WARN_MESSAGE, FileLine,
            {message_rcv_stmt_unused_pats, [format_unused_pats(UnusedPats)]}},
-      dialyzer_dataflow:state__add_warning(W, State)
+      [W|Warns]
   end.
 
 warn_unused_rcv_pats1([], _Counter, Acc) ->
@@ -552,29 +624,31 @@ warn_unused_rcv_pats1([Bool|Bools], Counter, Acc) ->
     end,
   warn_unused_rcv_pats1(Bools, Counter - 1, NewAcc).
 
-warn_unused_send_rcv_stmts([], [], State) ->
-  State;
-warn_unused_send_rcv_stmts([], [#rcv_fun{file_line = FileLine}|T], State) ->
-  W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, []}},
-  State1 = dialyzer_dataflow:state__add_warning(W, State),
-  warn_unused_send_rcv_stmts([], T, State1);
-warn_unused_send_rcv_stmts(SendTags, RcvTags, State) ->
-  SentMsgs = [T#send_fun.msg || T <- SendTags],
-  {Checks, State1} = check_sent_msgs(SentMsgs, RcvTags, State),
-  warn_unused_send_stmts(Checks, SendTags, State1).
+warn_unused_send_rcv_stmts(SendTags, RcvTags) ->
+  warn_unused_send_rcv_stmts(SendTags, RcvTags, []).
 
-warn_unused_send_stmts([], [], State) ->
-  State;
+warn_unused_send_rcv_stmts([], [], Warns) ->
+  Warns;
+warn_unused_send_rcv_stmts([], [#rcv_fun{file_line = FileLine}|T], Warns) ->
+  W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, []}},
+  warn_unused_send_rcv_stmts([], T, [W|Warns]);
+warn_unused_send_rcv_stmts(SendTags, RcvTags, Warns) ->
+  SentMsgs = [T#send_fun.msg || T <- SendTags],
+  {Checks, Warns1} = check_sent_msgs(SentMsgs, RcvTags, Warns),
+  warn_unused_send_stmts(Checks, SendTags, Warns1).
+
+warn_unused_send_stmts([], [], Warns) ->
+  Warns;
 warn_unused_send_stmts([Check|Checks], [#send_fun{file_line = FileLine}|Tags],
-                       State) ->
-  State1 =
+                       Warns) ->
+  Warns1 =
     case Check of
       true ->
         W = {?WARN_MESSAGE, FileLine, {message_unused_send_stmt, []}},
-        dialyzer_dataflow:state__add_warning(W, State);
-      false -> State
+        [W|Warns];
+      false -> Warns
     end,
-  warn_unused_send_stmts(Checks, Tags, State1).
+  warn_unused_send_stmts(Checks, Tags, Warns1).
 
 %%% ===========================================================================
 %%%
