@@ -178,6 +178,7 @@ store_call(Fun, ArgTypes, Args, FileLine, State) ->
                             PidArgLabel ->
                               dialyzer_messages:update_proc_reg(PidArgLabel,
                                                                 AtomVals,
+                                                                CurrFun,
                                                                 ProcReg)
                           end
                       end

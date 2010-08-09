@@ -38,7 +38,7 @@
          create_send_tag/4, get_race_list_ret/3,
          get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
          new/0, put_proc_reg/2, put_rcv_tags/2,
-         put_send_tags/2, update_proc_reg/3]).
+         put_send_tags/2, update_proc_reg/4]).
 
 %% Exported Types
 
@@ -55,6 +55,10 @@
 
 -type dest()     :: label() | ?no_label | [atom()].
 -type pid_kind() :: 'self'.
+-type proc_reg() :: {dict(), [mfa_or_funlbl()]}.
+% process registry associating atoms to pids and
+% mfas that contain the associations
+% (i.e. the 'register' calls)
 
 -record(pid_fun,  {kind            :: pid_kind(),
                    pid = ?no_label :: label() | ?no_label,
@@ -74,7 +78,7 @@
                    pid_tags  = []  :: [#pid_fun{}],
                    rcv_tags  = []  :: [#rcv_fun{}],
                    send_tags = []  :: [#send_fun{}],
-                   proc_reg  = dict:new() :: dict()}).
+                   proc_reg  = {dict:new(), []} :: proc_reg()}).
 
 %%% ===========================================================================
 %%%
@@ -152,15 +156,16 @@ go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
 
 forward_msg_analysis(_Pid, _Code, [], _ProcReg, _MsgVarMap, _Callgraph) ->
   [];
-forward_msg_analysis(Pid, Code, SendTags, ProcReg, MsgVarMap, Callgraph) ->
+forward_msg_analysis(Pid, Code, SendTags, {RegDict, RegMFAs}, MsgVarMap,
+                     Callgraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
-  forward_msg_analysis(Pid, Code, SendTags, SendMFAs, ProcReg, [],
-                       MsgVarMap, Callgraph).
+  forward_msg_analysis(Pid, Code, SendTags, lists:usort(RegMFAs ++ SendMFAs),
+                       RegDict, [], MsgVarMap, Callgraph).
 
-forward_msg_analysis(Pid, Code, SendTags, SendMFAs, ProcReg, Calls,
-                     MsgVarMap, Callgraph) ->
+forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
+                     Callgraph) ->
   case Code of
-    [] -> find_pid_send_tags(Pid, SendTags, ProcReg, MsgVarMap);
+    [] -> find_pid_send_tags(Pid, SendTags, RegDict, MsgVarMap);
     [Head|Tail] ->
       {NewPidSendTags, NewMsgVarMap} =
         case Head of
@@ -179,7 +184,7 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, ProcReg, Calls,
               end,
             Digraph = dialyzer_callgraph:get_digraph(Callgraph),
             PidSendTags = 
-              case follow_call(Callee, SendMFAs, Digraph) of
+              case follow_call(Callee, MFAs, Digraph) of
                 true ->
                   case lists:member({Caller, Callee}, Calls) of
                     true -> [];
@@ -191,7 +196,7 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, ProcReg, Calls,
                             dialyzer_races:race_var_map(DefVars, CallVars,
                                                         MsgVarMap, 'bind'),
                           forward_msg_analysis(Pid, CalleeCode, SendTags,
-                                               SendMFAs, ProcReg,
+                                               MFAs, RegDict,
                                                [{Caller, Callee}|Calls],
                                                MsgVarMap1, Callgraph)
                       end
@@ -216,8 +221,8 @@ forward_msg_analysis(Pid, Code, SendTags, SendMFAs, ProcReg, Calls,
             {[], dialyzer_races:race_var_map(Var, Arg, MsgVarMap, 'bind')}
         end,
       NewPidSendTags ++
-        forward_msg_analysis(Pid, Tail, SendTags, SendMFAs, ProcReg,
-                             Calls, NewMsgVarMap, Callgraph)
+        forward_msg_analysis(Pid, Tail, SendTags, MFAs, RegDict, Calls,
+                             NewMsgVarMap, Callgraph)
   end.
 
 %%% ===========================================================================
@@ -282,12 +287,12 @@ find_control_flow_send_tags(PidFun, [#send_fun{fun_mfa = SendFun} = H|T],
     end,
   find_control_flow_send_tags(PidFun, T, NewAcc, ReachableFrom).
 
-find_pid_send_tags(Pid, CFSendTags, ProcReg, MsgVarMap) ->
-  find_pid_send_tags(Pid, CFSendTags, ProcReg, [], MsgVarMap).
+find_pid_send_tags(Pid, CFSendTags, RegDict, MsgVarMap) ->
+  find_pid_send_tags(Pid, CFSendTags, RegDict, [], MsgVarMap).
 
-find_pid_send_tags(_Pid, [], _ProcReg, Acc, _MsgVarMap) ->
+find_pid_send_tags(_Pid, [], _RegDict, Acc, _MsgVarMap) ->
   Acc;
-find_pid_send_tags(Pid, [#send_fun{pid = SendPid} = H|T], ProcReg, Acc,
+find_pid_send_tags(Pid, [#send_fun{pid = SendPid} = H|T], RegDict, Acc,
                    MVM) ->
   NewAcc =
     case SendPid =:= ?no_label of
@@ -295,7 +300,7 @@ find_pid_send_tags(Pid, [#send_fun{pid = SendPid} = H|T], ProcReg, Acc,
       false ->
         case is_list(SendPid) of
           true ->
-            Checks = [is_bound_reg_name(A, Pid, ProcReg, MVM) || A <- SendPid],
+            Checks = [is_bound_reg_name(A, Pid, RegDict, MVM) || A <- SendPid],
             case lists:any(fun(E) -> E end, Checks) of
               true -> [H|Acc];
               false -> Acc
@@ -312,11 +317,11 @@ find_pid_send_tags(Pid, [#send_fun{pid = SendPid} = H|T], ProcReg, Acc,
             end
         end
     end,
-  find_pid_send_tags(Pid, T, ProcReg, NewAcc, MVM).
+  find_pid_send_tags(Pid, T, RegDict, NewAcc, MVM).
 
-follow_call(Callee, SendMFAs, Digraph) ->
+follow_call(Callee, MFAs, Digraph) ->
   lists:any(fun(E) -> E end,
-            [follow_call_pred(Callee, MFA, Digraph) || MFA <- SendMFAs]).
+            [follow_call_pred(Callee, MFA, Digraph) || MFA <- MFAs]).
 
 follow_call_pred(From, From, _Digraph) ->
   true;
@@ -453,8 +458,8 @@ group_pid_tags1(#pid_fun{pid = CurrTagPid, fun_mfa = CurrTagFun} = CurrTag,
   group_pid_tags1(CurrTag, T, NewOldTags, ReachableFrom, ReachingTo, Digraph,
                   NewDad, NewMsgVarMap).
 
-is_bound_reg_name(Atom, Pid, ProcReg, MVM) ->
-  case dict:find(Atom, ProcReg) of
+is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
+  case dict:find(Atom, RegDict) of
     'error' -> false;
     {ok, List} ->
       Checks = [begin
@@ -636,7 +641,7 @@ create_send_tag(Pid, Msg, FunMFA, FileLine) ->
   #send_fun{pid = Pid, msg = Msg, fun_mfa = FunMFA,
             file_line = FileLine}.
 
--spec get_proc_reg(msgs()) -> dict().
+-spec get_proc_reg(msgs()) -> proc_reg().
 
 get_proc_reg(#msgs{proc_reg = ProcReg}) ->
   ProcReg.
@@ -655,7 +660,7 @@ get_send_tags(#msgs{send_tags = SendTags}) ->
 
 new() -> #msgs{}.
 
--spec put_proc_reg(dict(), msgs()) -> msgs().
+-spec put_proc_reg(proc_reg(), msgs()) -> msgs().
 
 put_proc_reg(ProcReg, Msgs) ->
   Msgs#msgs{proc_reg = ProcReg}.
@@ -670,15 +675,19 @@ put_rcv_tags(RcvTags, Msgs) ->
 put_send_tags(SendTags, Msgs) ->
   Msgs#msgs{send_tags = SendTags}.
 
--spec update_proc_reg(label(), [atom()], dict()) -> dict().
+-spec update_proc_reg(label(), [atom()], mfa_or_funlbl(), proc_reg()) ->
+      proc_reg().
 
-update_proc_reg(_Label, [], ProcReg) ->
-  ProcReg;
-update_proc_reg(Label, [Atom|Atoms], ProcReg) ->
+update_proc_reg(_Label, [], RegMFA, {RegDict, RegMFAs} = ProcReg) ->
+  case lists:member(RegMFA, RegMFAs) of
+    true -> ProcReg;
+    false -> {RegDict, [RegMFA|RegMFAs]}
+  end;
+update_proc_reg(Label, [Atom|Atoms], RegMFA, {RegDict, RegMFAs}) ->
   LabelsToStore =
-    case dict:find(Atom, ProcReg) of
+    case dict:find(Atom, RegDict) of
       'error' -> [Label];
       {'ok', L} -> [Label|L]
     end,
-  update_proc_reg(Label, Atoms,
-                  dict:store(Atom, LabelsToStore, ProcReg)).
+  update_proc_reg(Label, Atoms, RegMFA,
+                  {dict:store(Atom, LabelsToStore, RegDict), RegMFAs}).
