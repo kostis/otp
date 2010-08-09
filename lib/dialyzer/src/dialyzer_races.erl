@@ -33,7 +33,7 @@
 
 %% Utilities also used by the message analysis
 
--export([are_bound_labels/3, bind_dict_vars_list/3, filter_parents/3,
+-export([are_bound_labels/3, bind_dict_vars/3, filter_parents/3,
          fixup_race_backward/5, race_var_map/4, race_var_map_clauses/2,
          race_var_map_guard/5]).
 

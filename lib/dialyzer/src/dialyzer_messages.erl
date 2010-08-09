@@ -234,17 +234,8 @@ backward_msg_analysis(CurrFun, Digraph) ->
   filter_parents(UParents, Digraph).
 
 bind_dict_vars(Label1, Label2, Dict) ->
-  TempDict =
-    case dict:find(Label1, Dict) of
-      error -> dict:store(Label1, [Label2], Dict);
-      {ok, Labels1} ->
-        dialyzer_races:bind_dict_vars_list(Label1, [Label2|Labels1], Dict)
-    end,
-  case dict:find(Label2, Dict) of
-    error -> dict:store(Label2, [Label1], Dict);
-    {ok, Labels2} ->
-      dialyzer_races:bind_dict_vars_list(Label2, [Label1|Labels2], TempDict)
-  end.
+  TempDict = dialyzer_races:bind_dict_vars(Label1, Label2, Dict),
+  dialyzer_races:bind_dict_vars(Label2, Label1, TempDict).
 
 filter_parents(UParents, Digraph) ->
   dialyzer_races:filter_parents(UParents, UParents, Digraph).
