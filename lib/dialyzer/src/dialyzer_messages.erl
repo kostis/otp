@@ -687,7 +687,11 @@ update_proc_reg(Label, [Atom|Atoms], RegMFA, {RegDict, RegMFAs}) ->
   LabelsToStore =
     case dict:find(Atom, RegDict) of
       'error' -> [Label];
-      {'ok', L} -> [Label|L]
+      {'ok', L} ->
+        case lists:member(Label, L) of
+          true -> L;
+          false -> [Label|L]
+        end
     end,
   update_proc_reg(Label, Atoms, RegMFA,
                   {dict:store(Atom, LabelsToStore, RegDict), RegMFAs}).
