@@ -416,8 +416,8 @@ message_to_string({message_unused_rcv_stmt_no_send, []}) ->
 message_to_string({message_unused_rcv_stmt_no_msg, []}) ->
   io_lib:format("The receive statement will block"
                 " because no messages sent to the"
-                " process can match the expected "
-                "patterns\n", []);
+                " process can match the expected"
+                " patterns\n", []);
 message_to_string({message_unused_send_stmt, []}) ->
   io_lib:format("The message sent by the send statement"
                 " will never be received\n", []);
