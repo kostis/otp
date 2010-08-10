@@ -142,7 +142,6 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
   ProcReg = dialyzer_messages:get_proc_reg(Msgs),
   SendTags = dialyzer_messages:get_send_tags(Msgs),
-  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
   CleanState = dialyzer_dataflow:state__records_only(InpState),
 
   %% EXPERIMENTAL: Turn a behaviour's API call into a call to the
