@@ -56,13 +56,13 @@
 -type dest()     :: label() | ?no_label | [atom()].
 -type pid_kind() :: 'self'.
 -type proc_reg() :: {dict(), [mfa_or_funlbl()]}.
-% process registry associating atoms to pids and
-% mfas that contain the associations
-% (i.e. the 'register' calls)
+%% process registry associating atoms to pids and
+%% mfas that contain the associations
+%% (i.e. the 'register' calls)
 
 -record(pid_fun,  {kind            :: pid_kind(),
                    pid = ?no_label :: label() | ?no_label,
-                   pid_mfa         :: mfa_or_funlbl(), % fun that owns the pid
+                   pid_mfa         :: mfa_or_funlbl(), %% fun that owns the pid
                    fun_mfa         :: mfa_or_funlbl()}).
 
 -record(rcv_fun,  {msgs = []       :: [erl_types:erl_type()],
@@ -74,7 +74,7 @@
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
 
--record(msgs,     {old_pids  = []  :: [#pid_fun{}], % already analyzed pid tags
+-record(msgs,     {old_pids  = []  :: [#pid_fun{}], %% already analyzed pid tags
                    pid_tags  = []  :: [#pid_fun{}],
                    rcv_tags  = []  :: [#rcv_fun{}],
                    send_tags = []  :: [#send_fun{}],
@@ -192,7 +192,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
                   case lists:member({Caller, Callee}, Calls) of
-                    true -> []; % XXX: new MsgVarMap?
+                    true -> []; %% XXX: new MsgVarMap?
                     false ->
                       case ets:lookup(cfgs, Callee) of
                         [] -> [];
@@ -397,7 +397,7 @@ get_race_list_ret1(RaceList, NestingLevel, State) ->
       end
   end.
 
-%% Groups self tags that refer to the same process
+%% Groups pid tags that refer to the same process
 %% in the form of the highest ancestor
 group_pid_tags([], _Tags, OldTags, _Digraph) ->
   {OldTags, []};
@@ -405,7 +405,9 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
                Tags, OldTags, Digraph) ->
   {NewOldTags, Group} =
     case Kind =/= 'self' of
-      true -> {OldTags, []};
+      true -> {OldTags, []}; %% XXX: Return the spawn tag and renew the old
+                             %%      tags to include any self tags that are
+                             %%      covered (only below)
       false ->
         case Pid =:= ?no_label of
           true -> {OldTags, []};
@@ -476,8 +478,8 @@ is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
   end.
 
 lists_intersection(List1, List2) ->
-  Diff1 = List1 -- List2, % elements that exist in List1 but not in List2
-  Diff2 = List2 -- List1, % elements that exist in List2 but not in List1
+  Diff1 = List1 -- List2, %% elements that exist in List1 but not in List2
+  Diff2 = List2 -- List1, %% elements that exist in List2 but not in List1
   (List1 ++ List2) -- (Diff1 ++ Diff2).
 
 renew_analyzed_pid_tags(OldPidTags, Msgs) ->
