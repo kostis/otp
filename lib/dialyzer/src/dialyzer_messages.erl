@@ -192,7 +192,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
                   case lists:member({Caller, Callee}, Calls) of
-                    true -> [];
+                    true -> []; % XXX: new MsgVarMap?
                     false ->
                       case ets:lookup(cfgs, Callee) of
                         [] -> [];
