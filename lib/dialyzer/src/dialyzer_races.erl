@@ -48,7 +48,7 @@
 
 %% Exported Types
 
--export_type([code/0, core_vars/0, races/0]).
+-export_type([code/0, core_vars/0, pid_tags/0, races/0]).
 
 -include("dialyzer.hrl").
 -include("dialyzer_heisenbugs.hrl").

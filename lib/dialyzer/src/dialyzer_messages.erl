@@ -369,7 +369,7 @@ get_clause_ret(RaceList, State) ->
 
 -spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type(),
                         dialyzer_dataflow:state()) ->
-      dialyzer_races:code().
+      [dialyzer_races:pid_tags()].
 
 get_race_list_ret([], _RetType, _State) -> [];
 get_race_list_ret([#end_case{}|RaceList], RetType, State) ->
