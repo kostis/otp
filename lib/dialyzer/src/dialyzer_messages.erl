@@ -331,53 +331,95 @@ follow_call_pred(From, To, Digraph) ->
     _Vertices when is_list(_Vertices) -> true
   end.
 
-get_clause_ret(RaceList) ->
+get_case_ret(RaceList) ->
   case RaceList of
     [] -> [];
     [H|T] ->
       case H of
-        #beg_clause{} -> [];
-        #end_case{} -> get_race_list_ret1(T, 0);
-        'self' -> ['self'];
-        #fun_call{callee = Callee} ->
-          case ets:lookup(cfgs, Callee) of
-            [] -> [];
-            [{Callee, _Args, Ret, _C}] -> Ret
-          end;
-        _ -> []
+        #end_clause{} ->
+          {RaceList1, Ret1} = get_clause_ret(T),
+          {RaceList2, Ret2} = get_case_ret(RaceList1),
+          {RaceList2, Ret1 ++ Ret2};
+        'beg_case' -> {T, []}
       end
   end.
+
+get_clause(RaceList, NestingLevel) ->
+  case RaceList of
+    [] -> [];
+    [H|T] ->
+      {NestingLevel1, Return} =
+        case H of
+          'beg_case' -> {NestingLevel - 1, false};
+          #end_case{} -> {NestingLevel + 1, false};
+          #beg_clause{} ->
+            case NestingLevel =:= 0 of
+              true -> {NestingLevel, true};
+              false -> {NestingLevel, false}
+            end;
+          _Other -> {NestingLevel, false}
+        end,
+      case Return of
+        true -> [];
+        false -> [H|get_clause(T, NestingLevel1)]
+      end
+  end.
+
+get_clause_ret(RaceList) ->
+  Ret = get_ret_paths(get_clause(RaceList, 0)),
+  {get_rest_after_clause(RaceList, 0), Ret}.
 
 -spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type()) ->
       [dialyzer_races:pid_tags()].
 
 get_race_list_ret([], _RetType) -> [];
-get_race_list_ret([#end_case{}|RaceList], RetType) ->
+get_race_list_ret(RaceList, RetType) ->
   PidType = erl_types:t_pid(),
   case erl_types:t_is_subtype(PidType, RetType) of
-    true -> lists:flatten(get_race_list_ret1(RaceList, 0));
+    true -> get_ret_paths(RaceList);
     false -> []
   end.
 
-get_race_list_ret1(RaceList, NestingLevel) ->
+get_rest_after_clause(RaceList, NestingLevel) ->
   case RaceList of
     [] -> [];
     [H|T] ->
-      {Ret, NestingLevel1} =
+      {NestingLevel1, Return} =
         case H of
-          'beg_case' -> {[], NestingLevel - 1};
-          #end_clause{} ->
+          'beg_case' -> {NestingLevel - 1, false};
+          #end_case{} -> {NestingLevel + 1, false};
+          #beg_clause{} ->
             case NestingLevel =:= 0 of
-              true -> {get_clause_ret(T), NestingLevel};
-              false -> {[], NestingLevel}
+              true -> {NestingLevel, true};
+              false -> {NestingLevel, false}
             end;
-          #end_case{} -> {[], NestingLevel + 1};
-          _ -> {[], NestingLevel}
+          _Other -> {NestingLevel, false}
         end,
-      case NestingLevel1 =:= -1 of
-        true -> Ret;
-        false ->
-          Ret ++ get_race_list_ret1(T, NestingLevel1)
+      case Return of
+        true -> T;
+        false -> get_rest_after_clause(T, NestingLevel1)
+      end
+  end.
+
+get_ret_paths(RaceList) ->
+  case RaceList of
+    [] -> [];
+    [H|T] ->
+      case H of
+        #end_case{} ->
+          {RaceList1, Ret} = get_case_ret(T),
+          Ret ++ get_ret_paths(RaceList1);
+        'self' -> ['self'|get_ret_paths(T)];
+        #fun_call{callee = Callee} ->
+          Ret =
+            case ets:lookup(cfgs, Callee) of
+              [] -> [];
+              [{Callee, _Args, CRet, _C}] -> CRet
+            end,
+          Ret ++ get_ret_paths(T);
+        #dep_call{} -> get_ret_paths(T);
+        #warn_call{} -> get_ret_paths(T);
+        #let_tag{} -> get_ret_paths(T)
       end
   end.
 
