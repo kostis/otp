@@ -1031,6 +1031,18 @@ do_clause(RaceList, WarnVarArgs, RaceWarnTag, RaceVarMap, CurrLevel,
                       PublicTables, NamedTables),
   {fixup_case_rest_paths(RaceList, 0), DepList, IsPublic, Continue}.
 
+%% Gets the race list before a case clause.
+fixup_before_case_path(RaceList) ->
+  case RaceList of
+    [] -> [];
+    [Head|Tail] ->
+      case Head of
+        #end_clause{} ->
+          fixup_before_case_path(fixup_case_rest_paths(Tail, 0));
+        'beg_case' -> Tail
+      end
+  end.
+
 fixup_case_path(RaceList, NestingLevel) ->
   case RaceList of
     [] -> [];
@@ -1049,18 +1061,6 @@ fixup_case_path(RaceList, NestingLevel) ->
       case Return of
         true -> [];
         false -> [Head|fixup_case_path(Tail, NewNestingLevel)]
-      end
-  end.
-
-%% Gets the race list before a case clause.
-fixup_before_case_path(RaceList) ->
-  case RaceList of
-    [] -> [];
-    [Head|Tail] ->
-      case Head of
-        #end_clause{} ->
-          fixup_before_case_path(fixup_case_rest_paths(Tail, 0));
-        'beg_case' -> Tail
       end
   end.
 
