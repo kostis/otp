@@ -168,8 +168,12 @@ get_warnings_from_modules([M|Ms], State, DocPlt, Acc) when is_atom(M) ->
   State1 = st__renew_state_calls(NewCallgraph, State),
   get_warnings_from_modules(Ms, State1, NewDocPlt,
 			    [Warnings1, Warnings2, Warnings3|Acc]);
-get_warnings_from_modules([], #st{plt = Plt}, DocPlt, Acc) ->
-  {lists:flatten(Acc), Plt, DocPlt}.
+get_warnings_from_modules([], #st{callgraph = Callgraph, plt = Plt},
+                          DocPlt, Acc) ->
+  Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+  MsgWarns1 = dialyzer_messages:get_warnings(Msgs),
+  MsgWarns2 = dialyzer_messages:prioritize_msg_warns(MsgWarns1),
+  {MsgWarns2 ++ lists:flatten(Acc), Plt, DocPlt}.
 
 refine_succ_typings(ModulePostorder, State) ->
   refine_succ_typings(ModulePostorder, State, []).

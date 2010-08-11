@@ -29,7 +29,7 @@
 
 %% Message Analysis
 
--export([msg/1]).
+-export([msg/1, prioritize_msg_warns/1]).
 
 %% Record Interfaces
 
@@ -37,7 +37,7 @@
          create_pid_tag_for_self/1, create_rcv_tag/2,
          create_send_tag/4, get_race_list_ret/3,
          get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
-         new/0, put_proc_reg/2, put_rcv_tags/2,
+         get_warnings/1, new/0, put_proc_reg/2, put_rcv_tags/2,
          put_send_tags/2, update_proc_reg/4]).
 
 %% Exported Types
@@ -78,7 +78,8 @@
                    pid_tags  = []  :: [#pid_fun{}],
                    rcv_tags  = []  :: [#rcv_fun{}],
                    send_tags = []  :: [#send_fun{}],
-                   proc_reg  = {dict:new(), []} :: proc_reg()}).
+                   proc_reg  = {dict:new(), []} :: proc_reg(),
+                   warnings  = []  :: [dial_warning()]}).
 
 %%% ===========================================================================
 %%%
@@ -118,9 +119,12 @@ msg(State) ->
   dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
 
 msg1(PidTagGroups, SendTags, RcvTags, ProcReg, State) ->
-  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, [], Callgraph),
-  State1 = prioritize_warns(Warns, State),
+  Callgraph1 = dialyzer_dataflow:state__get_callgraph(State),
+  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, [], Callgraph1),
+  Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
+  Msgs2 = add_warnings(Warns, Msgs1),
+  Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
+  State1 = dialyzer_dataflow:state__put_callgraph(Callgraph2, State),
   dialyzer_dataflow:state__put_pid_tags([], State1).
 
 msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Callgraph) ->
@@ -405,9 +409,7 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
                Tags, OldTags, Digraph) ->
   {NewOldTags, Group} =
     case Kind =/= 'self' of
-      true -> {OldTags, []}; %% XXX: Return the spawn tag and renew the old
-                             %%      tags to include any self tags that are
-                             %%      covered (only below)
+      true -> {OldTags, []};
       false ->
         case Pid =:= ?no_label of
           true -> {OldTags, []};
@@ -491,27 +493,8 @@ renew_analyzed_pid_tags(OldPidTags, Msgs) ->
 %%%
 %%% ===========================================================================
 
-add_warns([], State) ->
-  State;
-add_warns([{?WARN_MESSAGE, _FL, {message_rcv_stmt_unused_pats, []}}|Warns],
-          State) ->
-  add_warns(Warns, State);
-add_warns([{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, Pats}}|Warns],
-          State) ->
-  W =
-    case lists:usort(Pats) of
-      [_] = Pat ->
-        {?WARN_MESSAGE, FL,
-         {message_rcv_stmt_unused_pats, [{one, format_unused_pats(Pat)}]}};
-      Sorted ->
-        {?WARN_MESSAGE, FL,
-         {message_rcv_stmt_unused_pats, [{more, format_unused_pats(Sorted)}]}}
-    end,
-  State1 = dialyzer_dataflow:state__add_warning(W, State),
-  add_warns(Warns, State1);
-add_warns([W|Warns], State) ->
-  State1 = dialyzer_dataflow:state__add_warning(W, State),
-  add_warns(Warns, State1).
+add_warnings(Warns, #msgs{warnings = OldWarns} = Msgs) ->
+  Msgs#msgs{warnings = Warns ++ OldWarns}.
 
 check_rcv_pats([], _FileLine, Warns) ->
   Warns;
@@ -566,10 +549,12 @@ format_unused_pats([Num|Nums], Acc) ->
   NewAcc = Acc ++ format_suffix(Num) ++ ", ",
   format_unused_pats(Nums, NewAcc).
 
-prioritize_warns(Warns, State) ->
+-spec prioritize_msg_warns([dial_warning()]) -> [dial_warning()].
+
+prioritize_msg_warns(Warns) ->
   SortedWarns = sort_warns(Warns),
   Warns1 = prioritize_warns1(SortedWarns, []),
-  add_warns(Warns1, State).
+  prioritize_warns3(Warns1, []).
 
 prioritize_warns1([], Acc) ->
   Acc;
@@ -607,6 +592,26 @@ prioritize_warns2([{?WARN_MESSAGE, FL, {Type, Pats}} = H|T],
         end
     end,
   prioritize_warns2(T, NewPrioWarn).
+
+prioritize_warns3([], Acc) ->
+  Acc;
+prioritize_warns3([{?WARN_MESSAGE, _FL, {message_rcv_stmt_unused_pats, []}}|
+                   Warns], Acc) ->
+  prioritize_warns3(Warns, Acc);
+prioritize_warns3([{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, Pats}}|
+                   Warns], Acc) ->
+  W =
+    case lists:usort(Pats) of
+      [_] = Pat ->
+        {?WARN_MESSAGE, FL,
+         {message_rcv_stmt_unused_pats, [{one, format_unused_pats(Pat)}]}};
+      Sorted ->
+        {?WARN_MESSAGE, FL,
+         {message_rcv_stmt_unused_pats, [{more, format_unused_pats(Sorted)}]}}
+    end,
+  prioritize_warns3(Warns, [W|Acc]);
+prioritize_warns3([W|Warns], Acc) ->
+  prioritize_warns3(Warns, [W|Acc]).
 
 sort_warns(Warns) ->
   case lists:keysort(2, Warns) of
@@ -753,6 +758,11 @@ get_rcv_tags(#msgs{rcv_tags = RcvTags}) ->
 
 get_send_tags(#msgs{send_tags = SendTags}) ->
   SendTags.
+
+-spec get_warnings(msgs()) -> [dial_warning()].
+
+get_warnings(#msgs{warnings = Warnings}) ->
+  Warnings.
 
 -spec new() -> msgs().
 
