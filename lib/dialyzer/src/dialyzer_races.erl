@@ -210,7 +210,8 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                                                 CurrFun,
                                                                 ProcReg)
                           end
-                      end
+                      end;
+                    false -> ProcReg
                   end;
                 false -> ProcReg
               end,
