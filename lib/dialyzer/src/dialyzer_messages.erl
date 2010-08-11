@@ -139,7 +139,7 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Callgraph) ->
                                     MsgVarMap, Callgraph),
       PidMFAs =
         case Kind =:= 'self' of
-          true -> backward_msg_analysis(CurrFun, Digraph);
+          true -> backward_msg_analysis(PidMFA, Digraph);
           false -> [PidMFA]
         end,
       CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
@@ -405,67 +405,103 @@ get_race_list_ret1(RaceList, NestingLevel, State) ->
 %% in the form of the highest ancestor
 group_pid_tags([], _Tags, OldTags, _Digraph) ->
   {OldTags, []};
-group_pid_tags([#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
+group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA} = H|T],
                Tags, OldTags, Digraph) ->
   {NewOldTags, Group} =
-    case Kind =/= 'self' of
+    case Pid =:= ?no_label of
       true -> {OldTags, []};
       false ->
-        case Pid =:= ?no_label of
+        case lists:member(H, OldTags) of
           true -> {OldTags, []};
           false ->
-            case lists:member(H, OldTags) of
-              true -> {OldTags, []};
-              false ->
-                ReachableFrom = digraph_utils:reachable([CurrFun], Digraph),
-                ReachingTo = digraph_utils:reaching([CurrFun], Digraph),
-                {RetTags, RetDad, RetMVM} =
-                  group_pid_tags1(H, Tags, [H|OldTags], ReachableFrom,
-                                  ReachingTo, Digraph, H, dict:new()),
-                {RetTags, [{RetDad, RetMVM}]}
-            end
+            ReachableFrom = digraph_utils:reachable([PidMFA], Digraph),
+            ReachingTo = digraph_utils:reaching([PidMFA], Digraph),
+            {RetTags, RetDad, RetMVM} =
+              case Kind =/= 'self' of
+                true ->
+                  group_spawn_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
+                                       ReachingTo, [], true, dict:new());
+                false ->
+                  group_self_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
+                                      ReachingTo, Digraph, H, dict:new())
+              end,
+            {RetTags, [{RetDad, RetMVM}]}
         end
     end,
   {RetOldTags, RetGroups} = group_pid_tags(T, Tags, NewOldTags, Digraph),
   {RetOldTags, Group ++ RetGroups}.
 
-group_pid_tags1(_CurrTag, [], OldTags, _ReachableFrom, _ReachingTo, _Digraph,
-                Dad, MsgVarMap) ->
+group_self_pid_tags(_CurrTag, [], OldTags, _ReachableFrom, _ReachingTo,
+                    _Digraph, Dad, MsgVarMap) ->
   {OldTags, Dad, MsgVarMap};
-group_pid_tags1(#pid_fun{pid = CurrTagPid, fun_mfa = CurrTagFun} = CurrTag,
-                [#pid_fun{kind = Kind, pid = Pid, fun_mfa = CurrFun} = H|T],
-                OldTags, ReachableFrom, ReachingTo, Digraph,
-                #pid_fun{fun_mfa = DadCurrFun} = Dad, MsgVarMap) ->
+group_self_pid_tags(#pid_fun{pid = CurrPid, pid_mfa = CurrPidMFA} = CurrTag,
+                    [#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA} = H|T],
+                    OldTags, ReachableFrom, ReachingTo, Digraph,
+                    #pid_fun{pid_mfa = DadPidMFA} = Dad, MsgVarMap) ->
   {NewOldTags, NewDad, NewMsgVarMap} =
     case Kind =/= 'self' orelse Pid =:= ?no_label orelse CurrTag =:= H orelse
       lists:member(H, OldTags) of
       true -> {OldTags, Dad, MsgVarMap};
       false ->
-        case CurrTagFun =:= CurrFun of
+        case CurrPidMFA =:= PidMFA of
           true ->
-            {[H|OldTags], Dad, bind_dict_vars(CurrTagPid, Pid, MsgVarMap)};
+            {[H|OldTags], Dad, bind_dict_vars(CurrPid, Pid, MsgVarMap)};
           false ->
-            case lists:member(CurrFun, ReachableFrom) of
+            case lists:member(PidMFA, ReachableFrom) of
               true ->
-                {[H|OldTags], Dad, bind_dict_vars(CurrTagPid, Pid, MsgVarMap)};
+                {[H|OldTags], Dad, bind_dict_vars(CurrPid, Pid, MsgVarMap)};
               false ->
-                case lists:member(CurrFun, ReachingTo) of
+                case lists:member(PidMFA, ReachingTo) of
                   true ->
-                    case digraph:get_path(Digraph, CurrFun, DadCurrFun) of
+                    case digraph:get_path(Digraph, PidMFA, DadPidMFA) of
                       false ->
                         {[H|OldTags], Dad,
-                         bind_dict_vars(CurrTagPid, Pid, MsgVarMap)};
+                         bind_dict_vars(CurrPid, Pid, MsgVarMap)};
                       _Vertices ->
                         {[H|OldTags], H,
-                         bind_dict_vars(CurrTagPid, Pid, MsgVarMap)}
+                         bind_dict_vars(CurrPid, Pid, MsgVarMap)}
                     end;
                   false -> {OldTags, Dad, MsgVarMap}
                 end
             end
         end
     end,
-  group_pid_tags1(CurrTag, T, NewOldTags, ReachableFrom, ReachingTo, Digraph,
-                  NewDad, NewMsgVarMap).
+  group_self_pid_tags(CurrTag, T, NewOldTags, ReachableFrom, ReachingTo,
+                      Digraph, NewDad, NewMsgVarMap).
+
+group_spawn_pid_tags(CurrTag, [], OldTags, _ReachableFrom, _ReachingTo,
+                     OldTagsAcc, true, MsgVarMap) ->
+  {lists:usort(OldTagsAcc ++ OldTags), CurrTag, MsgVarMap};
+group_spawn_pid_tags(CurrTag, [], OldTags, _ReachableFrom, _ReachingTo,
+                     _OldTagsAcc, false, MsgVarMap) ->
+  {OldTags, CurrTag, MsgVarMap};
+group_spawn_pid_tags(#pid_fun{pid = CurrPid, pid_mfa = CurrPidMFA} = CurrTag,
+                     [#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA} = H|T],
+                     OldTags, ReachableFrom, ReachingTo, OldTagsAcc, AddOldTags,
+                     MsgVarMap) ->
+  {NewOldTagsAcc, NewAddOldTags, NewMsgVarMap} =
+    case Kind =/= 'self' orelse Pid =:= ?no_label of
+      true -> {OldTagsAcc, AddOldTags, MsgVarMap};
+      false ->
+        case CurrPidMFA =:= PidMFA of
+          true ->
+            {[H|OldTagsAcc], AddOldTags,
+             bind_dict_vars(CurrPid, Pid, MsgVarMap)};
+          false ->
+            case lists:member(PidMFA, ReachableFrom) of
+              true ->
+                {[H|OldTagsAcc], AddOldTags,
+                 bind_dict_vars(CurrPid, Pid, MsgVarMap)};
+              false ->
+                case lists:member(PidMFA, ReachingTo) of
+                  true -> {OldTagsAcc, false, MsgVarMap};
+                  false -> {OldTagsAcc, AddOldTags, MsgVarMap}
+                end
+            end
+        end
+    end,
+  group_spawn_pid_tags(CurrTag, T, OldTags, ReachableFrom, ReachingTo,
+                       NewOldTagsAcc, NewAddOldTags, NewMsgVarMap).
 
 is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
   case dict:find(Atom, RegDict) of
@@ -718,7 +754,12 @@ add_pid_tag(Kind, Label, State) ->
   Races = dialyzer_dataflow:state__get_races(State),
   CurrFun = dialyzer_races:get_curr_fun(Races),
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
-  NewPidTag = #pid_fun{kind = Kind, pid = Label, fun_mfa = CurrFun},
+  NewPidTag =
+    case Kind of
+      'self' ->
+        #pid_fun{kind = Kind, pid = Label, pid_mfa = CurrFun,
+                 fun_mfa = CurrFun}
+    end,
   dialyzer_dataflow:state__put_pid_tags([NewPidTag|PidTags], State).
 
 -spec add_pid_tags([pid_fun()], msgs()) -> msgs().
@@ -729,7 +770,7 @@ add_pid_tags(PidTags, #msgs{pid_tags = PT} = Msgs) ->
 -spec create_pid_tag_for_self(mfa_or_funlbl()) -> pid_fun().
 
 create_pid_tag_for_self(CurrFun) ->
-  #pid_fun{kind = 'self', fun_mfa = CurrFun}.
+  #pid_fun{kind = 'self', pid_mfa = CurrFun, fun_mfa = CurrFun}.
 
 -spec create_rcv_tag(mfa_or_funlbl(), file_line()) -> #rcv_fun{}.
 
