@@ -400,7 +400,12 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
           Int when is_integer(Int) ->
             case RaceDetection orelse MsgAnalysis of
               true ->
-                {[#fun_call{caller = CurrFun, callee = Int,
+                Callee =
+                  case dialyzer_callgraph:lookup_name(Int, Callgraph) of
+                    error -> Int;
+                    {ok, MFA} -> MFA
+                  end,
+                {[#fun_call{caller = CurrFun, callee = Callee,
                             arg_types =  ArgTypes, vars = Args}|RaceList],
                  RaceListSize + 1, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags};
@@ -545,20 +550,10 @@ fixup_race_forward_pullout(CurrFun, CurrFunLabel, Calls, Code, RaceList,
                        State),
   case NewCode of
     [] -> DepList;
-    [#fun_call{caller = NewCurrFun, callee = Call, arg_types = FunTypes,
+    [#fun_call{caller = NewCurrFun, callee = Fun, arg_types = FunTypes,
                vars = FunArgs}|Tail] ->
       Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-      OkCall = {ok, Call},
-      {Name, Label} =
-        case is_integer(Call) of
-          true ->
-            case dialyzer_callgraph:lookup_name(Call, Callgraph) of
-              error -> {OkCall, OkCall};
-              N -> {N, OkCall}
-            end;
-          false ->
-            {OkCall, dialyzer_callgraph:lookup_label(Call, Callgraph)}
-        end,
+      Label = dialyzer_callgraph:lookup_label(Fun, Callgraph),
       {NewCurrFun1, NewCurrFunLabel1, NewCalls1, NewCode1, NewRaceList1,
        NewRaceVarMap1, NewFunDefVars1, NewFunCallVars1, NewFunArgTypes1,
        NewNestingLevel1} =
@@ -568,7 +563,6 @@ fixup_race_forward_pullout(CurrFun, CurrFunLabel, Calls, Code, RaceList,
              NewRaceVarMap, NewFunDefVars, NewFunCallVars, NewFunArgTypes,
              NewNestingLevel};
           false ->
-            {ok, Fun} = Name,
             {ok, Int} = Label,
             case ets:lookup(cfgs, Fun) of
               [] ->
@@ -745,8 +739,9 @@ fixup_race_forward(CurrFun, CurrFunLabel, Calls, Code, RaceList,
                                args = WarnVarArgs, var_map = RaceVarMap}],
                    NewDepList}
               end,
+            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
             {NewHead ++ RaceList, NewDepList1, NestingLevel,
-             is_last_race(RaceTag, InitFun, Tail, Callgraph)}
+             is_last_race(RaceTag, InitFun, Tail, Digraph)}
         end,
       {NewCurrFun, NewCurrFunLabel, NewCode, NewRaceList, NewRaceVarMap,
        NewFunDefVars, NewFunCallVars, NewFunArgTypes, NewNestingLevel,
@@ -1505,29 +1500,19 @@ fixup_all_calls(CurrFun, NextFun, NextFunLabel, Args, CodeToReplace,
       NewCode ++ RetCode
   end.
 
-is_last_race(RaceTag, InitFun, Code, Callgraph) ->
+is_last_race(RaceTag, InitFun, Code, Digraph) ->
   case Code of
     [] -> true;
     [Head|Tail] ->
       case Head of
         RaceTag -> false;
-        #fun_call{callee = Fun} ->
-          FunName =
-            case is_integer(Fun) of
-              true ->
-                case dialyzer_callgraph:lookup_name(Fun, Callgraph) of
-                  error -> Fun;
-                  {ok, Name} -> Name
-                end;
-              false -> Fun
-            end,
-          Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+        #fun_call{callee = FunName} ->
           case FunName =:= InitFun orelse
                digraph:get_path(Digraph, FunName, InitFun) of
-            false -> is_last_race(RaceTag, InitFun, Tail, Callgraph);
+            false -> is_last_race(RaceTag, InitFun, Tail, Digraph);
             _Vertices -> false
           end;
-        _Other -> is_last_race(RaceTag, InitFun, Tail, Callgraph)
+        _Other -> is_last_race(RaceTag, InitFun, Tail, Digraph)
       end
   end.
 

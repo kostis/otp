@@ -379,8 +379,7 @@ analyze_loop(#state{callgraph = Callgraph, races = Races} = State) ->
                 true ->
                   Races1 = NewState4#state.races,
                   RaceList = dialyzer_races:get_race_list(Races1),
-                  Ret = dialyzer_messages:get_race_list_ret(RaceList, BodyType,
-                                                            NewState4),
+                  Ret = dialyzer_messages:get_race_list_ret(RaceList, BodyType),
                   Code = lists:reverse(RaceList),
                   renew_code(dialyzer_races:get_curr_fun(Races1),
                              dialyzer_races:get_curr_fun_args(Races1),

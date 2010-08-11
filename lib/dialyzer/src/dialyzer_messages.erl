@@ -35,7 +35,7 @@
 
 -export([add_msg/2, add_pid/3, add_pid_tag/3, add_pid_tags/2,
          create_pid_tag_for_self/1, create_rcv_tag/2,
-         create_send_tag/4, get_race_list_ret/3,
+         create_send_tag/4, get_race_list_ret/2,
          get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
          get_warnings/1, new/0, put_proc_reg/2, put_rcv_tags/2,
          put_send_tags/2, update_proc_reg/4]).
@@ -153,7 +153,8 @@ go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
       [] -> [];
       [{MFA, _Args, _Ret, C}] -> C
     end,
-  forward_msg_analysis(Pid, Code, SendTags, ProcReg, MsgVarMap, Callgraph).
+  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+  forward_msg_analysis(Pid, Code, SendTags, ProcReg, MsgVarMap, Digraph).
 
 %%% ===========================================================================
 %%%
@@ -161,18 +162,18 @@ go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
 %%%
 %%% ===========================================================================
 
-forward_msg_analysis(_Pid, _Code, [], _ProcReg, _MsgVarMap, _Callgraph) ->
+forward_msg_analysis(_Pid, _Code, [], _ProcReg, _MsgVarMap, _Digraph) ->
   [];
 forward_msg_analysis(Pid, Code, SendTags, {RegDict, RegMFAs}, MsgVarMap,
-                     Callgraph) ->
+                     Digraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
   PidSendTags = forward_msg_analysis(Pid, Code, SendTags,
                                      lists:usort(RegMFAs ++ SendMFAs),
-                                     RegDict, [], MsgVarMap, Callgraph),
+                                     RegDict, [], MsgVarMap, Digraph),
   lists:usort(PidSendTags).
 
 forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
-                     Callgraph) ->
+                     Digraph) ->
   case Code of
     [] -> find_pid_send_tags(Pid, SendTags, RegDict, MsgVarMap);
     [Head|Tail] ->
@@ -181,17 +182,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
           'self' -> {[], MsgVarMap};
           #dep_call{} -> {[], MsgVarMap};
           #warn_call{} -> {[], MsgVarMap};
-          #fun_call{caller = Caller, callee = MFAorLabel, vars = CallVars} ->
-            Callee =
-              case is_integer(MFAorLabel) of
-                true ->
-                  case dialyzer_callgraph:lookup_name(MFAorLabel, Callgraph) of
-                    error -> MFAorLabel;
-                    {ok, MFA} -> MFA
-                  end;
-                false -> MFAorLabel
-              end,
-            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+          #fun_call{caller = Caller, callee = Callee, vars = CallVars} ->
             PidSendTags = 
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
@@ -207,7 +198,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
                           forward_msg_analysis(Pid, CalleeCode, SendTags,
                                                MFAs, RegDict,
                                                [{Caller, Callee}|Calls],
-                                               MsgVarMap1, Callgraph)
+                                               MsgVarMap1, Digraph)
                       end
                   end;
                 false -> []
@@ -231,7 +222,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
         end,
       NewPidSendTags ++
         forward_msg_analysis(Pid, Tail, SendTags, MFAs, RegDict, Calls,
-                             NewMsgVarMap, Callgraph)
+                             NewMsgVarMap, Digraph)
   end.
 
 %%% ===========================================================================
@@ -340,46 +331,35 @@ follow_call_pred(From, To, Digraph) ->
     _Vertices when is_list(_Vertices) -> true
   end.
 
-get_clause_ret(RaceList, State) ->
+get_clause_ret(RaceList) ->
   case RaceList of
     [] -> [];
     [H|T] ->
       case H of
         #beg_clause{} -> [];
-        #end_case{} -> get_race_list_ret1(T, 0, State);
+        #end_case{} -> get_race_list_ret1(T, 0);
         'self' -> ['self'];
         #fun_call{callee = Callee} ->
-          Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-          {ok, MFA} =
-            case is_integer(Callee) of
-              true ->
-                case dialyzer_callgraph:lookup_name(Callee, Callgraph) of
-                  error -> {ok, Callee};
-                  OkMFA -> OkMFA
-                end;
-              false -> {ok, Callee}
-            end,
-          case ets:lookup(cfgs, MFA) of
+          case ets:lookup(cfgs, Callee) of
             [] -> [];
-            [{MFA, _Args, Ret, _C}] -> Ret
+            [{Callee, _Args, Ret, _C}] -> Ret
           end;
         _ -> []
       end
   end.
 
--spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type(),
-                        dialyzer_dataflow:state()) ->
+-spec get_race_list_ret(dialyzer_races:code(), erl_types:erl_type()) ->
       [dialyzer_races:pid_tags()].
 
-get_race_list_ret([], _RetType, _State) -> [];
-get_race_list_ret([#end_case{}|RaceList], RetType, State) ->
+get_race_list_ret([], _RetType) -> [];
+get_race_list_ret([#end_case{}|RaceList], RetType) ->
   PidType = erl_types:t_pid(),
   case erl_types:t_is_subtype(PidType, RetType) of
-    true -> lists:flatten(get_race_list_ret1(RaceList, 0, State));
+    true -> lists:flatten(get_race_list_ret1(RaceList, 0));
     false -> []
   end.
 
-get_race_list_ret1(RaceList, NestingLevel, State) ->
+get_race_list_ret1(RaceList, NestingLevel) ->
   case RaceList of
     [] -> [];
     [H|T] ->
@@ -388,7 +368,7 @@ get_race_list_ret1(RaceList, NestingLevel, State) ->
           'beg_case' -> {[], NestingLevel - 1};
           #end_clause{} ->
             case NestingLevel =:= 0 of
-              true -> {get_clause_ret(T, State), NestingLevel};
+              true -> {get_clause_ret(T), NestingLevel};
               false -> {[], NestingLevel}
             end;
           #end_case{} -> {[], NestingLevel + 1};
@@ -397,7 +377,7 @@ get_race_list_ret1(RaceList, NestingLevel, State) ->
       case NestingLevel1 =:= -1 of
         true -> Ret;
         false ->
-          Ret ++ get_race_list_ret1(T, NestingLevel1, State)
+          Ret ++ get_race_list_ret1(T, NestingLevel1)
       end
   end.
 
