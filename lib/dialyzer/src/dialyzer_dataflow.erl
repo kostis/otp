@@ -39,7 +39,8 @@
 	 state__get_behaviour_api_dict/1,
 	 state__put_behaviour_api_dict/2,
 	 state__get_callback_ref_list/1,
-	 state__put_callback_ref_list/2]).
+	 state__put_callback_ref_list/2,
+	 state__var_fun_find/2]).
 
 %% Debug and test interfaces.
 -export([get_top_level_signatures/2, pp/1]).
@@ -2842,6 +2843,11 @@ var_fun_assignment(Arg, [Var], VFTab) ->
   end;
 var_fun_assignment(_Arg, _Vars, VFTab) ->
   VFTab.
+
+-spec state__var_fun_find(integer(), state()) -> {'ok', integer()} | 'error'.
+
+state__var_fun_find(VarLabel, #state{var_fun_tab = VFTab}) ->
+  dict:find(VarLabel, VFTab).
 
 any_opaque(Ts) ->
   lists:any(fun erl_types:t_is_opaque/1, Ts).

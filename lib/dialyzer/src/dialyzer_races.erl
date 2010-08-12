@@ -133,45 +133,21 @@
   dialyzer_dataflow:state().
 
 store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
-  Callgraph = dialyzer_dataflow:state__get_callgraph(InpState),
+
   Races = dialyzer_dataflow:state__get_races(InpState),
   CurrFun = Races#races.curr_fun,
+
+  {Fun, ArgTypes, Args, State} =
+    translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun),
+
+  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
   CurrFunLabel = Races#races.curr_fun_label,
   RaceTags = Races#races.race_tags,
-  PidTags = dialyzer_dataflow:state__get_pid_tags(InpState),
+  PidTags = dialyzer_dataflow:state__get_pid_tags(State),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
   ProcReg = dialyzer_messages:get_proc_reg(Msgs),
   SendTags = dialyzer_messages:get_send_tags(Msgs),
-  CleanState = dialyzer_dataflow:state__records_only(InpState),
-
-  %% EXPERIMENTAL: Turn a behaviour's API call into a call to the
-  %%               respective callback module's function.
-  
-  BehApiDict = dialyzer_dataflow:state__get_behaviour_api_dict(InpState),
-  CallbackRefList = dialyzer_dataflow:state__get_callback_ref_list(InpState),
-  {Fun, ArgTypes, Args, State} =
-    case dialyzer_behaviours:translate_behaviour_api_call(InpFun, InpArgTypes,
-							  InpArgs, BehApiDict,
-							  CallbackRefList,
-							  CurrFun) of
-      plain_call -> 
-	{InpFun, InpArgTypes, InpArgs, InpState};
-      {{TransFun, TransArgTypes, TransArgs}, NewCallbackRefList, Edge} ->
-	Edges =
-	  dialyzer_callgraph:get_translations(Callgraph),
-	NewEdges = case lists:member(Edge, Edges) of
-		     false -> [Edge|Edges];
-		     true  -> Edges
-		   end,
-	NewCallgraph =
-	  dialyzer_callgraph:put_translations(NewEdges, Callgraph),
-	TempState0 = dialyzer_dataflow:state__put_callback_ref_list(
-		       NewCallbackRefList,
-		       dialyzer_dataflow:state__put_callgraph(
-			 NewCallgraph, InpState)),
-	{TransFun, TransArgTypes, TransArgs, TempState0}
-    end,
-
+  CleanState = dialyzer_dataflow:state__records_only(State),
   {NewRaceList, NewRaceListSize, NewRaceTags, NewTable, NewPidTags,
    NewProcReg, NewSendTags} = 
     case CurrFun of
@@ -2644,3 +2620,77 @@ put_heisen_anal(Analysis, Races) ->
 
 put_race_list(RaceList, RaceListSize, Races) ->
   Races#races{race_list = RaceList, race_list_size = RaceListSize}.
+
+%%% ===========================================================================
+%%%
+%%%  Translations
+%%%
+%%% ===========================================================================
+
+debug(_S, _L) ->
+  ok.
+  %% io:format(_S, _L).
+
+translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
+  SpawnResult =
+    case InpFun of
+      {erlang, spawn, SpawnArity} ->
+	case SpawnArity of
+	  1 -> [FunArg] = InpArgs,
+	       case cerl:is_c_var(FunArg) of
+		 true ->
+		   VarLabel = cerl_trees:get_label(FunArg),
+		   case dialyzer_dataflow:state__var_fun_find(VarLabel,
+							      InpState) of
+		     {ok, FunLabel} ->
+		       debug("FunLabel\t: ~p\n",[FunLabel]),
+		       {true, {FunLabel, [], [], 
+			       add_translation_edge({CurrFun, FunLabel},
+						    InpState)}};
+		     error -> debug("Arity 1, Var Not Found\n",[]),
+			      false
+		   end;
+		 false ->  debug("Arity 1, No Var\n",[]),
+			   false
+	       end;
+	  _ -> debug("Extend Spawn Arity\n",[]),
+	       false
+	end;
+      _ -> debug("Not a Spawn\n",[]),
+	   other
+    end,
+  case SpawnResult of
+    {true, Res} -> Res;
+    false -> {InpFun, InpArgTypes, InpArgs, InpState};
+    other ->
+      
+      %% EXPERIMENTAL: Turn a behaviour's API call into a call to the
+      %%               respective callback module's function.
+      
+      BehApiDict = dialyzer_dataflow:state__get_behaviour_api_dict(InpState),
+      CallbackRefList = dialyzer_dataflow:state__get_callback_ref_list(InpState),
+      case dialyzer_behaviours:translate_behaviour_api_call(InpFun, InpArgTypes,
+							    InpArgs, BehApiDict,
+							    CallbackRefList,
+							    CurrFun) of
+	plain_call -> 
+	  {InpFun, InpArgTypes, InpArgs, InpState};
+	{{TransFun, TransArgTypes, TransArgs}, NewCallbackRefList, Edge} ->
+	  TempState0 = add_translation_edge(Edge, InpState),
+	  TempState1 =
+	    dialyzer_dataflow:state__put_callback_ref_list(NewCallbackRefList,
+							   TempState0),
+	  {TransFun, TransArgTypes, TransArgs, TempState1}
+      end
+  end.
+
+add_translation_edge(Edge, State) ->
+  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
+  Edges =  dialyzer_callgraph:get_translations(Callgraph),
+  NewEdges = case lists:member(Edge, Edges) of
+	       false -> [Edge|Edges];
+	       true  -> Edges
+	     end,
+  NewCallgraph = dialyzer_callgraph:put_translations(NewEdges, Callgraph),
+  dialyzer_dataflow:state__put_callgraph(NewCallgraph, State).
+  
