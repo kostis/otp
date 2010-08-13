@@ -351,11 +351,58 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags}
             end;
-          {erlang, '!', 2} ->
+          {erlang, Send, 2} when Send =:= '!' orelse Send =:= send orelse
+                                 Send =:= send_nosuspend ->
             case MsgAnalysis of
               true ->
                 [PidArg, _MsgArg] = Args,
                 [PidType, MsgType] = ArgTypes,
+                Pid =
+                  case erl_types:t_is_atom(PidType) of
+                    true ->
+                      case erl_types:t_atom_vals(PidType) of
+                        'unknown' -> ?no_label;
+                        Other -> Other
+                      end;
+                    false -> get_var_label(PidArg)
+                  end,
+                SendFun =
+                  dialyzer_messages:create_send_tag(Pid, MsgType, CurrFun,
+                                                    FileLine),
+                {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
+                 [SendFun|SendTags]};
+              false ->
+                {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
+                 SendTags}
+            end;
+          {erlang, Send, 3} when Send =:= send orelse Send =:= send_nosuspend ->
+            case MsgAnalysis of
+              true ->
+                [PidArg, _MsgArg, _OptArg] = Args,
+                [PidType, MsgType, _OptType] = ArgTypes,
+                Pid =
+                  case erl_types:t_is_atom(PidType) of
+                    true ->
+                      case erl_types:t_atom_vals(PidType) of
+                        'unknown' -> ?no_label;
+                        Other -> Other
+                      end;
+                    false -> get_var_label(PidArg)
+                  end,
+                SendFun =
+                  dialyzer_messages:create_send_tag(Pid, MsgType, CurrFun,
+                                                    FileLine),
+                {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
+                 [SendFun|SendTags]};
+              false ->
+                {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
+                 SendTags}
+            end;
+          {erlang, send_after, 3} ->
+            case MsgAnalysis of
+              true ->
+                [_TimeArg, PidArg, _MsgArg] = Args,
+                [_TimeType, PidType, MsgType] = ArgTypes,
                 Pid =
                   case erl_types:t_is_atom(PidType) of
                     true ->
@@ -382,10 +429,16 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                     error -> Int;
                     {ok, MFA} -> MFA
                   end,
+                %% case MsgAnalysis of
+                %%   true ->
+                %%     case InpFun of
+                %%       {erlang, spawn, A} when A =:= 1 ->
+                %%   false ->
                 {[#fun_call{caller = CurrFun, callee = Callee,
                             arg_types =  ArgTypes, vars = Args}|RaceList],
                  RaceListSize + 1, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags};
+              %% end;
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags}
