@@ -2780,12 +2780,9 @@ translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
 	      2 -> [_, FunArg] = InpArgs,
 		   spawn_result({single, FunArg}, InpState, CurrFun,
 				SpawnArity);
-	      3 -> [Module, Function, ArgList] = InpArgs,
-		   spawn_result({mfargs, {Module, Function, ArgList}}, InpState,
-				CurrFun, SpawnArity);
-	      4 -> [_, Module, Function, ArgList] = InpArgs,
-		   spawn_result({mfargs, {Module, Function, ArgList}}, InpState,
-				CurrFun, SpawnArity)
+	      N when N =:= 3 ; N =:= 4 ->
+		spawn_result({mfargs, InpArgs, InpArgTypes}, InpState, CurrFun,
+			     SpawnArity)
 	    end;
 	  {erlang, spawn_opt, SpawnArity} ->
 	    NewInpFun = {erlang, spawn, SpawnArity-1},
@@ -2848,11 +2845,63 @@ spawn_result({single, FunArg}, State, CurrFun, _SpawnArity) ->
       debug("Arity ~p, No Var\n",[_SpawnArity]),
       false
   end;
-spawn_result({mfargs, {Module, Function, Args}}, State, CurrFun, _SpawnArity) ->
-  Arity = length(Args),
-  MFA = {Module, Function, Arity},
-  ArgTypes = lists:duplicate(Arity, erl_types:t_any()),
-  {true, spawn_result1(MFA, ArgTypes, Args, CurrFun, State)}.
+spawn_result({mfargs, InpArgs, InpArgTypes}, State, CurrFun, SpawnArity) ->
+  {[ModuleCerl, FunctionCerl, ArgsCerl],
+   [ModuleType, FunctionType, ArgsType]} = 
+    case SpawnArity of
+      3 -> {InpArgs, InpArgTypes};
+      4 -> [_|T1] = InpArgs,
+	   [_|T2] = InpArgTypes,
+	   {T1, T2}
+    end,
+  case extract_atom(ModuleCerl, ModuleType) of
+    {ok, Module} ->
+      case extract_atom(FunctionCerl, FunctionType) of
+	{ok, Function} ->
+	  case extract_list(ArgsCerl, ArgsType) of
+	    {ok, Args} ->
+	      debug("Mod\t: ~p\nFun\t:~p\nArgs\t: ~p\n",
+		    [Module, Function, Args]),
+	      Arity = length(Args),
+	      MFA = {Module, Function, Arity},
+	      ArgTypes = lists:duplicate(Arity, erl_types:t_any()),
+	      {true, spawn_result1(MFA, ArgTypes, ArgsCerl, CurrFun, State)};
+	    error -> false
+	  end;
+	error -> false
+      end;
+    error -> false
+  end.
 
 spawn_result1(MFAorLbl, ArgTypes, Args, CurrFun, State) ->
   {MFAorLbl, ArgTypes, Args, add_translation_edge({CurrFun, MFAorLbl}, State)}.
+
+extract_atom(Cerl, Type) ->
+  case cerl:is_literal(Cerl) of
+    true ->
+      case cerl:concrete(Cerl) of
+	Atom when is_atom(Atom) -> {ok, Atom};
+	_ -> error
+      end;
+    false ->
+      case erl_types:t_is_atom(Type) of
+	true ->
+	  case erl_types:t_atom_vals(Type) of
+	    'unknown' -> error;
+	    [AtomVal] -> {ok, AtomVal};
+	    _         -> error
+	  end;
+	false -> error
+      end
+  end.
+
+extract_list(Cerl, _Type) ->
+  case cerl:is_literal(Cerl) of
+    true ->
+      case cerl:concrete(Cerl) of
+	List when is_list(List) -> {ok, List};
+	_ -> error
+      end;
+    false -> error
+  end.
+  
