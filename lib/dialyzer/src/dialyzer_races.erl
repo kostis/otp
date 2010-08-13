@@ -139,7 +139,6 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
 
   {Fun, ArgTypes, Args, State} =
     translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun),
-
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
   CurrFunLabel = Races#races.curr_fun_label,
   RaceTags = Races#races.race_tags,
@@ -2684,43 +2683,43 @@ debug(_S, _L) ->
   ok.
   %% io:format(_S, _L).
 
+drop_last([]) -> [];
+drop_last([_]) -> [];
+drop_last([H| T]) -> [H| drop_last(T)].
+
 translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
   Callgraph = dialyzer_dataflow:state__get_callgraph(InpState),
   MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
   SpawnResult =
     case MsgAnalysis of
       true ->
-        case InpFun of
-          {erlang, spawn, SpawnArity} ->
-            case SpawnArity of
-              1 -> [FunArg] = InpArgs,
-                   case cerl:is_c_var(FunArg) of
-                     true ->
-                       VarLabel = cerl_trees:get_label(FunArg),
-                       case dialyzer_dataflow:state__var_fun_find(VarLabel,
-                                                                  InpState) of
-                         {ok, FunLabel} ->
-                           debug("FunLabel\t: ~p\n",[FunLabel]),
-                           {true, {FunLabel, [], [], 
-                                   add_translation_edge({CurrFun, FunLabel},
-                                                        InpState)}};
-                         error ->
-                           debug("Arity 1, Var Not Found\n",[]),
-                           false
-                       end;
-                     false ->
-                       debug("Arity 1, No Var\n",[]),
-                       false
-                   end;
-              _ ->
-                debug("Extend Spawn Arity\n",[]),
-                false
-            end;
-          _ ->
-            debug("Not a Spawn\n",[]),
-            other
-        end;
-      false -> false
+	case InpFun of
+	  {erlang, SpawnId, SpawnArity} when SpawnId =:= 'spawn' ;
+					     SpawnId =:= 'spawn_link' ;
+					     SpawnId =:= 'spawn_monitor' ->
+	    case SpawnArity of
+	      1 -> [FunArg] = InpArgs,
+		   spawn_result({single, FunArg}, InpState, CurrFun,
+				SpawnArity);
+	      2 -> [_, FunArg] = InpArgs,
+		   spawn_result({single, FunArg}, InpState, CurrFun,
+				SpawnArity);
+	      3 -> [Module, Function, ArgList] = InpArgs,
+		   spawn_result({mfargs, {Module, Function, ArgList}}, InpState,
+				CurrFun, SpawnArity);
+	      4 -> [_, Module, Function, ArgList] = InpArgs,
+		   spawn_result({mfargs, {Module, Function, ArgList}}, InpState,
+				CurrFun, SpawnArity)
+	    end;
+	  {erlang, spawn_opt, SpawnArity} ->
+	    NewInpFun = {erlang, spawn, SpawnArity-1},
+	    NewInpArgTypes = drop_last(InpArgTypes),
+	    NewInpArgs = drop_last(InpArgs),
+	    translate(NewInpFun, NewInpArgTypes, NewInpArgs, InpState, CurrFun);
+	  _ -> debug("Not a Spawn\n",[]),
+	       other
+	end;
+      false -> other
     end,
   case SpawnResult of
     {true, Res} -> Res;
@@ -2757,3 +2756,27 @@ add_translation_edge(Edge, State) ->
   NewCallgraph = dialyzer_callgraph:put_translations(NewEdges, Callgraph),
   dialyzer_dataflow:state__put_callgraph(NewCallgraph, State).
   
+spawn_result({single, FunArg}, State, CurrFun, _SpawnArity) ->
+  case cerl:is_c_var(FunArg) of
+    true ->
+      VarLabel = cerl_trees:get_label(FunArg),
+      case dialyzer_dataflow:state__var_fun_find(VarLabel, State) of
+	{ok, FunLabel} ->
+	  debug("FunLabel\t: ~p\n",[FunLabel]),
+	  {true, spawn_result1(FunLabel, [], [], CurrFun, State)};
+	error ->
+	  debug("Arity ~p, Var Not Found\n",[_SpawnArity]),
+	  false
+      end;
+    false ->
+      debug("Arity ~p, No Var\n",[_SpawnArity]),
+      false
+  end;
+spawn_result({mfargs, {Module, Function, Args}}, State, CurrFun, _SpawnArity) ->
+  Arity = length(Args),
+  MFA = {Module, Function, Arity},
+  ArgTypes = lists:duplicate(Arity, erl_types:t_any()),
+  {true, spawn_result1(MFA, ArgTypes, Args, CurrFun, State)}.
+
+spawn_result1(MFAorLbl, ArgTypes, Args, CurrFun, State) ->
+  {MFAorLbl, ArgTypes, Args, add_translation_edge({CurrFun, MFAorLbl}, State)}.
