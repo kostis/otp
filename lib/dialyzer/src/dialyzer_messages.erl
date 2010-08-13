@@ -34,8 +34,8 @@
 %% Record Interfaces
 
 -export([add_msg/2, add_pid/3, add_pid_tag/3, add_pid_tags/2,
-         create_pid_tag_for_self/1, create_rcv_tag/2,
-         create_send_tag/4, get_race_list_ret/2,
+         create_pid_tag_for_self/1, create_pid_tag_for_spawn/2,
+         create_rcv_tag/2, create_send_tag/4, get_race_list_ret/2,
          get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
          get_warnings/1, new/0, put_proc_reg/2, put_rcv_tags/2,
          put_send_tags/2, update_proc_reg/4]).
@@ -54,7 +54,7 @@
 %%% ===========================================================================
 
 -type dest()     :: label() | ?no_label | [atom()].
--type pid_kind() :: 'self'.
+-type pid_kind() :: 'self' | 'spawn'.
 -type proc_reg() :: {dict(), [mfa_or_funlbl()]}.
 %% process registry associating atoms to pids and
 %% mfas that contain the associations
@@ -793,6 +793,11 @@ add_pid_tags(PidTags, #msgs{pid_tags = PT} = Msgs) ->
 
 create_pid_tag_for_self(CurrFun) ->
   #pid_fun{kind = 'self', pid_mfa = CurrFun, fun_mfa = CurrFun}.
+
+-spec create_pid_tag_for_spawn(mfa_or_funlbl(), mfa_or_funlbl()) -> pid_fun().
+
+create_pid_tag_for_spawn(PidMFA, CurrFun) ->
+  #pid_fun{kind = 'spawn', pid_mfa = PidMFA, fun_mfa = CurrFun}.
 
 -spec create_rcv_tag(mfa_or_funlbl(), file_line()) -> #rcv_fun{}.
 

@@ -136,7 +136,6 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
 
   Races = dialyzer_dataflow:state__get_races(InpState),
   CurrFun = Races#races.curr_fun,
-
   {Fun, ArgTypes, Args, State} =
     translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun),
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
@@ -428,16 +427,40 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                     error -> Int;
                     {ok, MFA} -> MFA
                   end,
-                %% case MsgAnalysis of
-                %%   true ->
-                %%     case InpFun of
-                %%       {erlang, spawn, A} when A =:= 1 ->
-                %%   false ->
-                {[#fun_call{caller = CurrFun, callee = Callee,
-                            arg_types =  ArgTypes, vars = Args}|RaceList],
-                 RaceListSize + 1, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags};
-              %% end;
+                case MsgAnalysis of
+                  true ->
+                    case InpFun of
+                      {erlang, Spawn, A} when (Spawn =:= spawn orelse
+                                               Spawn =:= spawn_link) andalso
+                                              (A =:= 1 orelse A =:= 2 orelse
+                                               A =:= 3 orelse A =:= 4) ->
+                        PidFun = dialyzer_messages:create_pid_tag_for_spawn(
+                                   Fun, CurrFun),
+                        {RaceList, RaceListSize, RaceTags, 'no_t',
+                         [PidFun|PidTags], ProcReg, SendTags};
+                      {erlang, spawn_monitor, A} when A =:= 1 orelse A =:= 3 ->
+                        PidFun = dialyzer_messages:create_pid_tag_for_spawn(
+                                   Fun, CurrFun),
+                        {RaceList, RaceListSize, RaceTags, 'no_t',
+                         [PidFun|PidTags], ProcReg, SendTags};
+                      {erlang, spawn_opt, A} when A =:= 2 orelse A =:= 3 orelse
+                                                  A =:= 4 orelse A =:= 5 ->
+                        PidFun = dialyzer_messages:create_pid_tag_for_spawn(
+                                   Fun, CurrFun),
+                        {RaceList, RaceListSize, RaceTags, 'no_t',
+                         [PidFun|PidTags], ProcReg, SendTags};
+                      _Else ->
+                        {[#fun_call{caller = CurrFun, callee = Callee,
+                                    arg_types =  ArgTypes, vars = Args}|
+                          RaceList], RaceListSize + 1, RaceTags, 'no_t',
+                         PidTags, ProcReg, SendTags}
+                    end;
+                  false ->
+                    {[#fun_call{caller = CurrFun, callee = Callee,
+                                arg_types =  ArgTypes, vars = Args}|RaceList],
+                     RaceListSize + 1, RaceTags, 'no_t', PidTags, ProcReg,
+                     SendTags}
+                end;
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags}
@@ -448,10 +471,63 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                 case digraph:vertex(dialyzer_callgraph:get_digraph(Callgraph),
                                     Fun) of
                   {Fun, confirmed} ->
-                    {[#fun_call{caller = CurrFun, callee = Fun,
-                                arg_types = ArgTypes, vars = Args}|RaceList],
-                     RaceListSize + 1, RaceTags, 'no_t', PidTags, ProcReg,
-                     SendTags};
+                    case MsgAnalysis of
+                      true ->
+                        case InpFun of
+                          {erlang, Spawn, A} when (Spawn =:= spawn orelse
+                                                   Spawn =:= spawn_link) andalso
+                                                  (A =:= 1 orelse A =:= 2 orelse
+                                                   A =:= 3 orelse A =:= 4) ->
+                            case InpFun of
+                              Fun ->
+                                {RaceList, RaceListSize, RaceTags, 'no_t',
+                                 PidTags, ProcReg, SendTags};
+                              _NotFun ->
+                                PidFun =
+                                  dialyzer_messages:create_pid_tag_for_spawn(
+                                    Fun, CurrFun),
+                                {RaceList, RaceListSize, RaceTags, 'no_t',
+                                 [PidFun|PidTags], ProcReg, SendTags}
+                            end;
+                          {erlang, spawn_monitor, A} when A =:= 1 orelse
+                                                          A =:= 3 ->
+                            case InpFun of
+                              Fun ->
+                                {RaceList, RaceListSize, RaceTags, 'no_t',
+                                 PidTags, ProcReg, SendTags};
+                              _NotFun ->
+                                PidFun =
+                                  dialyzer_messages:create_pid_tag_for_spawn(
+                                    Fun, CurrFun),
+                                {RaceList, RaceListSize, RaceTags, 'no_t',
+                                 [PidFun|PidTags], ProcReg, SendTags}
+                            end;
+                          {erlang, spawn_opt, A} when A =:= 2 orelse
+                                                      A =:= 3 orelse
+                                                      A =:= 4 orelse A =:= 5 ->
+                            case InpFun of
+                              Fun ->
+                                {RaceList, RaceListSize, RaceTags, 'no_t',
+                                 PidTags, ProcReg, SendTags};
+                              _NotFun ->
+                                PidFun =
+                                  dialyzer_messages:create_pid_tag_for_spawn(
+                                    Fun, CurrFun),
+                                {RaceList, RaceListSize, RaceTags, 'no_t',
+                                 [PidFun|PidTags], ProcReg, SendTags}
+                            end;
+                          _Else ->
+                            {[#fun_call{caller = CurrFun, callee = Fun,
+                                        arg_types = ArgTypes, vars = Args}|
+                              RaceList], RaceListSize + 1, RaceTags, 'no_t',
+                             PidTags, ProcReg, SendTags}
+                        end;
+                      false ->
+                        {[#fun_call{caller = CurrFun, callee = Fun,
+                                    arg_types = ArgTypes, vars = Args}|
+                          RaceList], RaceListSize + 1, RaceTags, 'no_t',
+                         PidTags, ProcReg, SendTags}
+                    end;
                   false ->
                     {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
                      SendTags}
@@ -2685,7 +2761,7 @@ debug(_S, _L) ->
 
 drop_last([]) -> [];
 drop_last([_]) -> [];
-drop_last([H| T]) -> [H| drop_last(T)].
+drop_last([H|T]) -> [H|drop_last(T)].
 
 translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
   Callgraph = dialyzer_dataflow:state__get_callgraph(InpState),
