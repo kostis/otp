@@ -2632,32 +2632,42 @@ debug(_S, _L) ->
   %% io:format(_S, _L).
 
 translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
+  Callgraph = dialyzer_dataflow:state__get_callgraph(InpState),
+  MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
   SpawnResult =
-    case InpFun of
-      {erlang, spawn, SpawnArity} ->
-	case SpawnArity of
-	  1 -> [FunArg] = InpArgs,
-	       case cerl:is_c_var(FunArg) of
-		 true ->
-		   VarLabel = cerl_trees:get_label(FunArg),
-		   case dialyzer_dataflow:state__var_fun_find(VarLabel,
-							      InpState) of
-		     {ok, FunLabel} ->
-		       debug("FunLabel\t: ~p\n",[FunLabel]),
-		       {true, {FunLabel, [], [], 
-			       add_translation_edge({CurrFun, FunLabel},
-						    InpState)}};
-		     error -> debug("Arity 1, Var Not Found\n",[]),
-			      false
-		   end;
-		 false ->  debug("Arity 1, No Var\n",[]),
-			   false
-	       end;
-	  _ -> debug("Extend Spawn Arity\n",[]),
-	       false
-	end;
-      _ -> debug("Not a Spawn\n",[]),
-	   other
+    case MsgAnalysis of
+      true ->
+        case InpFun of
+          {erlang, spawn, SpawnArity} ->
+            case SpawnArity of
+              1 -> [FunArg] = InpArgs,
+                   case cerl:is_c_var(FunArg) of
+                     true ->
+                       VarLabel = cerl_trees:get_label(FunArg),
+                       case dialyzer_dataflow:state__var_fun_find(VarLabel,
+                                                                  InpState) of
+                         {ok, FunLabel} ->
+                           debug("FunLabel\t: ~p\n",[FunLabel]),
+                           {true, {FunLabel, [], [], 
+                                   add_translation_edge({CurrFun, FunLabel},
+                                                        InpState)}};
+                         error ->
+                           debug("Arity 1, Var Not Found\n",[]),
+                           false
+                       end;
+                     false ->
+                       debug("Arity 1, No Var\n",[]),
+                       false
+                   end;
+              _ ->
+                debug("Extend Spawn Arity\n",[]),
+                false
+            end;
+          _ ->
+            debug("Not a Spawn\n",[]),
+            other
+        end;
+      false -> false
     end,
   case SpawnResult of
     {true, Res} -> Res;
