@@ -101,7 +101,7 @@
 		races = dialyzer_races:new() :: dialyzer_races:races(),
 		records = dict:new() :: dict(),
 		tree_map	     :: dict(),
-                var_fun_tab          :: dict(),
+                var_fun_tab = dict:new() :: dict(),
 		warning_mode = false :: boolean(),
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
@@ -2896,11 +2896,9 @@ state__new(Callgraph, Tree, Plt, Module, Records, BehaviourTranslations) ->
   Opaques = erl_types:module_builtin_opaques(Module) ++
     erl_types:t_opaque_from_records(Records),
   #state{callgraph = Callgraph, envs = Env, fun_tab = FunTab,
-         pid_tags = [], opaques = Opaques, plt = Plt,
-         races = dialyzer_races:new(), records = Records,
-         var_fun_tab = dict:new(), warning_mode = false,
-         warnings = [], work = Work, tree_map = TreeMap,
-         module = Module, behaviour_api_dict = BehaviourTranslations}.
+         opaques = Opaques, plt = Plt, records = Records,
+         work = Work, tree_map = TreeMap, module = Module,
+         behaviour_api_dict = BehaviourTranslations}.
 
 state__mark_fun_as_handled(#state{fun_tab = FunTab} = State, Fun0) ->
   Fun = get_label(Fun0),
