@@ -37,8 +37,9 @@
          create_pid_tag_for_self/1, create_pid_tag_for_spawn/2,
          create_rcv_tag/2, create_send_tag/4, get_race_list_ret/2,
          get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
-         get_warnings/1, new/0, put_proc_reg/2, put_rcv_tags/2,
-         put_send_tags/2, update_proc_reg/4]).
+         get_warnings/1, get_whereis_argtypes/1, new/0,
+         put_proc_reg/2, put_rcv_tags/2, put_send_tags/2,
+         put_whereis_argtypes/2, update_proc_reg/4]).
 
 %% Exported Types
 
@@ -79,6 +80,7 @@
                    rcv_tags  = []  :: [#rcv_fun{}],
                    send_tags = []  :: [#send_fun{}],
                    proc_reg  = {dict:new(), []} :: proc_reg(),
+                   whereis_argtypes = [] :: [erl_types:erl_type()],
                    warnings  = []  :: [dial_warning()]}).
 
 %%% ===========================================================================
@@ -167,9 +169,10 @@ forward_msg_analysis(_Pid, _Code, [], _ProcReg, _MsgVarMap, _Digraph) ->
 forward_msg_analysis(Pid, Code, SendTags, {RegDict, RegMFAs}, MsgVarMap,
                      Digraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
+  MsgVarMap1 = bind_reg_labels(RegDict, MsgVarMap),
   PidSendTags = forward_msg_analysis(Pid, Code, SendTags,
                                      lists:usort(RegMFAs ++ SendMFAs),
-                                     RegDict, [], MsgVarMap, Digraph),
+                                     RegDict, [], MsgVarMap1, Digraph),
   lists:usort(PidSendTags).
 
 forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
@@ -241,6 +244,17 @@ backward_msg_analysis(CurrFun, Digraph) ->
 bind_dict_vars(Label1, Label2, Dict) ->
   TempDict = dialyzer_races:bind_dict_vars(Label1, Label2, Dict),
   dialyzer_races:bind_dict_vars(Label2, Label1, TempDict).
+
+bind_reg_labels(RegDict, MsgVarMap) ->
+  Keys = dict:fetch_keys(RegDict),
+  bind_reg_labels(Keys, RegDict, MsgVarMap).
+
+bind_reg_labels([], _RegDict, MsgVarMap) ->
+  MsgVarMap;
+bind_reg_labels([K|Keys], RegDict, MsgVarMap) ->
+  {ok, [L|Labels]} = dict:find(K, RegDict),
+  MsgVarMap1 = dialyzer_races:bind_dict_vars_list(L, Labels, MsgVarMap),
+  bind_reg_labels(Keys, RegDict, MsgVarMap1).
 
 filter_parents(UParents, Digraph) ->
   dialyzer_races:filter_parents(UParents, UParents, Digraph).
@@ -832,6 +846,11 @@ get_send_tags(#msgs{send_tags = SendTags}) ->
 get_warnings(#msgs{warnings = Warnings}) ->
   Warnings.
 
+-spec get_whereis_argtypes(msgs()) -> [erl_types:erl_type()].
+
+get_whereis_argtypes(#msgs{whereis_argtypes = WhereisArgtypes}) ->
+  WhereisArgtypes.
+
 -spec new() -> msgs().
 
 new() -> #msgs{}.
@@ -850,6 +869,11 @@ put_rcv_tags(RcvTags, Msgs) ->
 
 put_send_tags(SendTags, Msgs) ->
   Msgs#msgs{send_tags = SendTags}.
+
+-spec put_whereis_argtypes([erl_types:erl_type()], msgs()) -> msgs().
+
+put_whereis_argtypes(WhereisArgtypes, Msgs) ->
+  Msgs#msgs{whereis_argtypes = WhereisArgtypes}.
 
 -spec update_proc_reg(label(), [atom()], mfa_or_funlbl(), proc_reg()) ->
       proc_reg().

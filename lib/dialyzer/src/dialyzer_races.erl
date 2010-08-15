@@ -33,9 +33,9 @@
 
 %% Utilities also used by the message analysis
 
--export([are_bound_labels/3, bind_dict_vars/3, filter_parents/3,
-         fixup_race_backward/5, race_var_map/4, race_var_map_clauses/2,
-         race_var_map_guard/5]).
+-export([are_bound_labels/3, bind_dict_vars/3, bind_dict_vars_list/3,
+         filter_parents/3, fixup_race_backward/5, get_var_label/1,
+         race_var_map/4, race_var_map_clauses/2, race_var_map_guard/5]).
 
 %% Record Interfaces
 
@@ -97,8 +97,8 @@
                         #curr_fun{} | #let_tag{} | case_tags() |
                         pid_tags() | race_tags()].
 
--type table_var()   :: label() | ?no_label.
--type table()       :: {'named', table_var(), [string()]} | 'other' | 'no_t'.
+-type var_label()   :: label() | ?no_label.
+-type table()       :: {'named', var_label(), [string()]} | 'other' | 'no_t'.
 
 -record(race_fun,   {mfa        :: mfa(),
                      args       :: args(),
@@ -144,13 +144,14 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
   ProcReg = dialyzer_messages:get_proc_reg(Msgs),
+  WhereisArgtypes = dialyzer_messages:get_whereis_argtypes(Msgs),
   SendTags = dialyzer_messages:get_send_tags(Msgs),
   CleanState = dialyzer_dataflow:state__records_only(State),
   {NewRaceList, NewRaceListSize, NewRaceTags, NewTable, NewPidTags,
-   NewProcReg, NewSendTags} = 
+   NewProcReg, NewSendTags, NewWhereisArgtypes} = 
     case CurrFun of
       {_Module, module_info, A} when A =:= 0 orelse A =:= 1 ->
-        {[], 0, RaceTags, 'no_t', PidTags, ProcReg, SendTags};
+        {[], 0, RaceTags, 'no_t', PidTags, ProcReg, SendTags, WhereisArgtypes};
       _Thing ->
         RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
         MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
@@ -160,10 +161,11 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
           {erlang, get_module_info, A} when A =:= 1 orelse A =:= 2 ->
             case RaceDetection orelse MsgAnalysis of
               true ->
-                {[], 0, RaceTags, 'no_t', PidTags, ProcReg, SendTags};
+                {[], 0, RaceTags, 'no_t', PidTags, ProcReg, SendTags,
+                 WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {erlang, register, 2} ->
             ProcReg1 =
@@ -202,10 +204,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                     fun_label = CurrFunLabel},
                 {[#warn_call{call_name = 'register', args = VarArgs}|
                   RaceList], RaceListSize + 1, [RaceFun|RaceTags], 'no_t',
-                 PidTags, ProcReg1, SendTags};
+                 PidTags, ProcReg1, SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg1,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {erlang, unregister, 1} ->
             case RaceDetection of
@@ -221,12 +223,17 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                     fun_label = CurrFunLabel},
                 {[#warn_call{call_name = 'unregister', args = VarArgs}|
                   RaceList], RaceListSize + 1, [RaceFun|RaceTags], 'no_t',
-                 PidTags, ProcReg, SendTags};
+                 PidTags, ProcReg, SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {erlang, whereis, 1} ->
+            WhereisArgtypes1 =
+              case MsgAnalysis of
+                true -> ArgTypes;
+                false -> WhereisArgtypes
+              end,
             case RaceDetection of
               true ->
                 VarArgs = format_args(Args, ArgTypes, CleanState, 'whereis'),
@@ -234,10 +241,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                             arg_types = ArgTypes, vars = Args,
                             state = CleanState, file_line = FileLine}|
                   RaceList], RaceListSize + 1, RaceTags, 'no_t', PidTags,
-                 ProcReg, SendTags};
+                 ProcReg, SendTags, WhereisArgtypes1};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes1}
             end;
           {ets, insert, 2} ->
             case RaceDetection of
@@ -253,10 +260,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                     fun_label = CurrFunLabel},
                 {[#warn_call{call_name = 'ets_insert', args = VarArgs}|
                   RaceList], RaceListSize + 1, [RaceFun|RaceTags], 'no_t',
-                 PidTags, ProcReg, SendTags};
+                 PidTags, ProcReg, SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {ets, lookup, 2} ->
             case RaceDetection of
@@ -266,10 +273,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                             arg_types = ArgTypes, vars = Args,
                             state = CleanState, file_line = FileLine}|
                   RaceList], RaceListSize + 1, RaceTags, 'no_t', PidTags,
-                 ProcReg, SendTags};
+                 ProcReg, SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {ets, new, 2} ->
             case RaceDetection of
@@ -287,10 +294,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                     false -> 'no_t'
                   end,
                 {RaceList, RaceListSize, RaceTags, NewTable1, PidTags,
-                 ProcReg, SendTags};
+                 ProcReg, SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {mnesia, dirty_read, A} when A =:= 1 orelse A =:= 2 ->
             case RaceDetection of
@@ -308,10 +315,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                             arg_types = ArgTypes, vars = Args,
                             state = CleanState, file_line = FileLine}|RaceList],
                  RaceListSize + 1, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags};
+                 SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {mnesia, dirty_write, A} when A =:= 1 orelse A =:= 2 ->
             case RaceDetection of
@@ -334,20 +341,20 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                 {[#warn_call{call_name = 'mnesia_dirty_write',
                              args = VarArgs}|RaceList],
                  RaceListSize + 1, [RaceFun|RaceTags], 'no_t', PidTags,
-                 ProcReg, SendTags};
+                 ProcReg, SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {erlang, self, 0} ->
             case MsgAnalysis of
               true ->
                 PidFun = dialyzer_messages:create_pid_tag_for_self(CurrFun),
                 {['self'|RaceList], RaceListSize + 1, RaceTags, 'no_t',
-                 [PidFun|PidTags], ProcReg, SendTags};
+                 [PidFun|PidTags], ProcReg, SendTags, WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {erlang, Send, 2} when Send =:= '!' orelse Send =:= send orelse
                                  Send =:= send_nosuspend ->
@@ -368,10 +375,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                   dialyzer_messages:create_send_tag(Pid, MsgType, CurrFun,
                                                     FileLine),
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 [SendFun|SendTags]};
+                 [SendFun|SendTags], WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {erlang, Send, 3} when Send =:= send orelse Send =:= send_nosuspend ->
             case MsgAnalysis of
@@ -391,10 +398,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                   dialyzer_messages:create_send_tag(Pid, MsgType, CurrFun,
                                                     FileLine),
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 [SendFun|SendTags]};
+                 [SendFun|SendTags], WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           {erlang, send_after, 3} ->
             case MsgAnalysis of
@@ -414,10 +421,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                   dialyzer_messages:create_send_tag(Pid, MsgType, CurrFun,
                                                     FileLine),
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 [SendFun|SendTags]};
+                 [SendFun|SendTags], WhereisArgtypes};
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           Int when is_integer(Int) ->
             case RaceDetection orelse MsgAnalysis of
@@ -437,33 +444,33 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
                         {RaceList, RaceListSize, RaceTags, 'no_t',
-                         [PidFun|PidTags], ProcReg, SendTags};
+                         [PidFun|PidTags], ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_monitor, A} when A =:= 1 orelse A =:= 3 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
                         {RaceList, RaceListSize, RaceTags, 'no_t',
-                         [PidFun|PidTags], ProcReg, SendTags};
+                         [PidFun|PidTags], ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_opt, A} when A =:= 2 orelse A =:= 3 orelse
                                                   A =:= 4 orelse A =:= 5 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
                         {RaceList, RaceListSize, RaceTags, 'no_t',
-                         [PidFun|PidTags], ProcReg, SendTags};
+                         [PidFun|PidTags], ProcReg, SendTags, WhereisArgtypes};
                       _Else ->
                         {[#fun_call{caller = CurrFun, callee = Callee,
                                     arg_types =  ArgTypes, vars = Args}|
                           RaceList], RaceListSize + 1, RaceTags, 'no_t',
-                         PidTags, ProcReg, SendTags}
+                         PidTags, ProcReg, SendTags, WhereisArgtypes}
                     end;
                   false ->
                     {[#fun_call{caller = CurrFun, callee = Callee,
                                 arg_types =  ArgTypes, vars = Args}|RaceList],
                      RaceListSize + 1, RaceTags, 'no_t', PidTags, ProcReg,
-                     SendTags}
+                     SendTags, WhereisArgtypes}
                 end;
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end;
           _Other ->
             case RaceDetection orelse MsgAnalysis of
@@ -481,26 +488,28 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                             case InpFun of
                               Fun ->
                                 {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 PidTags, ProcReg, SendTags};
+                                 PidTags, ProcReg, SendTags, WhereisArgtypes};
                               _NotFun ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
                                 {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 [PidFun|PidTags], ProcReg, SendTags}
+                                 [PidFun|PidTags], ProcReg, SendTags,
+                                 WhereisArgtypes}
                             end;
                           {erlang, spawn_monitor, A} when A =:= 1 orelse
                                                           A =:= 3 ->
                             case InpFun of
                               Fun ->
                                 {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 PidTags, ProcReg, SendTags};
+                                 PidTags, ProcReg, SendTags, WhereisArgtypes};
                               _NotFun ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
                                 {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 [PidFun|PidTags], ProcReg, SendTags}
+                                 [PidFun|PidTags], ProcReg, SendTags,
+                                 WhereisArgtypes}
                             end;
                           {erlang, spawn_opt, A} when A =:= 2 orelse
                                                       A =:= 3 orelse
@@ -508,38 +517,40 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                             case InpFun of
                               Fun ->
                                 {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 PidTags, ProcReg, SendTags};
+                                 PidTags, ProcReg, SendTags, WhereisArgtypes};
                               _NotFun ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
                                 {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 [PidFun|PidTags], ProcReg, SendTags}
+                                 [PidFun|PidTags], ProcReg, SendTags,
+                                 WhereisArgtypes}
                             end;
                           _Else ->
                             {[#fun_call{caller = CurrFun, callee = Fun,
                                         arg_types = ArgTypes, vars = Args}|
                               RaceList], RaceListSize + 1, RaceTags, 'no_t',
-                             PidTags, ProcReg, SendTags}
+                             PidTags, ProcReg, SendTags, WhereisArgtypes}
                         end;
                       false ->
                         {[#fun_call{caller = CurrFun, callee = Fun,
                                     arg_types = ArgTypes, vars = Args}|
                           RaceList], RaceListSize + 1, RaceTags, 'no_t',
-                         PidTags, ProcReg, SendTags}
+                         PidTags, ProcReg, SendTags, WhereisArgtypes}
                     end;
                   false ->
                     {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                     SendTags}
+                     SendTags, WhereisArgtypes}
                 end;
               false ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
-                 SendTags}
+                 SendTags, WhereisArgtypes}
             end
         end
     end,
   state__renew_info(NewRaceList, NewRaceListSize, NewRaceTags, NewTable,
-                    NewPidTags, NewProcReg, NewSendTags, State).
+                    NewPidTags, NewProcReg, NewSendTags, NewWhereisArgtypes,
+                    State).
 
 -spec race(dialyzer_dataflow:state()) -> dialyzer_dataflow:state().
 
@@ -1786,7 +1797,7 @@ state__renew_race_tags(RaceTags, State) ->
   dialyzer_dataflow:state__put_races(renew_race_tags(RaceTags, Races), State).
 
 state__renew_info(RaceList, RaceListSize, RaceTags, Table, PidTags, ProcReg,
-                  SendTags, State) ->
+                  SendTags, WhereisArgtypes, State) ->
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
   Races = dialyzer_dataflow:state__get_races(State),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
@@ -1794,7 +1805,9 @@ state__renew_info(RaceList, RaceListSize, RaceTags, Table, PidTags, ProcReg,
     callgraph__renew_tables(Table,
       dialyzer_callgraph:put_msgs(
       dialyzer_messages:put_send_tags(SendTags,
-      dialyzer_messages:put_proc_reg(ProcReg, Msgs)), Callgraph)),
+      dialyzer_messages:put_proc_reg(ProcReg,
+      dialyzer_messages:put_whereis_argtypes(WhereisArgtypes, Msgs))),
+      Callgraph)),
     dialyzer_dataflow:state__put_races(
       renew_table(Table,
       renew_race_list(RaceList,
@@ -2193,6 +2206,8 @@ format_cerl(Tree) ->
 format_type(Type, State) ->
   R = dialyzer_dataflow:state__get_records(State),
   erl_types:t_to_string(Type, R).
+
+-spec get_var_label(cerl:cerl() | ?bypassed) -> var_label().
 
 get_var_label(?bypassed) -> ?no_label;
 get_var_label(Arg) ->

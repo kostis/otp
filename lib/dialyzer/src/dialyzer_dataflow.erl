@@ -89,6 +89,7 @@
 %%--------------------------------------------------------------------
 
 -define(no_arg, no_arg).
+-define(no_label, no_label).
 
 -define(TYPE_LIMIT, 3).
 
@@ -1088,6 +1089,7 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
   HeisenAnal = dialyzer_races:get_heisen_anal(Races),
   RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
   MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
+  MsgAndHeisenAnal = MsgAnalysis andalso HeisenAnal,
   Arg = cerl:let_arg(Tree),
   Vars = cerl:let_vars(Tree),
   {AddPid, Map0, State0} =
@@ -1105,7 +1107,6 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
            false -> State
          end};
       false ->
-        MsgAndHeisenAnal = MsgAnalysis andalso HeisenAnal,
         VFTab1 =
           case MsgAndHeisenAnal of
             true -> var_fun_assignment(Arg, Vars, VFTab);
@@ -1116,7 +1117,42 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
     end,
   Body = cerl:let_body(Tree),
   {State1, Map1, ArgTypes} = SMA = traverse(Arg, Map0, State0),
-  State2 = 
+  State2 =
+    case MsgAndHeisenAnal of
+      true ->
+        Callgraph1 = State1#state.callgraph,
+        Msgs = dialyzer_callgraph:get_msgs(Callgraph1),
+        ProcReg = dialyzer_messages:get_proc_reg(Msgs),
+        ProcReg1 =
+          case is_call_to_whereis(Arg) of
+            true ->
+              [PidArg] = Vars,
+              [AtomType] = dialyzer_messages:get_whereis_argtypes(Msgs),
+              case erl_types:t_is_atom(AtomType) of
+                true ->
+                  case erl_types:t_atom_vals(AtomType) of
+                    'unknown' -> ProcReg;
+                    AtomVals ->
+                      case dialyzer_races:get_var_label(PidArg) of
+                        ?no_label -> ProcReg;
+                        PidArgLabel ->
+                          CurrFun = dialyzer_races:get_curr_fun(Races),
+                          dialyzer_messages:update_proc_reg(PidArgLabel,
+                                                            AtomVals, CurrFun,
+                                                            ProcReg)
+                      end
+                  end;
+                false -> ProcReg
+              end;
+            false -> ProcReg
+          end,
+        Msgs1 = dialyzer_messages:put_proc_reg(ProcReg1, Msgs),
+        Msgs2 = dialyzer_messages:put_whereis_argtypes([], Msgs1),
+        Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
+        State1#state{callgraph = Callgraph2};
+      false -> State1
+    end,
+  State3 = 
     case Vars of
       [V] ->
         case cerl:is_c_var(V) of
@@ -1124,32 +1160,32 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
             case AddPid of
               {true, false} ->
                 dialyzer_messages:add_pid('self', cerl_trees:get_label(V),
-                                          State1);
+                                          State2);
               {false, true} ->
                 dialyzer_messages:add_pid_tag('self', cerl_trees:get_label(V),
-                                              State1);
-              {false, false} -> State1;
-              false -> State1
+                                              State2);
+              {false, false} -> State2;
+              false -> State2
             end;
-          false -> State1
+          false -> State2
         end;
-      _Other -> State1
+      _Other -> State2
     end,
-  Callgraph1 = State2#state.callgraph,
-  Callgraph2 =
+  Callgraph3 = State3#state.callgraph,
+  Callgraph4 =
     case RaceDetection andalso HeisenAnal andalso is_call_to_ets_new(Arg) of
       true ->
-        NewTable = dialyzer_races:get_new_table(State2#state.races),
-        renew_public_tables(Vars, NewTable, state__warning_mode(State2),
-                            Callgraph1);
-      false -> Callgraph1
+        NewTable = dialyzer_races:get_new_table(State3#state.races),
+        renew_public_tables(Vars, NewTable, state__warning_mode(State3),
+                            Callgraph3);
+      false -> Callgraph3
     end,
-  State3 = State2#state{callgraph = Callgraph2},
+  State4 = State3#state{callgraph = Callgraph4},
   case t_is_none_or_unit(ArgTypes) of
     true -> SMA;
     false ->
       Map2 = enter_type_lists(Vars, t_to_tlist(ArgTypes), Map1),
-      traverse(Body, Map2, State3)
+      traverse(Body, Map2, State4)
   end.
 
 %%----------------------------------------
@@ -2827,6 +2863,20 @@ is_call_to_send(Tree) ->
 	andalso (cerl:atom_val(Name) =:= '!')
 	andalso (cerl:atom_val(Mod) =:= erlang)
 	andalso (Arity =:= 2)
+  end.
+
+is_call_to_whereis(Tree) ->
+  case cerl:is_c_call(Tree) of
+    false -> false;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      cerl:is_c_atom(Mod)
+	andalso cerl:is_c_atom(Name)
+	andalso (cerl:atom_val(Name) =:= whereis)
+	andalso (cerl:atom_val(Mod) =:= erlang)
+	andalso (Arity =:= 1)
   end.
 
 var_fun_assignment(Arg, [Var], VFTab) ->
