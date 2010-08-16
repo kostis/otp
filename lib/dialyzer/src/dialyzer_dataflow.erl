@@ -1045,10 +1045,11 @@ handle_case(Tree, Map, #state{callgraph = Callgraph} = State) ->
     true -> SMA;
     false ->
       Races = State1#state.races,
+      RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
+      MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
+      HeisenAnal = dialyzer_races:get_heisen_anal(Races),
       State2 =
-        case (dialyzer_callgraph:get_race_detection(Callgraph) orelse
-              dialyzer_callgraph:get_msg_analysis(Callgraph)) andalso
-             dialyzer_races:get_heisen_anal(Races) of
+        case (RaceDetection orelse MsgAnalysis) andalso HeisenAnal of
           true ->
 	    RaceList = dialyzer_races:get_race_list(Races),
             RaceListSize = dialyzer_races:get_race_list_size(Races),
@@ -1056,9 +1057,20 @@ handle_case(Tree, Map, #state{callgraph = Callgraph} = State) ->
                                    RaceListSize + 1, State1);
           false -> State1
         end,
+      {WhereisArgtypes, Callgraph2} =
+        case MsgAnalysis andalso HeisenAnal of
+          true ->
+            Callgraph1 = State2#state.callgraph,
+            Msgs = dialyzer_callgraph:get_msgs(Callgraph1),
+            WA = dialyzer_messages:get_whereis_argtypes(Msgs),
+            Msgs1 = dialyzer_messages:put_whereis_argtypes([], Msgs),
+            {WA, dialyzer_callgraph:put_msgs(Msgs1, Callgraph1)};
+          false -> {[], Callgraph}
+        end,
       {MapList, State3, Type} =
-	handle_clauses(Clauses, Arg, ArgType, ArgType, State2,
-		       [], Map1, [], []),
+	handle_clauses(Clauses, Arg, ArgType, ArgType,
+                       State2#state{callgraph = Callgraph2},
+                       [], Map1, WhereisArgtypes, [], []),
       Map2 = join_maps(MapList, Map1),
       debug_pp_map(Map2),
       {State3, Map2, Type}
@@ -1238,7 +1250,7 @@ handle_receive(Tree, Map,
     end,
   {MapList, State2, ReceiveType} =
     handle_clauses(Clauses, ?no_arg, t_any(), t_any(), State1, [], Map,
-                   [], []),
+                   [], [], []),
   Map1 = join_maps(MapList, Map),
   {State3, Map2, TimeoutType} = traverse(Timeout, Map1, State2),
   case (t_is_atom(TimeoutType) andalso
@@ -1357,20 +1369,53 @@ handle_tuple(Tree, Map, State) ->
 %%
 handle_clauses([C|Left], Arg, ArgType, OrigArgType,
                #state{callgraph = Callgraph, races = Races} = State,
-               CaseTypes, MapIn, Acc, ClauseAcc) ->
+               CaseTypes, MapIn, WhereisArgtypes, Acc, ClauseAcc) ->
   RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
   MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
   HeisenAnal = dialyzer_races:get_heisen_anal(Races),
+  Pats = cerl:clause_pats(C),
+  Guard = cerl:clause_guard(C),
   State1 =
     case (RaceDetection orelse MsgAnalysis) andalso HeisenAnal of
       true ->
+        CG =
+          case MsgAnalysis of
+            true ->
+              Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+              ProcReg = dialyzer_messages:get_proc_reg(Msgs),
+              ProcReg1 =
+                case is_call_to_whereis(Arg) of
+                  true ->
+                    [PidArg] = Pats,
+                    [AtomType] = WhereisArgtypes,
+                    case erl_types:t_is_atom(AtomType) of
+                      true ->
+                        case erl_types:t_atom_vals(AtomType) of
+                          'unknown' -> ProcReg;
+                          AtomVals ->
+                            case dialyzer_races:get_var_label(PidArg) of
+                              ?no_label -> ProcReg;
+                              PidArgLabel ->
+                                CurrFun = dialyzer_races:get_curr_fun(Races),
+                                dialyzer_messages:update_proc_reg(PidArgLabel,
+                                                                  AtomVals,
+                                                                  CurrFun,
+                                                                  ProcReg)
+                            end
+                        end;
+                      false -> ProcReg
+                    end;
+                  false -> ProcReg
+                end,
+              Msgs1 = dialyzer_messages:put_proc_reg(ProcReg1, Msgs),
+              dialyzer_callgraph:put_msgs(Msgs1, Callgraph);
+            false -> Callgraph
+          end,
 	RaceList = dialyzer_races:get_race_list(Races),
         RaceListSize = dialyzer_races:get_race_list_size(Races),
         state__renew_race_list(
-          [dialyzer_races:beg_clause_new(Arg, cerl:clause_pats(C),
-                                         cerl:clause_guard(C))|
-           RaceList], RaceListSize + 1,
-          State);
+          [dialyzer_races:beg_clause_new(Arg, Pats, Guard)|RaceList],
+          RaceListSize + 1, State#state{callgraph = CG});
       false -> State
     end,
   {State2, ClauseMap, BodyType, NewArgType} =
@@ -1381,8 +1426,7 @@ handle_clauses([C|Left], Arg, ArgType, OrigArgType,
         Races1 = State2#state.races,
         RaceList1 = dialyzer_races:get_race_list(Races1),
         RaceListSize1 = dialyzer_races:get_race_list_size(Races1),
-        EndClause = dialyzer_races:end_clause_new(Arg, cerl:clause_pats(C),
-                                                  cerl:clause_guard(C)),
+        EndClause = dialyzer_races:end_clause_new(Arg, Pats, Guard),
         {[EndClause|ClauseAcc],
          state__renew_race_list([EndClause|RaceList1],
                                 RaceListSize1 + 1, State2)};
@@ -1394,10 +1438,10 @@ handle_clauses([C|Left], Arg, ArgType, OrigArgType,
       false -> {[BodyType|CaseTypes], [ClauseMap|Acc]}
     end,
   handle_clauses(Left, Arg, NewArgType, OrigArgType, State3,
-                 NewCaseTypes, MapIn, NewAcc, NewClauseAcc);
+                 NewCaseTypes, MapIn, WhereisArgtypes, NewAcc, NewClauseAcc);
 handle_clauses([], _Arg, _ArgType, _OrigArgType,
 	       #state{callgraph = Callgraph, races = Races} = State,
-               CaseTypes, _MapIn, Acc, ClauseAcc) ->
+               CaseTypes, _MapIn, _WhereisArgtypes, Acc, ClauseAcc) ->
   State1 = 
     case (dialyzer_callgraph:get_race_detection(Callgraph) orelse
           dialyzer_callgraph:get_msg_analysis(Callgraph)) andalso
