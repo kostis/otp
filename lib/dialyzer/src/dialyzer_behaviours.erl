@@ -130,44 +130,36 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 	  case Directive of
 	    {create, no, _} -> plain_call;
 	    {create,  N, M} ->
-	      CMCandidate = nth_or_0(M, Args, foo),
-	      case cerl:is_literal(CMCandidate) of
-		true ->
-		  case cerl:concrete(CMCandidate) of
-		    CallbackModule when is_atom(CallbackModule) ->
-		      CM = CallbackModule,
-		      NameCandidate = nth_or_0(N, Args, foo),
-		      case cerl:is_literal(NameCandidate) of
-			true ->
-			  case cerl:concrete(NameCandidate) of
-			    {_,Name} when is_atom(Name) ->
-			      {CM, TI, add_reference({Name,CM},CA)};
-			    Name when is_atom(Name) ->
-			      {CM, TI, add_reference({Name,CM},CA)};
-			    _ -> plain_call
-			  end;
-			false -> plain_call
-		      end;
+	      CMCandidateCerl = nth_or_0(M, Args, foo),
+	      CMCandidateType = nth_or_0(M, ArgTypes, foo),
+	      case extract_atom(CMCandidateCerl, CMCandidateType) of
+		{ok, CallbackModule} ->
+		  CM = CallbackModule,
+		  NameCandidateCerl = nth_or_0(N, Args, foo),
+		  NameCandidateType = nth_or_0(N, ArgTypes, foo),
+		  case extract_atom_or_tuple(NameCandidateCerl,
+					     NameCandidateType) of
+		    {ok, Name} when is_atom(Name)->
+		      {CM, TI, add_reference({Name,CM},CA)};
+		    {ok, {_,Name}} when is_atom(Name) ->
+		      {CM, TI, add_reference({Name,CM},CA)};		      
 		    _ -> plain_call
 		  end;
-		false -> plain_call
+		error -> plain_call
 	      end;
 	    {refer, N} ->
 	      case CA of
 		[] -> plain_call;
-		 _ ->
-		  NameCandidate = nth_or_0(N, Args, foo),
-		  case cerl:is_literal(NameCandidate) of
-		    true ->
-		      case cerl:concrete(NameCandidate) of
-			Name when is_atom(Name) ->
-			  case lists:keyfind(Name,1,CA) of
-			    {_,CM} -> {CM, TI, CA};
-			    false  -> plain_call
-			  end;
-			_ -> plain_call
+		_ ->
+		  NameCandidateCerl = nth_or_0(N, Args, foo),
+		  NameCandidateType = nth_or_0(N, ArgTypes, foo),
+		  case extract_atom(NameCandidateCerl, NameCandidateType) of
+		    {ok, Name} ->
+		      case lists:keyfind(Name,1,CA) of
+			{_,CM} -> {CM, TI, CA};
+			false  -> plain_call
 		      end;
-		    false -> plain_call
+		    _ -> plain_call
 		  end
 	      end
 	  end
@@ -185,6 +177,69 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 translate_behaviour_api_call(_Fun, _ArgTypes, _Args, _BehApiInfo,
 			     _Translations, _CurFun) ->
   plain_call.
+
+extract_atom(Cerl, Type) ->
+  case cerl:is_literal(Cerl) of
+    true ->
+      case cerl:concrete(Cerl) of
+	Atom when is_atom(Atom) -> {ok, Atom};
+	_ -> error
+      end;
+    false ->
+      case erl_types:t_is_atom(Type) of
+	true ->
+	  case erl_types:t_atom_vals(Type) of
+	    'unknown' -> error;
+	    [AtomVal] -> {ok, AtomVal};
+	    _         -> error
+	  end;
+	false -> io:format("\n~p\n",[Type]),error
+      end
+  end.
+
+extract_atom_or_tuple(Cerl, Type) ->
+  case cerl:is_literal(Cerl) of
+    true ->
+      case cerl:concrete(Cerl) of
+	Atom when is_atom(Atom) -> {ok, Atom};
+	Tuple when is_tuple(Tuple) -> {ok, Tuple};
+	_ -> error
+      end;
+    false ->
+      case erl_types:t_is_atom(Type) of
+	true ->
+	  case erl_types:t_atom_vals(Type) of
+	    'unknown' -> error;
+	    [AtomVal] -> {ok, AtomVal};
+	    _         -> error
+	  end;
+	false ->
+	  case erl_types:t_is_tuple(Type) of
+	    true ->
+	      Args = erl_types:t_tuple_args(Type),
+	      process_tuple_args(Args);
+	    false -> error
+	  end
+      end
+  end.
+
+process_tuple_args(Args) ->
+  process_tuple_args(Args, {}).
+
+process_tuple_args([], Acc) ->
+  {ok, Acc};
+process_tuple_args([Type| Rest], Acc) ->
+  case erl_types:t_is_atom(Type) of
+    true ->
+      case erl_types:t_atom_vals(Type) of
+	'unknown' -> error;
+	[AtomVal] -> process_tuple_args(Rest,
+					erlang:append_element(Acc, AtomVal));
+	_         -> error
+      end;
+    false ->
+      error
+  end.
 
 add_reference({Name,CM},CA) ->
   case lists:member({Name,CM},CA) of
