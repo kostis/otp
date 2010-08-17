@@ -29,7 +29,9 @@
 
 %% Message Analysis
 
--export([msg/1, prioritize_msg_warns/1]).
+-export([is_call_to_self/3, is_call_to_send/1, is_call_to_spawn/3,
+         is_call_to_whereis/1, msg/1, prioritize_msg_warns/1,
+         var_fun_assignment/3]).
 
 %% Record Interfaces
 
@@ -551,6 +553,159 @@ is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
       lists:any(fun(E) -> E end, Checks)
   end.
 
+-spec is_call_to_self(cerl:cerl(), module(), dict()) ->
+      {boolean(), boolean()}.
+
+%% Returns {direct_call_boolean, indirect_call_boolean}
+is_call_to_self(Tree, M, VFTab) ->
+  case cerl:is_c_call(Tree) of
+    false ->
+      case cerl:is_c_apply(Tree) of
+        true ->
+          ApplyOp = cerl:apply_op(Tree),
+          case cerl:var_name(ApplyOp) of
+            {F, A} ->
+              MFA = {M, F, A},
+              Ret =
+                case ets:lookup(cfgs, MFA) of
+                  [] -> [];
+                  [{MFA, _Args, R, _Code}] -> R
+                end,
+              {false, lists:member('self', Ret)};
+            _ ->
+              case dict:find(cerl_trees:get_label(ApplyOp), VFTab) of
+                error -> {false, false};
+                {ok, FunLabel} ->
+                  Ret =
+                    case ets:lookup(cfgs, FunLabel) of
+                      [] -> [];
+                      [{FunLabel, _Args, R, _Code}] -> R
+                    end,
+                  {false, lists:member('self', Ret)}
+              end
+          end;
+        false -> {false, false}
+      end;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      case cerl:is_c_atom(Mod) andalso cerl:is_c_atom(Name) of
+        true ->
+          case {cerl:atom_val(Mod), cerl:atom_val(Name), Arity} of
+            {'erlang', 'self', 0} -> {true, false};
+            MFA ->
+              Ret =
+                case ets:lookup(cfgs, MFA) of
+                  [] -> [];
+                  [{MFA, _Args, R, _Code}] -> R
+                end,
+              {false, lists:member('self', Ret)}
+          end;
+        false -> {false, false}
+      end
+  end.
+
+-spec is_call_to_send(cerl:cerl()) -> boolean().
+
+is_call_to_send(Tree) ->
+  case cerl:is_c_call(Tree) of
+    false -> false;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      cerl:is_c_atom(Mod)
+	andalso cerl:is_c_atom(Name)
+	andalso (cerl:atom_val(Name) =:= '!')
+	andalso (cerl:atom_val(Mod) =:= erlang)
+	andalso (Arity =:= 2)
+  end.
+
+-spec is_call_to_spawn(cerl:cerl(), module(), dict()) ->
+      {boolean(), boolean()}.
+
+is_call_to_spawn(Tree, _M, VFTab) ->
+  case cerl:is_c_call(Tree) of
+    false ->
+      case cerl:is_c_apply(Tree) of
+        true ->
+          ApplyOp = cerl:apply_op(Tree),
+          case cerl:var_name(ApplyOp) of
+            {_F, _A} ->
+              %% MFA = {M, F, A},
+              %% Ret =
+              %%   case ets:lookup(cfgs, MFA) of
+              %%     [] -> [];
+              %%     [{MFA, _Args, R, _Code}] -> R
+              %%   end,
+              %% {false, lists:member('self', Ret)};
+              {false, false};
+            _ ->
+              case dict:find(cerl_trees:get_label(ApplyOp), VFTab) of
+                error -> {false, false};
+                {ok, _FunLabel} ->
+                  %% Ret =
+                  %%   case ets:lookup(cfgs, FunLabel) of
+                  %%     [] -> [];
+                  %%     [{FunLabel, _Args, R, _Code}] -> R
+                  %%   end,
+                  %% {false, lists:member('self', Ret)}
+                  {false, false}
+              end
+          end;
+        false -> {false, false}
+      end;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      case cerl:is_c_atom(Mod) andalso cerl:is_c_atom(Name) of
+        true ->
+          case {cerl:atom_val(Mod), cerl:atom_val(Name), Arity} of
+            {'erlang', 'spawn', 1} -> {true, false};
+            {'erlang', 'spawn', 2} -> {true, false};
+            {'erlang', 'spawn', 3} -> {true, false};
+            {'erlang', 'spawn', 4} -> {true, false};
+            {'erlang', 'spawn_link', 1} -> {true, false};
+            {'erlang', 'spawn_link', 2} -> {true, false};
+            {'erlang', 'spawn_link', 3} -> {true, false};
+            {'erlang', 'spawn_link', 4} -> {true, false};
+            {'erlang', 'spawn_monitor', 1} -> {true, false};
+            {'erlang', 'spawn_monitor', 3} -> {true, false};
+            {'erlang', 'spawn_opt', 2} -> {true, false};
+            {'erlang', 'spawn_opt', 3} -> {true, false};
+            {'erlang', 'spawn_opt', 4} -> {true, false};
+            {'erlang', 'spawn_opt', 5} -> {true, false};
+            _MFA ->
+              %% Ret =
+              %%   case ets:lookup(cfgs, MFA) of
+              %%     [] -> [];
+              %%     [{MFA, _Args, R, _Code}] -> R
+              %%   end,
+              %% {false, lists:member('self', Ret)}
+              {false, false}
+          end;
+        false -> {false, false}
+      end
+  end.
+
+-spec is_call_to_whereis(cerl:cerl()) -> boolean().
+
+is_call_to_whereis(Tree) ->
+  case cerl:is_c_call(Tree) of
+    false -> false;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      cerl:is_c_atom(Mod)
+	andalso cerl:is_c_atom(Name)
+	andalso (cerl:atom_val(Name) =:= whereis)
+	andalso (cerl:atom_val(Mod) =:= erlang)
+	andalso (Arity =:= 1)
+  end.
+
 lists_intersection(List1, List2) ->
   Diff1 = List1 -- List2, %% elements that exist in List1 but not in List2
   Diff2 = List2 -- List1, %% elements that exist in List2 but not in List1
@@ -558,6 +713,24 @@ lists_intersection(List1, List2) ->
 
 renew_analyzed_pid_tags(OldPidTags, Msgs) ->
   Msgs#msgs{old_pids = OldPidTags}.
+
+-spec var_fun_assignment(cerl:cerl(), [cerl:cerl()], dict()) ->
+      dict().
+
+var_fun_assignment(Arg, [Var], VFTab) ->
+  case cerl:is_c_fun(Arg) of
+    true ->
+      case cerl:is_c_var(Var) of
+        true ->
+          ArgLabel = cerl_trees:get_label(Arg),
+          VarLabel = cerl_trees:get_label(Var),
+          dict:store(VarLabel, ArgLabel, VFTab);
+        false -> VFTab
+      end;
+    false -> VFTab
+  end;
+var_fun_assignment(_Arg, _Vars, VFTab) ->
+  VFTab.
         
 %%% ===========================================================================
 %%%

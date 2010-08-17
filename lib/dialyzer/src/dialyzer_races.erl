@@ -29,7 +29,8 @@
 
 %% Race Analysis
 
--export([store_call/5, race/1, get_race_warnings/2, format_args/4]).
+-export([format_args/4, get_race_warnings/2, is_call_to_ets_new/1,
+         race/1, store_call/5]).
 
 %% Utilities also used by the message analysis
 
@@ -1614,6 +1615,22 @@ fixup_all_calls(CurrFun, NextFun, NextFunLabel, Args, CodeToReplace,
         fixup_all_calls(CurrFun, NextFun, NextFunLabel, Args, CodeToReplace,
                         Tail, RaceVarMap),
       NewCode ++ RetCode
+  end.
+
+-spec is_call_to_ets_new(cerl:cerl()) -> boolean().
+
+is_call_to_ets_new(Tree) ->
+  case cerl:is_c_call(Tree) of
+    false -> false;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      cerl:is_c_atom(Mod) 
+	andalso cerl:is_c_atom(Name) 
+	andalso (cerl:atom_val(Name) =:= 'new')
+	andalso (cerl:atom_val(Mod) =:= 'ets')
+	andalso (Arity =:= 2)
   end.
 
 is_last_race(RaceTag, InitFun, Code, Digraph) ->

@@ -481,8 +481,8 @@ traverse(Tree, Map, State) ->
 	  SMA;
 	false ->
 	  State2 =
-	    case (t_is_any(ArgType) orelse t_is_simple(ArgType)
-		                    orelse is_call_to_send(Arg)) of
+	    case (t_is_any(ArgType) orelse t_is_simple(ArgType) orelse
+                  dialyzer_messages:is_call_to_send(Arg)) of
 	      true -> % do not warn in these cases
 		State1;
 	      false ->
@@ -1104,11 +1104,11 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
   MsgAndHeisenAnal = MsgAnalysis andalso HeisenAnal,
   Arg = cerl:let_arg(Tree),
   Vars = cerl:let_vars(Tree),
-  {AddPid, Map0, State0} =
+  {AddSelfPid, _AddSpawnPid, Map0, State0} =
     case cerl:is_c_var(Arg) of
       true ->
 	[Var] = Vars,
-	{false, enter_subst(Var, Arg, Map),
+	{false, false, enter_subst(Var, Arg, Map),
          case (RaceDetection orelse MsgAnalysis) andalso HeisenAnal of
            true ->
              RaceList = dialyzer_races:get_race_list(Races),
@@ -1121,10 +1121,14 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
       false ->
         VFTab1 =
           case MsgAndHeisenAnal of
-            true -> var_fun_assignment(Arg, Vars, VFTab);
+            true ->
+              dialyzer_messages:var_fun_assignment(Arg, Vars, VFTab);
             false -> VFTab
           end,
-        {MsgAndHeisenAnal andalso is_call_to_self(Arg, Module, VFTab1),
+        {MsgAndHeisenAnal andalso
+         dialyzer_messages:is_call_to_self(Arg, Module, VFTab1),
+         MsgAndHeisenAnal andalso
+         dialyzer_messages:is_call_to_spawn(Arg, Module, VFTab1),
          Map, State#state{var_fun_tab = VFTab1}}
     end,
   Body = cerl:let_body(Tree),
@@ -1136,7 +1140,7 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
         Msgs = dialyzer_callgraph:get_msgs(Callgraph1),
         ProcReg = dialyzer_messages:get_proc_reg(Msgs),
         ProcReg1 =
-          case is_call_to_whereis(Arg) of
+          case dialyzer_messages:is_call_to_whereis(Arg) of
             true ->
               [PidArg] = Vars,
               [AtomType] = dialyzer_messages:get_whereis_argtypes(Msgs),
@@ -1169,7 +1173,7 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
       [V] ->
         case cerl:is_c_var(V) of
           true ->
-            case AddPid of
+            case AddSelfPid of
               {true, false} ->
                 dialyzer_messages:add_pid('self', cerl_trees:get_label(V),
                                           State2);
@@ -1185,7 +1189,8 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
     end,
   Callgraph3 = State3#state.callgraph,
   Callgraph4 =
-    case RaceDetection andalso HeisenAnal andalso is_call_to_ets_new(Arg) of
+    case RaceDetection andalso HeisenAnal andalso
+      dialyzer_races:is_call_to_ets_new(Arg) of
       true ->
         NewTable = dialyzer_races:get_new_table(State3#state.races),
         renew_public_tables(Vars, NewTable, state__warning_mode(State3),
@@ -1384,7 +1389,7 @@ handle_clauses([C|Left], Arg, ArgType, OrigArgType,
               Msgs = dialyzer_callgraph:get_msgs(Callgraph),
               ProcReg = dialyzer_messages:get_proc_reg(Msgs),
               ProcReg1 =
-                case is_call_to_whereis(Arg) of
+                case dialyzer_messages:is_call_to_whereis(Arg) of
                   true ->
                     [PidArg] = Pats,
                     [AtomType] = WhereisArgtypes,
@@ -2830,119 +2835,6 @@ t_is_simple(ArgType) ->
 %%       t_is_equal(ArgType, SType)
 %%   end.
 
-is_call_to_ets_new(Tree) ->
-  case cerl:is_c_call(Tree) of
-    false -> false;
-    true ->
-      Mod = cerl:call_module(Tree),
-      Name = cerl:call_name(Tree),
-      Arity = cerl:call_arity(Tree),
-      cerl:is_c_atom(Mod) 
-	andalso cerl:is_c_atom(Name) 
-	andalso (cerl:atom_val(Name) =:= 'new')
-	andalso (cerl:atom_val(Mod) =:= 'ets')
-	andalso (Arity =:= 2)
-  end.
-
-
-%% Returns {direct_call_boolean, indirect_call_boolean}
-is_call_to_self(Tree, M, VFTab) ->
-  case cerl:is_c_call(Tree) of
-    false ->
-      case cerl:is_c_apply(Tree) of
-        true ->
-          ApplyOp = cerl:apply_op(Tree),
-          case cerl:var_name(ApplyOp) of
-            {F, A} ->
-              MFA = {M, F, A},
-              Ret =
-                case ets:lookup(cfgs, MFA) of
-                  [] -> [];
-                  [{MFA, _Args, R, _Code}] -> R
-                end,
-              {false, lists:member('self', Ret)};
-            _ ->
-              case dict:find(get_label(ApplyOp), VFTab) of
-                error -> {false, false};
-                {ok, FunLabel} ->
-                  Ret =
-                    case ets:lookup(cfgs, FunLabel) of
-                      [] -> [];
-                      [{FunLabel, _Args, R, _Code}] -> R
-                    end,
-                  {false, lists:member('self', Ret)}
-              end
-          end;
-        false -> {false, false}
-      end;
-    true ->
-      Mod = cerl:call_module(Tree),
-      Name = cerl:call_name(Tree),
-      Arity = cerl:call_arity(Tree),
-      case cerl:is_c_atom(Mod) andalso cerl:is_c_atom(Name) of
-        true ->
-          case {cerl:atom_val(Mod), cerl:atom_val(Name), Arity} of
-            {'erlang', 'self', 0} -> {true, false};
-            MFA ->
-              Ret =
-                case ets:lookup(cfgs, MFA) of
-                  [] -> [];
-                  [{MFA, _Args, R, _Code}] -> R
-                end,
-              {false, lists:member('self', Ret)}
-          end;
-        false -> {false, false}
-      end
-  end.
-
-is_call_to_send(Tree) ->
-  case cerl:is_c_call(Tree) of
-    false -> false;
-    true ->
-      Mod = cerl:call_module(Tree),
-      Name = cerl:call_name(Tree),
-      Arity = cerl:call_arity(Tree),
-      cerl:is_c_atom(Mod)
-	andalso cerl:is_c_atom(Name)
-	andalso (cerl:atom_val(Name) =:= '!')
-	andalso (cerl:atom_val(Mod) =:= erlang)
-	andalso (Arity =:= 2)
-  end.
-
-is_call_to_whereis(Tree) ->
-  case cerl:is_c_call(Tree) of
-    false -> false;
-    true ->
-      Mod = cerl:call_module(Tree),
-      Name = cerl:call_name(Tree),
-      Arity = cerl:call_arity(Tree),
-      cerl:is_c_atom(Mod)
-	andalso cerl:is_c_atom(Name)
-	andalso (cerl:atom_val(Name) =:= whereis)
-	andalso (cerl:atom_val(Mod) =:= erlang)
-	andalso (Arity =:= 1)
-  end.
-
-var_fun_assignment(Arg, [Var], VFTab) ->
-  case cerl:is_c_fun(Arg) of
-    true ->
-      case cerl:is_c_var(Var) of
-        true ->
-          ArgLabel = get_label(Arg),
-          VarLabel = get_label(Var),
-          dict:store(VarLabel, ArgLabel, VFTab);
-        false -> VFTab
-      end;
-    false -> VFTab
-  end;
-var_fun_assignment(_Arg, _Vars, VFTab) ->
-  VFTab.
-
--spec state__var_fun_find(integer(), state()) -> {'ok', integer()} | 'error'.
-
-state__var_fun_find(VarLabel, #state{var_fun_tab = VFTab}) ->
-  dict:find(VarLabel, VFTab).
-
 any_opaque(Ts) ->
   lists:any(fun erl_types:t_is_opaque/1, Ts).
 
@@ -3461,26 +3353,34 @@ state__put_races(Races, State) ->
 state__records_only(#state{records = Records}) ->
   #state{records = Records}.
 
+-spec state__var_fun_find(integer(), state()) ->
+      {'ok', integer()} | 'error'.
+
+state__var_fun_find(VarLabel, #state{var_fun_tab = VFTab}) ->
+  dict:find(VarLabel, VFTab).
+
 -spec state__get_behaviour_api_dict(state()) ->
-				       dialyzer_behaviours:behaviour_api_dict().
+      dialyzer_behaviours:behaviour_api_dict().
 
 state__get_behaviour_api_dict(#state{behaviour_api_dict = BehApiDict}) ->
   BehApiDict.
 
 -spec state__put_behaviour_api_dict(dialyzer_behaviours:behaviour_api_dict(),
-				    state()) -> state().
+				    state()) ->
+      state().
 
 state__put_behaviour_api_dict(BehApiDict, State) ->
   State#state{behaviour_api_dict = BehApiDict}.
 
 -spec state__get_callback_ref_list(state()) ->
-				      dialyzer_behaviours:callback_ref_list().
+      dialyzer_behaviours:callback_ref_list().
 
 state__get_callback_ref_list(#state{callback_ref_list = CallbackRefList}) ->
   CallbackRefList.
 
 -spec state__put_callback_ref_list(dialyzer_behaviours:callback_ref_list(),
-				   state()) -> state().
+				   state()) ->
+      state().
 
 state__put_callback_ref_list(CallbackRefList, State) ->
   State#state{callback_ref_list = CallbackRefList}.
