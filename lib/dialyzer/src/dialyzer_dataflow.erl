@@ -1104,7 +1104,7 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
   MsgAndHeisenAnal = MsgAnalysis andalso HeisenAnal,
   Arg = cerl:let_arg(Tree),
   Vars = cerl:let_vars(Tree),
-  {AddSelfPid, _AddSpawnPid, Map0, State0} =
+  {AddSelfPid, AddSpawnPid, Map0, State0} =
     case cerl:is_c_var(Arg) of
       true ->
 	[Var] = Vars,
@@ -1168,41 +1168,52 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
         State1#state{callgraph = Callgraph2};
       false -> State1
     end,
-  State3 = 
+  State4 =
     case Vars of
       [V] ->
         case cerl:is_c_var(V) of
           true ->
-            case AddSelfPid of
+            State3 =
+              case AddSelfPid of
+                {true, false} ->
+                  dialyzer_messages:add_pid('self', cerl_trees:get_label(V),
+                                            State2);
+                {false, true} ->
+                  dialyzer_messages:add_pid_tag('self', cerl_trees:get_label(V),
+                                                State2);
+                {false, false} -> State2;
+                false -> State2
+              end,
+            case AddSpawnPid of
               {true, false} ->
-                dialyzer_messages:add_pid('self', cerl_trees:get_label(V),
-                                          State2);
+                dialyzer_messages:add_pid('spawn', cerl_trees:get_label(V),
+                                          State3);
               {false, true} ->
-                dialyzer_messages:add_pid_tag('self', cerl_trees:get_label(V),
-                                              State2);
-              {false, false} -> State2;
-              false -> State2
+                dialyzer_messages:add_pid_tag('spawn', cerl_trees:get_label(V),
+                                              State3);
+              {false, false} -> State3;
+              false -> State3
             end;
           false -> State2
         end;
       _Other -> State2
     end,
-  Callgraph3 = State3#state.callgraph,
+  Callgraph3 = State4#state.callgraph,
   Callgraph4 =
     case RaceDetection andalso HeisenAnal andalso
       dialyzer_races:is_call_to_ets_new(Arg) of
       true ->
-        NewTable = dialyzer_races:get_new_table(State3#state.races),
-        renew_public_tables(Vars, NewTable, state__warning_mode(State3),
+        NewTable = dialyzer_races:get_new_table(State4#state.races),
+        renew_public_tables(Vars, NewTable, state__warning_mode(State4),
                             Callgraph3);
       false -> Callgraph3
     end,
-  State4 = State3#state{callgraph = Callgraph4},
+  State5 = State4#state{callgraph = Callgraph4},
   case t_is_none_or_unit(ArgTypes) of
     true -> SMA;
     false ->
       Map2 = enter_type_lists(Vars, t_to_tlist(ArgTypes), Map1),
-      traverse(Body, Map2, State4)
+      traverse(Body, Map2, State5)
   end.
 
 %%----------------------------------------

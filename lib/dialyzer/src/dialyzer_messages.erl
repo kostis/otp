@@ -948,13 +948,16 @@ add_msg(RcvMsg, State) ->
 
 add_pid(Kind, Label, State) ->
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
-  [H|T] = PidTags,
-  case H#pid_fun.kind =:= Kind of
-    true ->
-      NewPidTags = [H#pid_fun{pid = Label}|T],
-      dialyzer_dataflow:state__put_pid_tags(NewPidTags, State);
-    false -> State
-  end.  
+  case PidTags of
+    [] -> State;
+    [H|T] ->
+      case H#pid_fun.kind =:= Kind of
+        true ->
+          NewPidTags = [H#pid_fun{pid = Label}|T],
+          dialyzer_dataflow:state__put_pid_tags(NewPidTags, State);
+        false -> State
+      end
+  end.
 
 -spec add_pid_tag(pid_kind(), non_neg_integer(), dialyzer_dataflow:state()) ->
       dialyzer_dataflow:state().
