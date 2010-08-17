@@ -454,16 +454,25 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA} = H|T],
           false ->
             ReachableFrom = digraph_utils:reachable([PidMFA], Digraph),
             ReachingTo = digraph_utils:reaching([PidMFA], Digraph),
-            {RetTags, RetDad, RetMVM} =
-              case Kind =/= 'self' of
-                true ->
+            case Kind =/= 'self' of
+              true ->
+                {RetTags, RetDad, RetMVM} =
                   group_spawn_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
-                                       ReachingTo, [], true, dict:new());
-                false ->
+                                       ReachingTo, [], true, dict:new()),
+                {RetTags, [{RetDad, RetMVM}]};
+              false ->
+                {RetTags, RetDad, RetMVM} =
                   group_self_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
-                                      ReachingTo, Digraph, H, dict:new())
-              end,
-            {RetTags, [{RetDad, RetMVM}]}
+                                      ReachingTo, Digraph, H, dict:new()),
+                DadPidMFA = RetDad#pid_fun.pid_mfa,
+                ReachingToDad = digraph_utils:reaching([DadPidMFA], Digraph),
+                case lists:any(fun(ETag) ->
+                                   is_below_spawn(ETag, ReachingToDad)
+                               end, Tags) of
+                  true -> {OldTags, []};
+                  false -> {RetTags, [{RetDad, RetMVM}]}
+                end
+            end
         end
     end,
   {RetOldTags, RetGroups} = group_pid_tags(T, Tags, NewOldTags, Digraph),
@@ -540,6 +549,13 @@ group_spawn_pid_tags(#pid_fun{pid = CurrPid, pid_mfa = CurrPidMFA} = CurrTag,
     end,
   group_spawn_pid_tags(CurrTag, T, OldTags, ReachableFrom, ReachingTo,
                        NewOldTagsAcc, NewAddOldTags, NewMsgVarMap).
+
+is_below_spawn(_Tag, []) ->
+  false;
+is_below_spawn(#pid_fun{kind = 'self'}, _ReachingTo) ->
+  false;
+is_below_spawn(#pid_fun{kind = 'spawn', pid_mfa = PidMFA}, ReachingTo) ->
+  lists:member(PidMFA, ReachingTo).
 
 is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
   case dict:find(Atom, RegDict) of
