@@ -2798,6 +2798,7 @@ drop_last([H|T]) -> [H|drop_last(T)].
 translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
   Callgraph = dialyzer_dataflow:state__get_callgraph(InpState),
   MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
+  debug("IF\t: ~p\nIAT\t: ~p\nIA\t: ~p\n",[InpFun, InpArgTypes, InpArgs]),
   SpawnResult =
     case MsgAnalysis of
       true ->
@@ -2820,12 +2821,14 @@ translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
 	    NewInpFun = {erlang, spawn, SpawnArity-1},
 	    NewInpArgTypes = drop_last(InpArgTypes),
 	    NewInpArgs = drop_last(InpArgs),
-	    translate(NewInpFun, NewInpArgTypes, NewInpArgs, InpState, CurrFun);
+	    {true, translate(NewInpFun, NewInpArgTypes, NewInpArgs, InpState,
+			     CurrFun)};
 	  _ -> debug("Not a Spawn\n",[]),
 	       other
 	end;
       false -> other
     end,
+  debug("SpawnRes: ~P\n",[SpawnResult,2]),
   case SpawnResult of
     {true, Res} -> Res;
     false -> {InpFun, InpArgTypes, InpArgs, InpState};
@@ -2860,7 +2863,7 @@ add_translation_edge(Edge, State) ->
 	     end,
   NewCallgraph = dialyzer_callgraph:put_translations(NewEdges, Callgraph),
   dialyzer_dataflow:state__put_callgraph(NewCallgraph, State).
-  
+
 spawn_result({single, FunArg}, State, CurrFun, _SpawnArity) ->
   case cerl:is_c_var(FunArg) of
     true ->
