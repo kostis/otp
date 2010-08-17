@@ -1057,23 +1057,29 @@ handle_case(Tree, Map, #state{callgraph = Callgraph} = State) ->
                                    RaceListSize + 1, State1);
           false -> State1
         end,
-      {WhereisArgtypes, Callgraph2} =
+      {WhereisArgtypes, State5} =
         case MsgAnalysis andalso HeisenAnal of
           true ->
             Callgraph1 = State2#state.callgraph,
             Msgs = dialyzer_callgraph:get_msgs(Callgraph1),
             WA = dialyzer_messages:get_whereis_argtypes(Msgs),
             Msgs1 = dialyzer_messages:put_whereis_argtypes([], Msgs),
-            {WA, dialyzer_callgraph:put_msgs(Msgs1, Callgraph1)};
-          false -> {[], Callgraph}
+            Callgraph2 = dialyzer_callgraph:put_msgs(Msgs1, Callgraph1),
+            State3 = State2#state{callgraph = Callgraph2},
+            State4 =
+              case dialyzer_messages:is_call_to_spawn(Arg) of
+                true -> dialyzer_messages:add_clauses_pid(Clauses, State3);
+                _Else -> State3
+              end,
+            {WA, State4};
+          false -> {[], State2}
         end,
-      {MapList, State3, Type} =
-	handle_clauses(Clauses, Arg, ArgType, ArgType,
-                       State2#state{callgraph = Callgraph2},
-                       [], Map1, WhereisArgtypes, [], []),
+      {MapList, State6, Type} =
+	handle_clauses(Clauses, Arg, ArgType, ArgType, State5, [], Map1,
+                       WhereisArgtypes, [], []),
       Map2 = join_maps(MapList, Map1),
       debug_pp_map(Map2),
-      {State3, Map2, Type}
+      {State6, Map2, Type}
   end.
 
 %%----------------------------------------

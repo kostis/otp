@@ -29,9 +29,9 @@
 
 %% Message Analysis
 
--export([is_call_to_self/3, is_call_to_send/1, is_call_to_spawn/3,
-         is_call_to_whereis/1, msg/1, prioritize_msg_warns/1,
-         var_fun_assignment/3]).
+-export([add_clauses_pid/2, is_call_to_self/3, is_call_to_send/1,
+         is_call_to_spawn/1, is_call_to_spawn/3, is_call_to_whereis/1,
+         msg/1, prioritize_msg_warns/1, var_fun_assignment/3]).
 
 %% Record Interfaces
 
@@ -235,6 +235,29 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
 %%%  Utilities
 %%%
 %%% ===========================================================================
+
+-spec add_clauses_pid([cerl:cerl()], dialyzer_dataflow:state()) ->
+      dialyzer_dataflow:state().
+
+add_clauses_pid([], State) ->
+  State;
+add_clauses_pid([C|Cs], State) ->
+  [Pat] = cerl:clause_pats(C),
+  case cerl:is_c_tuple(Pat) of
+    true ->
+      case cerl:tuple_arity(Pat) =:= 2 of
+        true ->
+          [PidArg, _RefArg] = cerl:tuple_es(Pat),
+          case cerl:is_c_var(PidArg) of
+            true ->
+              dialyzer_messages:add_pid('spawn', cerl_trees:get_label(PidArg),
+                                        State);
+            false -> add_clauses_pid(Cs, State)
+          end;
+        false -> add_clauses_pid(Cs, State)
+      end;
+    false -> add_clauses_pid(Cs, State)
+  end.
 
 backward_msg_analysis(CurrFun, Digraph) ->
   Calls = digraph:edges(Digraph),
@@ -636,6 +659,30 @@ is_call_to_send(Tree) ->
 	andalso (cerl:atom_val(Name) =:= '!')
 	andalso (cerl:atom_val(Mod) =:= erlang)
 	andalso (Arity =:= 2)
+  end.
+
+-spec is_call_to_spawn(cerl:cerl()) -> boolean().
+
+%% For the spawn calls that return tuples of the kind:
+%% {pid(), reference()}
+is_call_to_spawn(Tree) ->
+  case cerl:is_c_call(Tree) of
+    false -> false;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      case cerl:is_c_atom(Mod) andalso cerl:is_c_atom(Name) of
+        true ->
+          case {cerl:atom_val(Mod), cerl:atom_val(Name), Arity} of
+            {'erlang', 'spawn_monitor', 1} -> true;
+            {'erlang', 'spawn_monitor', 3} -> true;
+            {'erlang', 'spawn_opt', 2} -> true;
+            {'erlang', 'spawn_opt', 4} -> true;
+            _Other -> false
+          end;
+        false -> false
+      end
   end.
 
 -spec is_call_to_spawn(cerl:cerl(), module(), dict()) ->
