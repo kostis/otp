@@ -22,7 +22,7 @@
 
 -export([number_of_temporaries/1]).
 
-% The following exports are used as M:F(...) calls from other modules;
+%% The following exports are used as M:F(...) calls from other modules;
 %% e.g. hipe_amd64_ra_ls.
 -export([analyze/1,
          bb/2,
@@ -51,7 +51,7 @@
 
 %% callbacks for hipe_regalloc_loop
 -export([defun_to_cfg/1,
-	 check_and_rewrite/2]).
+	 check_and_rewrite/3]).
 
 %%----------------------------------------------------------------------------
 
@@ -62,8 +62,8 @@
 defun_to_cfg(Defun) ->
   hipe_x86_cfg:init(Defun).
 
-check_and_rewrite(Defun, Coloring) ->
-  hipe_amd64_ra_sse2_postconditions:check_and_rewrite(Defun, Coloring).
+check_and_rewrite(Defun, Coloring, Options) ->
+  hipe_amd64_ra_sse2_postconditions:check_and_rewrite(Defun, Coloring, Options).
 
 reverse_postorder(CFG) ->
   hipe_x86_cfg:reverse_postorder(CFG).
@@ -127,7 +127,7 @@ labels(CFG) ->
 var_range(_CFG) ->
   hipe_gensym:var_range(x86).
 
--spec number_of_temporaries(#cfg{}) -> non_neg_integer().
+-spec number_of_temporaries(#cfg{}) -> pos_integer().
 number_of_temporaries(_CFG) ->
   Highest_temporary = hipe_gensym:get_var(x86),
   %% Since we can have temps from 0 to Max adjust by +1.

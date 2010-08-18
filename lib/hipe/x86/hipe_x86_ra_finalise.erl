@@ -158,6 +158,7 @@ ra_opnd(Opnd, Map) ->
   ra_opnd(Opnd, Map, gb_trees:empty()).
 ra_opnd(Opnd, Map, FpMap) ->
   case Opnd of
+    #x86_temp{allocatable=false} -> Opnd;	% used for live range splitting
     #x86_temp{} -> ra_temp(Opnd, Map, FpMap);
     #x86_mem{} -> ra_mem(Opnd, Map);
     _ -> Opnd

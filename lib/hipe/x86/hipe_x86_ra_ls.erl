@@ -62,8 +62,8 @@ alloc(Defun, SpillIndex, SpillLimit, Options) ->
       SpillIndex, SpillLimit, Options,
       ?HIPE_X86_SPECIFIC),
   {NewDefun, _DidSpill} =
-    ?HIPE_X86_RA_POSTCONDITIONS:check_and_rewrite(
-      Defun, Coloring, 'linearscan'),
+    ?HIPE_X86_RA_POSTCONDITIONS:check_and_rewrite(Defun, Coloring,
+						  'linearscan', Options),
   %% ?HIPE_X86_PP:pp(NewDefun),
   TempMap = hipe_temp_map:cols2tuple(Coloring, ?HIPE_X86_SPECIFIC),
   {TempMap2,NewSpillIndex2} = 

@@ -1,20 +1,20 @@
 %% -*- erlang-indent-level: 2 -*-
 %%
 %% %CopyrightBegin%
-%% 
-%% Copyright Ericsson AB 2001-2009. All Rights Reserved.
-%% 
+%%
+%% Copyright Ericsson AB 2001-2010. All Rights Reserved.
+%%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
 %% compliance with the License. You should have received a copy of the
 %% Erlang Public License along with this software. If not, it can be
 %% retrieved online at http://www.erlang.org/.
-%% 
+%%
 %% Software distributed under the License is distributed on an "AS IS"
 %% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
 %% the License for the specific language governing rights and limitations
 %% under the License.
-%% 
+%%
 %% %CopyrightEnd%
 %%
 
@@ -32,21 +32,553 @@
 
 -module(?HIPE_X86_RA_POSTCONDITIONS).
 
--export([check_and_rewrite/3]).
+-export([check_and_rewrite/4]).
 
 -include("../x86/hipe_x86.hrl").
 -define(HIPE_INSTRUMENT_COMPILER, true).
 -include("../main/hipe.hrl").
+-include("../flow/cfg.hrl").
+-include("../flow/hipe_bb.hrl").
 -define(count_temp(T), ?cons_counter(counter_mfa_mem_temps, T)).
 
-check_and_rewrite(Defun, Coloring, Strategy) ->
+check_and_rewrite(Defun, Coloring, Strategy, Options) ->
   %% io:format("Converting\n"),
   TempMap = hipe_temp_map:cols2tuple(Coloring, ?HIPE_X86_SPECIFIC),
   %% io:format("Rewriting\n"),
   #defun{code=Code0} = Defun,
+  ?ASSERT(lists:all(fun ({Id, V}) -> element(Id+1, TempMap) =:= V end, Coloring)),
+  case proplists:get_bool(range_split, Options) of
+    true ->
+      ?option_time(
+	check_and_rewrite_range_split(Defun, Coloring, Strategy, TempMap, Code0),
+	"Live range splitting", Options);
+    false ->
+      check_and_rewrite_spill(Defun, Coloring, Strategy, TempMap, Code0)
+  end.
+
+check_and_rewrite_spill(Defun, _Coloring, Strategy, TempMap, Code0) ->
   {Code1, DidSpill} = do_insns(Code0, TempMap, Strategy, [], false),
   {Defun#defun{code=Code1,var_range={0,hipe_gensym:get_var(x86)}},
    DidSpill}.
+
+%%
+%% Auxilary functions
+%%
+
+delay2([_A]) -> [];
+delay2([A | [B|_]=Rest]) -> [{A,B} | delay2(Rest)].
+
+delay3([_A]) -> [];
+delay3([_A, _B]) -> [];
+delay3([A | [B, C|_]=Rest]) -> [{A, B, C} | delay3(Rest)].
+
+find(_Pred, [])   -> notfound;
+find(Pred, [H|R]) ->
+  case Pred(H) of
+    true  -> {found, H};
+    false -> find(Pred, R)
+  end.
+
+-define(IMPLIES(A, B), (not(A) orelse (B))).
+
+-define(WHENFALSE(Expr, Do), case (Expr) of
+			       true -> true;
+			       false -> Do, false
+			     end).
+
+gb_trees_from_list(KeyValues) ->
+  lists:foldl(fun ({Key,Val}, Tree) -> gb_trees:insert(Key, Val, Tree) end,
+	      gb_trees:empty(), KeyValues).
+
+replace_code(Cfg, Lbl, NewCode) ->
+  Table = Cfg#cfg.table,
+  {Block, Succ, Pred} = gb_trees:get(Lbl, Table),
+  NewBlock = Block#bb{code = NewCode},
+  NewTable = gb_trees:update(Lbl, {NewBlock, Succ, Pred}, Table),
+  Cfg#cfg{table = NewTable}.
+
+get_temp([], _TempId) -> notfound;
+get_temp([I|Code], TempId) ->
+  Temps = def(I) ++ use(I),
+  case find(fun (#x86_temp{reg=Reg}) when Reg =:= TempId -> true;
+                (_) -> false
+	    end, Temps) of
+    {found, Temp} -> {found, Temp};
+    notfound -> get_temp(Code, TempId)
+  end.
+
+liveness_of_bb(BB, LiveOut) ->
+  Fun = fun (I, [Lo|Los]) ->
+	    Use = ordsets:from_list(use(I)),
+	    Def = ordsets:from_list(def(I)),
+	    LOut = ordsets:from_list(Lo),
+	    [ordsets:to_list(ordsets:union(Use, ordsets:subtract(LOut, Def))), Lo | Los]
+	end,
+  [LiveInNew | LiveOutNew] = lists:foldr(Fun, [LiveOut], bb_code(BB)),
+  {LiveInNew, LiveOutNew}.
+
+complete_liveness(Cfg, Liveness) ->
+  gb_trees:map(
+    fun (K, _V) ->
+	{Li, Los} = liveness_of_bb(bb(Cfg, K), liveout(K, Liveness)),
+	?ASSERT(length(Los) =:= length(bb_code(bb(Cfg,K)))),
+	R = delay2([ordsets:from_list(temp_ids(Temps)) || Temps <- [Li|Los]]),
+	?ASSERT(length(bb_code(bb(Cfg,K))) =:= length(R)),
+	R
+    end,
+    Liveness).
+
+%%
+%% aliases
+%%
+bb(Cfg, Lbl)           -> hipe_x86_cfg:bb(Cfg, Lbl).
+bb_code(BB)            -> hipe_bb:code(BB).
+bbslabels(Cfg)         -> hipe_x86_cfg:labels(Cfg).
+def(I)                 -> ?HIPE_X86_SPECIFIC:defines(I).
+use(I)                 -> ?HIPE_X86_SPECIFIC:uses(I).
+liveout(Lbl, Liveness) -> ?HIPE_X86_SPECIFIC:liveout(Liveness, Lbl).
+defun_to_cfg(Defun)    -> ?HIPE_X86_SPECIFIC:defun_to_cfg(Defun).
+linearise(Cfg)         -> hipe_x86_cfg:linearise(Cfg).
+temp_id(Temp)          -> hipe_x86:temp_reg(Temp).
+temp_ids(Temps)        -> [temp_id(T) || T <- Temps].
+liveness_analysis(Cfg) -> ?HIPE_X86_SPECIFIC:analyze(Cfg).
+is_branch(I)           -> hipe_x86_cfg:is_branch(I).
+
+
+%%
+%% Constructs a map SpillId to colour to spill, from Coloring
+%%
+get_partial_spills(Coloring) ->
+  [Id || {Id, {spill, _}} <- Coloring].
+
+construct_partial_spills(Coloring) ->
+  gb_trees_from_list([{Id, 7} || Id <- get_partial_spills(Coloring)]).
+
+check_and_rewrite_range_split(Defun, Coloring, Strategy, TempMap, Code0) ->
+  Cfg = defun_to_cfg(Defun),
+  ?ASSERT(defun_to_cfg(linearise(defun_to_cfg(linearise(defun_to_cfg(Defun)))))
+	  == defun_to_cfg(linearise(defun_to_cfg(Defun)))),
+  SpillCosts = construct_partial_spills(Coloring),
+  Spills = get_partial_spills(Coloring),
+  R =
+    case Spills =:= [] of
+      true ->
+	check_and_rewrite_spill(Defun, ignore, Strategy, TempMap, Code0);
+      false ->
+	Temps =
+	  gb_trees_from_list(lists:map(fun (Id) ->
+					   {found, Temp} = get_temp(Code0, Id),
+					   {Id, Temp}
+				       end, Spills)),
+	NewTemps =
+	  gb_trees_from_list(lists:map(fun (Id) ->
+					   {Id, hipe_x86:mk_new_nonallocatable_temp(hipe_x86:temp_type(gb_trees:get(Id, Temps)))}
+				       end, Spills)),
+	{NewCfg, DidSpill1} =
+	  do_rs_cfg(Cfg, Spills, Coloring, SpillCosts, Temps, NewTemps),
+	case DidSpill1 of
+	  true -> {linearise(NewCfg), true};
+	  false ->
+	    %% no IRs were found (graph colorer failed to color), so try to spill
+	    check_and_rewrite_spill(Defun, ignore, Strategy, TempMap, Code0)
+	end
+    end,
+  {__ResultingDefun,_} = R,
+  %% postcondition: all reloads through all posible paths upwards have a store
+  ?ASSERT(reloads_closed(__ResultingDefun, NewTemps)),
+  R.
+
+-ifdef(DO_ASSERT).
+
+enumerate_list(List) -> lists:zip(lists:seq(1,length(List)), List).
+
+is_store(I, _SpillId, SpilledId) ->
+  lists:member(SpilledId, temp_ids(hipe_x86_liveness:defines(I))).
+
+is_reload(I, SpillId, SpilledId) ->
+  (temp_ids(hipe_x86_liveness:defines(I)) =:= [SpillId])
+    andalso
+      (temp_ids(hipe_x86_liveness:uses(I)) =:= [SpilledId]).
+
+reloads_closed(Defun, NewTemps) ->
+  Cfg = defun_to_cfg(Defun),
+  lists:all(
+    fun (SpillId) ->
+	lists:all(
+	  fun (Lbl) ->
+	      reloads_closed_for_bb(Cfg, Lbl, SpillId, temp_id(gb_trees:get(SpillId, NewTemps)))
+	  end, bbslabels(Cfg))
+    end, gb_trees:keys(NewTemps)).
+
+reloads_closed_for_bb(Cfg, Lbl, SpillId, SpilledId) ->
+  Code = bb_code(bb(Cfg, Lbl)),
+  NumberedCode = lists:zip(lists:seq(1,length(Code)), Code),
+  lists:all(fun ({In, I}) ->
+		?IMPLIES(is_reload(I, SpillId, SpilledId),
+			 reload_has_a_store(Cfg, Lbl, I, In, SpillId, SpilledId))
+	    end, NumberedCode).
+
+reload_has_a_store(Cfg, Lbl, I, In, SpillId, SpilledId) ->
+  F = bfs_search_upwards(Cfg, Lbl, In,
+    fun (Instr) ->
+	is_store(Instr, SpillId, SpilledId) orelse
+	is_reload(Instr, SpillId, SpilledId)
+    end),
+  ?WHENFALSE(lists:all(fun (Instr) -> is_store(Instr, SpillId, SpilledId) end, F),
+	     io:format("~nCould not find a store for ~w in ~w at ~w~nFound was: ~p~n", [I, Lbl, In, F])) .
+
+bfs_search_upwards(Cfg, Lbl, Nr, F) ->
+  bfs_search_upwards(Cfg, Lbl, Nr, F, []).
+
+bfs_search_upwards(Cfg, Lbl, Nr, F, Visited) ->
+  Code = enumerate_list(bb_code(bb(Cfg, Lbl))),
+  C = lists:reverse(case Nr of
+		      all -> Code;
+		      _ -> lists:filter(fun ({N, _I}) -> N < Nr end, Code)
+		    end),
+  case lists:member(Lbl, Visited) of
+    true -> [];
+    false ->
+      case find(fun ({_,I}) -> F(I) end, C) of
+	{found, {_,X}} -> [X];
+	notfound ->
+	  Preds = hipe_x86_cfg:pred(Cfg, Lbl),
+	  case Preds of
+	    [] -> notfound;
+	    _ ->
+	      NewVisited = [Lbl|Visited],
+	      Pr = [bfs_search_upwards(Cfg, L, all, F, NewVisited) || L <- Preds],
+	      case lists:any(fun (notfound) -> true;
+				 (_) -> false
+			     end, Pr) of
+		true -> notfound;
+		false -> lists:flatten(Pr)
+	      end
+	  end
+      end
+  end.
+
+-endif.
+
+%%
+%% Live Range splitting for all partial spills
+%%
+do_rs_cfg(Cfg, Spills, Coloring, SpillCosts, Temps, NewTemps) ->
+  Liveness = liveness_analysis(Cfg),
+  lists:foldr(
+    fun (SpillId, {Cfg0, DidSpill}) ->
+        LivenessComplete = complete_liveness(Cfg0, Liveness),
+        SpillColor = gb_trees:get(SpillId, SpillCosts),
+        InterferingVars = interfering_vars(Coloring, SpillColor),
+        Apps = cfg_traverse_flow(Cfg0, SpillId, LivenessComplete, InterferingVars),
+        case Apps of
+          [] -> {Cfg0, DidSpill}; % did not find any interfering live ranges
+          _ ->
+            Map = construct_app_map(Apps),
+            {cfg_apply_apps(Cfg0, Map, SpillId,
+                gb_trees:get(SpillId, Temps), gb_trees:get(SpillId, NewTemps)), true}
+        end
+    end,
+    {Cfg, false}, Spills).
+
+bb_from_app({_,BB,_,_}) -> BB;
+bb_from_app({storep,BB}) -> BB.
+
+insert_In({storep,_}, {Storeps, InMap}) ->
+  {Storeps ++ [storep], InMap};
+insert_In({Type,_,In,Where}, {Storeps, InMap}) ->
+  NewInMap = case gb_trees:lookup(In, InMap) of
+    {value, {B, C, A}} ->
+      gb_trees:update(In,
+	case Where of
+	  b -> {B ++ [Type], C, A};
+	  c -> {B, C ++ [Type], A};
+	  a -> {B, C, A ++ [Type]}
+	end, InMap);
+    none -> gb_trees:insert(In,
+	case Where of
+	  b -> {[Type], [], []};
+	  c -> {[], [Type], []};
+	  a -> {[], [], [Type]}
+	end, InMap)
+  end,
+  {Storeps, NewInMap}.
+
+insert_app(App, Map) ->
+  BB = bb_from_app(App),
+  case gb_trees:lookup(BB, Map) of
+    {value, InMap} -> gb_trees:update(BB, insert_In(App, InMap), Map);
+    none -> gb_trees:insert(BB, insert_In(App, {[], gb_trees:empty()}), Map)
+  end.
+
+construct_app_map(Apps) ->
+  lists:foldr(fun (App, Map) -> insert_app(App, Map) end, gb_trees:empty(), Apps).
+
+app_mk_edge_instr(_SpillId, store, Temp, NewTemp) ->
+  hipe_x86:mk_move(Temp, NewTemp);
+app_mk_edge_instr(_SpillId, reload, Temp, NewTemp) ->
+  hipe_x86:mk_move(NewTemp, Temp).
+
+app_comment(SpillId, Type) -> hipe_x86:mk_comment({Type, SpillId}).
+
+app_instr(I, SpillId, Temp, NewTemp, B, C, A) ->
+  Before =
+    case B of
+      [reload,store] ->
+	[app_mk_edge_instr(SpillId, reload, Temp, NewTemp),
+	 app_mk_edge_instr(SpillId, store, Temp, NewTemp)];
+      [store,reload] ->
+	[app_mk_edge_instr(SpillId, reload, Temp, NewTemp),
+	 app_mk_edge_instr(SpillId, store, Temp, NewTemp)];
+      [X1] ->
+	[app_comment(SpillId, X1), app_mk_edge_instr(SpillId,X1,Temp,NewTemp)];
+      [] -> []
+    end,
+  After  = case A of
+	     [ X2] -> [app_mk_edge_instr(SpillId, X2, Temp, NewTemp)];
+	     [] -> []
+	   end,
+  Rename = case C of
+	     [_X3] -> [map_temp(rename_temp(SpillId, NewTemp), I)];
+	     [] -> [I]
+	   end,
+  Before ++ Rename ++ After.
+
+app_instr_storep(Storeps, Code, Temp, NewTemp) ->
+  case Storeps of
+    [] -> Code;
+    [_] ->
+      [Last|Other] = lists:reverse(Code),
+      N = case is_branch(Last) of
+	    true ->
+	      [Last, app_comment(Temp, storep), hipe_x86:mk_move(Temp, NewTemp)];
+	    false ->
+	      [hipe_x86:mk_move(Temp, NewTemp), app_comment(Temp, storep), Last]
+	  end,
+      lists:reverse(N ++ Other)
+  end.
+
+cfg_apply_apps(Cfg, Map, SpillId, Temp, NewTemp) ->
+  lists:foldr(
+    fun (Lbl, Cfg0) ->
+	Code = bb_code(bb(Cfg0, Lbl)),
+	{Storeps, InMap} = gb_trees:get(Lbl,Map),
+	NewCodeI = lists:map(
+	  fun ({I,In}) ->
+	      case gb_trees:lookup(In, InMap) of
+		{value, {B, C, A}} ->
+		  app_instr(I, SpillId, Temp, NewTemp, B, C, A);
+		none -> [I]
+	      end
+	  end, lists:zip(Code, lists:seq(1, length(Code)))),
+	NewCodeF = lists:flatten(NewCodeI),
+	NewCode = app_instr_storep(Storeps, NewCodeF, Temp, NewTemp),
+	replace_code(Cfg0, Lbl, NewCode)
+    end, Cfg, gb_trees:keys(Map)).
+
+union_lists(Lsts) ->
+  ordsets:union([ordsets:from_list(L) || L <- Lsts]).
+
+merge_liveness(LT) ->
+  LiveInsLiveOuts = gb_trees:values(LT),
+  {LiveIns, LiveOuts} = lists:unzip(LiveInsLiveOuts),
+  {union_lists(LiveIns), union_lists(LiveOuts)}.
+
+merge_defs(DefsT) ->
+  union_lists(gb_trees:values(DefsT)).
+
+gb_trees_from_keys(F, Keys) ->
+  gb_trees_from_list([{K, F(K)} || K <- Keys]).
+
+cfg_traverse_flow(Cfg, SpillId, Liveness, InterferingVars) ->
+  BBs = bbslabels(Cfg),
+  lists:foldl(
+    fun (Lbl, Apps0) ->
+	%% Predecessors
+	PredBBs = hipe_x86_cfg:pred(Cfg, Lbl),
+	PredLivenessInit = gb_trees_from_keys(
+	  fun (P) -> lists:last(gb_trees:get(P, Liveness)) end,
+	  PredBBs),
+	PredI = gb_trees_from_keys(
+	  fun (P) -> lists:last(bb_code(bb(Cfg, P))) end,
+	  PredBBs),
+	PredDefs = gb_trees:map(fun (_, I) -> temp_ids(def(I)) end, PredI),
+
+	%% Successors
+	SuccBBs = hipe_x86_cfg:succ(Cfg, Lbl),
+	SuccLivenessInit = gb_trees_from_keys(
+	  fun (S) -> [LiLo|_] = gb_trees:get(S, Liveness), LiLo end,
+	  SuccBBs),
+	SuccI = gb_trees_from_keys(
+	  fun (S) -> hd(bb_code(bb(Cfg, S))) end,
+	  SuccBBs),
+	SuccDefs = gb_trees:map(fun (_, I) -> temp_ids(def(I)) end, SuccI),
+
+	BB      = bb(Cfg, Lbl),
+	Code    = bb_code(BB),
+	Defs    = [temp_ids(def(I)) || I <- Code],
+	DefsT   = [gb_trees_from_list([{Lbl, Def}]) || Def <- Defs],
+	Live    = gb_trees:get(Lbl, Liveness),
+	LiveT   = [gb_trees_from_list([{Lbl, LiLo}]) || LiLo <- Live],
+	%% PCN - Previous Current Next
+	PCNDef  = delay3([PredDefs] ++ DefsT ++ [SuccDefs]),
+	PCNLive = delay3([PredLivenessInit] ++ LiveT ++ [SuccLivenessInit]),
+	PCNLiveMerged = delay3([merge_liveness(PredLivenessInit)] ++ Live ++
+				 [merge_liveness(SuccLivenessInit)]),
+	PCNDefsMerged = delay3([merge_defs(PredDefs)] ++ Defs ++
+				 [merge_defs(SuccDefs)]),
+	N = length(Code),
+	Nr = lists:seq(1,N),
+	?ASSERT(N =:= length(Live)),
+	?ASSERT(N =:= length(PCNLive)),
+	?ASSERT(N =:= length(PCNLiveMerged)),
+	?ASSERT(N =:= length(PCNDefsMerged)),
+	?ASSERT(N =:= length(PCNDef)),
+	NewApps = traverse_flow_run_detect(
+		    Code, PCNDef, PCNDefsMerged, PCNLive, PCNLiveMerged,
+		    Nr, N, SpillId, InterferingVars, Lbl, ordsets:new()),
+	ordsets:union(Apps0, NewApps)
+    end,
+    ordsets:new(), BBs).
+
+traverse_flow_run_detect([], [], [], [], [], [], _, _, _, _, Apps) -> Apps;
+traverse_flow_run_detect([I|Code],
+			 [{PD,CD,ND}|PCNDef],
+			 [{PDM,CDM,NDM}|PCNDefsMerged],
+			 [{PL,CL,NL}|PCNLive],
+			 [{PLM,CLM,NLM}|PCNLiveMerged],
+			 [In|Nr],
+			 CodeLength, SpillId, InterferingVars, Lbl, Apps) ->
+  NewApps =
+    ordsets:union(Apps,
+		  detect(PL, CL, NL, PLM, CLM, NLM, PD, CD, ND, PDM, CDM, NDM,
+			 Lbl, I, In, CodeLength, SpillId, InterferingVars)),
+  traverse_flow_run_detect(Code, PCNDef, PCNDefsMerged, PCNLive, PCNLiveMerged,
+			   Nr, CodeLength, SpillId, InterferingVars, Lbl, NewApps).
+
+interfering_vars(Coloring, SpillColor) ->
+  [Id || {Id, {reg, X}} <- Coloring, X =:= SpillColor].
+
+is_live(SpillId, {LiveIn, LiveOut}) ->
+  lists:member(SpillId, LiveIn) orelse lists:member(SpillId, LiveOut).
+
+is_interfering(InterferingVars, IsSpillLive, {LiveIn, LiveOut}, SpillId, Defs) ->
+  InterferingVars2 = ordsets:from_list(InterferingVars),
+  LiveOut2 = ordsets:from_list(LiveOut),
+  LiveIn2 = ordsets:from_list(LiveIn),
+  Defs2 = ordsets:from_list(Defs),
+  IsSpillLive
+  andalso
+  (((ordsets:intersection(InterferingVars2, LiveIn2) =/= [])
+      orelse (ordsets:intersection(InterferingVars2, LiveOut2) =/= [])) orelse
+    ((ordsets:intersection(InterferingVars2, Defs2) =/= []) andalso
+      lists:member(SpillId, LiveOut2))
+    orelse
+    (lists:member(SpillId, Defs2) andalso
+      (ordsets:intersection(InterferingVars2, LiveOut2) =/= []))).
+
+detect(PLiveT, _CLiveT, _NLiveT,
+       PLive, CLive, NLive,
+       PDefT, _CDefT, _NDefT,
+       PDef, CDef, NDef, BBLbl,
+       I, In, _N, SpillId, InterferingVars) ->
+  CL = is_live(SpillId, CLive),
+  CI = is_interfering(InterferingVars, CL, CLive, SpillId, CDef),
+  PL = is_live(SpillId, PLive),
+  PI = is_interfering(InterferingVars, PL, PLive, SpillId, PDef),
+  NL = is_live(SpillId, NLive),
+  NI = is_interfering(InterferingVars, NL, NLive, SpillId, NDef),
+  StorePred =
+    case ((In =:= 1) andalso PI andalso CL andalso not(CI)) of
+      true ->
+	lists:map(fun (L) -> {storep, L} end,
+		  lists:filter(
+          fun (J) ->
+              IsLive = is_live(SpillId, gb_trees:get(J, PLiveT)),
+	      IsLive andalso
+		       (not(is_interfering(
+			      InterferingVars,
+			      IsLive,
+			      gb_trees:get(J, PLiveT),
+			      SpillId,
+			      gb_trees:get(J, PDefT))))
+          end, gb_trees:keys(PLiveT)));
+      false -> []
+    end,
+  %% Stores
+  IsBranch = is_branch(I),
+  %% Invariant: currently the last instructions is always a branch
+  %% IsBranch iff _N = In
+  ?ASSERT((not(IsBranch) or (_N =:= In)) and (not(_N =:= In) or IsBranch)),
+  Store =
+    case not(CI) andalso CL andalso NI of
+      true ->
+	case IsBranch of
+	  true  -> [{store, BBLbl, In, b}];
+	  false -> [{store, BBLbl, In, a}]
+	end;
+      false -> []
+    end,
+  Reload =
+    case PI andalso CL andalso not(CI) of
+      true -> [{reload, BBLbl, In, b}];
+      false -> []
+    end,
+  IsUsedInInstr = lists:member(SpillId, temp_ids(def(I) ++ use(I))),
+  Rename =
+    case CI andalso IsUsedInInstr of
+      true -> [{rename, BBLbl, In, c}];
+      false -> []
+    end,
+  ordsets:union([ordsets:from_list(Reload),
+		 ordsets:from_list(Rename),
+		 ordsets:from_list(Store),
+		 ordsets:from_list(StorePred)]).
+
+rename_temp(TempId, NewTemp) ->
+  ?ASSERT(TempId =/= hipe_x86:temp_reg(NewTemp)),
+  fun (TempI) ->
+      case TempI of
+        #x86_mem{base=T, off=O} ->
+          TempI#x86_mem{base=((rename_temp(TempId,NewTemp))(T)),
+			off=((rename_temp(TempId,NewTemp))(O))};
+        #x86_temp{reg=Reg} when Reg =:= TempId -> NewTemp;
+        _ -> TempI
+      end
+  end.
+
+map_temp(F, I) ->
+  case I of
+    #alu{src=Src, dst=Dst} -> I#alu{src=F(Src), dst=F(Dst)};
+    #call{'fun'=Fun} -> I#call{'fun'=F(Fun)};
+    #cmovcc{src=Src, dst=Dst} -> I#cmovcc{src=F(Src), dst=F(Dst)};
+    #cmp{src=Src, dst=Dst} -> I#cmp{src=F(Src), dst=F(Dst)};
+    #comment{} -> I;
+    #fmove{src=Src, dst=Dst} -> I#fmove{src=F(Src), dst=F(Dst)};
+    #fp_binop{src=Src, dst=Dst} -> I#fp_binop{src=F(Src), dst=F(Dst)};
+    #fp_unop{arg=Arg} -> I#fp_unop{arg=F(Arg)};
+    #imul{src=Src, temp=Temp} -> I#imul{src=F(Src), temp=F(Temp)};
+    #jcc{} -> I;
+    #jmp_fun{'fun'=Fun} -> I#jmp_fun{'fun'=F(Fun)};
+    #jmp_label{} -> I;
+    #jmp_switch{temp=T, jtab=Tab} -> I#jmp_switch{temp=F(T), jtab=F(Tab)};
+    #label{} -> I;
+    #lea{mem=Mem, temp=Temp} -> I#lea{mem=F(Mem), temp=F(Temp)};
+    #move{src=Src, dst=Dst} -> I#move{src=F(Src), dst=F(Dst)};
+    #move64{dst=Dst} -> I#move64{dst=F(Dst)};
+    #movsx{src=Src, dst=Dst} -> I#movsx{src=F(Src), dst=F(Dst)};
+    #movzx{src=Src, dst=Dst} -> I#movzx{src=F(Src), dst=F(Dst)};
+    #pseudo_call{'fun'=Fun} -> I#pseudo_call{'fun'=F(Fun)};
+    #pseudo_jcc{} -> I;
+    #pseudo_spill{args=Args} -> I#pseudo_spill{args=lists:map(F, Args)};
+    #pseudo_tailcall{'fun'=Fun, stkargs=Args} ->
+      I#pseudo_tailcall{'fun'=F(Fun), stkargs=lists:map(F, Args)};
+    #pseudo_tailcall_prepare{} -> I;
+    #push{src=Src} -> I#push{src=F(Src)};
+    #pop{dst=Dst} -> I#pop{dst=F(Dst)};
+    #shift{src=Src, dst=Dst} -> I#shift{src=F(Src), dst=F(Dst)};
+    #test{src=Src, dst=Dst} -> I#test{src=F(Src), dst=F(Dst)}
+  end.
 
 do_insns([I|Insns], TempMap, Strategy, Accum, DidSpill0) ->
   {NewIs, DidSpill1} = do_insn(I, TempMap, Strategy),
@@ -334,7 +866,7 @@ fix_dst_operand(Opnd, TempMap, Strategy) ->
 temp0('normal') -> [];
 temp0('linearscan') -> ?HIPE_X86_REGISTERS:temp0().
 
-fix_mem_operand(Opnd, TempMap, RegOpt) ->	% -> {[fixupcode], newop, DidSpill}
+fix_mem_operand(Opnd, TempMap, RegOpt) ->   % -> {[fixupcode], newop, DidSpill}
   case Opnd of
     #x86_mem{base=Base,off=Off} ->
       case is_mem_opnd(Base, TempMap) of

@@ -26,6 +26,7 @@
          bb/2, bb_add/3]).
 -export([postorder/1, reverse_postorder/1]).
 -export([linearise/1, params/1, arity/1, redirect_jmp/3]).
+-export([is_branch/1]).
 
 %%% these tell cfg.inc what to define (ugly as hell)
 -define(PRED_NEEDED,true).

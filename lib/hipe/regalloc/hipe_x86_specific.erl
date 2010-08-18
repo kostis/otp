@@ -65,13 +65,13 @@
 
 %% callbacks for hipe_regalloc_loop
 -export([defun_to_cfg/1,
-	 check_and_rewrite/2]).
+	 check_and_rewrite/3]).
 
 defun_to_cfg(Defun) ->
   hipe_x86_cfg:init(Defun).
 
-check_and_rewrite(Defun, Coloring) ->
-  ?HIPE_X86_RA_POSTCONDITIONS:check_and_rewrite(Defun, Coloring, 'normal').
+check_and_rewrite(Defun, Coloring, Options) ->
+  ?HIPE_X86_RA_POSTCONDITIONS:check_and_rewrite(Defun, Coloring, 'normal', Options).
 
 reverse_postorder(CFG) ->
   hipe_x86_cfg:reverse_postorder(CFG).

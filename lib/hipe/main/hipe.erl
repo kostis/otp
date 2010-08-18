@@ -1360,6 +1360,7 @@ opt_keys() ->
      pp_rtl_ssapre,
      pp_rtl_linear,
      regalloc,
+     range_split,
      remove_comments,
      rtl_ssa,
      rtl_ssa_const_prop,

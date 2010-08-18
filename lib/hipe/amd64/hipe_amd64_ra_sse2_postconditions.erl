@@ -20,7 +20,7 @@
 
 -module(hipe_amd64_ra_sse2_postconditions).
 
--export([check_and_rewrite/2]).
+-export([check_and_rewrite/3]).
 
 -include("../x86/hipe_x86.hrl").
 -define(HIPE_INSTRUMENT_COMPILER, true).
@@ -28,9 +28,9 @@
 -define(count_temp(T), ?cons_counter(counter_mfa_mem_temps, T)).
 
 
-check_and_rewrite(AMD64Defun, Coloring) ->
+check_and_rewrite(AMD64Defun, Coloring, _Options) ->
   %%io:format("Converting\n"),
-  TempMap = hipe_temp_map:cols2tuple(Coloring,hipe_amd64_specific_sse2),
+  TempMap = hipe_temp_map:cols2tuple(Coloring, hipe_amd64_specific_sse2),
   %%io:format("Rewriting\n"),
   #defun{code=Code0} = AMD64Defun,
   {Code1, DidSpill} = do_insns(Code0, TempMap, [], false),
