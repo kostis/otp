@@ -138,7 +138,8 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Callgraph) ->
       {#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA, fun_mfa = CurrFun},
        MsgVarMap} = H,
       Digraph = dialyzer_callgraph:get_digraph(Callgraph),
-      CFSendTags = find_control_flow_send_tags(CurrFun, SendTags, Digraph),
+      CFSendTags = find_control_flow_send_tags(CurrFun, PidMFA, SendTags,
+                                               Digraph),
       PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, ProcReg,
                                     MsgVarMap, Callgraph),
       PidMFAs =
@@ -305,18 +306,21 @@ find_control_flow_rcv_tags(PidFuns, [#rcv_fun{fun_mfa = RcvFun} = H|T],
     end,
   find_control_flow_rcv_tags(PidFuns, T, NewAcc, ReachableFrom).
 
-find_control_flow_send_tags(PidFun, SendTags, Digraph) ->
-  ReachableFrom = digraph_utils:reachable([PidFun], Digraph),
-  find_control_flow_send_tags(PidFun, SendTags, [], ReachableFrom).
+find_control_flow_send_tags(PidFun1, PidFun2, SendTags, Digraph) ->
+  ReachableFrom = digraph_utils:reachable(lists:usort([PidFun1, PidFun2]),
+                                          Digraph),
+  find_control_flow_send_tags(PidFun1, PidFun2, SendTags, [],
+                              ReachableFrom).
 
-find_control_flow_send_tags(_PidFun, [], Acc, _ReachableFrom) ->
+find_control_flow_send_tags(_PidFun1, _PidFun2, [], Acc, _ReachableFrom) ->
   Acc;
-find_control_flow_send_tags(_PidFun, _SendTags, Acc, []) ->
+find_control_flow_send_tags(_PidFun1, _PidFun2, _SendTags, Acc, []) ->
   Acc;
-find_control_flow_send_tags(PidFun, [#send_fun{fun_mfa = SendFun} = H|T],
+find_control_flow_send_tags(PidFun1, PidFun2,
+                            [#send_fun{fun_mfa = SendFun} = H|T],
                             Acc, ReachableFrom) ->
   NewAcc =
-    case PidFun =:= SendFun of
+    case PidFun1 =:= SendFun orelse PidFun2 =:= SendFun of
       true -> [H|Acc];
       false ->
         case lists:member(SendFun, ReachableFrom) of
@@ -324,7 +328,7 @@ find_control_flow_send_tags(PidFun, [#send_fun{fun_mfa = SendFun} = H|T],
           false -> Acc
         end
     end,
-  find_control_flow_send_tags(PidFun, T, NewAcc, ReachableFrom).
+  find_control_flow_send_tags(PidFun1, PidFun2, T, NewAcc, ReachableFrom).
 
 find_pid_send_tags(Pid, CFSendTags, RegDict, MsgVarMap) ->
   find_pid_send_tags(Pid, CFSendTags, RegDict, [], MsgVarMap).
