@@ -82,7 +82,7 @@
                      | 'mnesia_dirty_write2' | 'function_call'.
 
 -type case_tags()   :: 'beg_case' | #beg_clause{} | #end_clause{} | #end_case{}.
--type pid_tags()    :: 'self'.
+-type pid_tags()    :: 'self' | #spawn_call{}.
 -type race_tags()   :: 'whereis_register' | 'whereis_unregister'
                      | 'ets_lookup_insert' | 'mnesia_dirty_read_write'.
 
@@ -94,9 +94,9 @@
                      call_vars  :: [core_vars()],
                      var_map    :: dict()}).
 
--type code()        :: [#dep_call{} | #fun_call{} | #spawn_call{} |
-                        #warn_call{} | #curr_fun{} | #let_tag{} |
-                        case_tags() | pid_tags() | race_tags()].
+-type code()        :: [#dep_call{} | #fun_call{} | #warn_call{} |
+                        #curr_fun{} | #let_tag{} | case_tags() |
+                        pid_tags() | race_tags()].
 
 -type var_label()   :: label() | ?no_label.
 -type table()       :: {'named', var_label(), [string()]} | 'other' | 'no_t'.
@@ -444,20 +444,23 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                                A =:= 3 orelse A =:= 4) ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
-                        {[#spawn_call{callee = Fun, vars = Args}|RaceList],
+                        {[#spawn_call{caller = CurrFun, callee = Fun,
+                                      vars = Args}|RaceList],
                          RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
                          ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_monitor, A} when A =:= 1 orelse A =:= 3 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
-                        {[#spawn_call{callee = Fun, vars = Args}|RaceList],
+                        {[#spawn_call{caller = CurrFun, callee = Fun,
+                                      vars = Args}|RaceList],
                          RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
                          ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_opt, A} when A =:= 2 orelse A =:= 3 orelse
                                                   A =:= 4 orelse A =:= 5 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
-                        {[#spawn_call{callee = Fun, vars = Args}|RaceList],
+                        {[#spawn_call{caller = CurrFun, callee = Fun,
+                                      vars = Args}|RaceList],
                          RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
                          ProcReg, SendTags, WhereisArgtypes};
                       _Else ->
@@ -497,9 +500,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
-                                {[#spawn_call{callee = Fun, vars = Args}|
-                                  RaceList], RaceListSize + 1, RaceTags,
-                                 'no_t', [PidFun|PidTags], ProcReg, SendTags,
+                                {[#spawn_call{caller = CurrFun, callee = Fun,
+                                              vars = Args}|RaceList],
+                                 RaceListSize + 1, RaceTags, 'no_t',
+                                 [PidFun|PidTags], ProcReg, SendTags,
                                  WhereisArgtypes}
                             end;
                           {erlang, spawn_monitor, A} when A =:= 1 orelse
@@ -512,9 +516,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
-                                {[#spawn_call{callee = Fun, vars = Args}|
-                                  RaceList], RaceListSize + 1, RaceTags,
-                                 'no_t', [PidFun|PidTags], ProcReg, SendTags,
+                                {[#spawn_call{caller = CurrFun, callee = Fun,
+                                              vars = Args}|RaceList],
+                                 RaceListSize + 1, RaceTags, 'no_t',
+                                 [PidFun|PidTags], ProcReg, SendTags,
                                  WhereisArgtypes}
                             end;
                           {erlang, spawn_opt, A} when A =:= 2 orelse
@@ -528,9 +533,10 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
-                                {[#spawn_call{callee = Fun, vars = Args}|
-                                  RaceList], RaceListSize + 1, RaceTags,
-                                 'no_t', [PidFun|PidTags], ProcReg, SendTags,
+                                {[#spawn_call{caller = CurrFun, callee = Fun,
+                                              vars = Args}|RaceList],
+                                 RaceListSize + 1, RaceTags, 'no_t',
+                                 [PidFun|PidTags], ProcReg, SendTags,
                                  WhereisArgtypes}
                             end;
                           _Else ->

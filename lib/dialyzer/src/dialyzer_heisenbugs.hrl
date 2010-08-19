@@ -85,7 +85,8 @@
 -record(let_tag,    {var        :: var_to_map1(),
                      arg        :: var_to_map1()}).
 
--record(spawn_call, {callee     :: mfa_or_funlbl(),
+-record(spawn_call, {caller     :: mfa_or_funlbl(),
+                     callee     :: mfa_or_funlbl(),
                      vars       :: [core_vars()]}).
 
 -record(warn_call,  {call_name  :: warn_calls(),

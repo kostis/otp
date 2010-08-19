@@ -35,7 +35,9 @@
 
 %% Record Interfaces
 
--export([add_msg/2, add_pid/3, add_pid_tag/3, add_pid_tags/2,
+-export([add_msg/2, add_pid/3, add_pid_tags/2,
+         create_indirect_pid_tag_for_self/2,
+         create_indirect_pid_tags_for_spawn/3,
          create_pid_tag_for_self/1, create_pid_tag_for_spawn/2,
          create_rcv_tag/2, create_send_tag/4, get_race_list_ret/2,
          get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
@@ -66,7 +68,8 @@
 -record(pid_fun,  {kind            :: pid_kind(),
                    pid = ?no_label :: label() | ?no_label,
                    pid_mfa         :: mfa_or_funlbl(), %% fun that owns the pid
-                   fun_mfa         :: mfa_or_funlbl()}).
+                   fun_mfa         :: mfa_or_funlbl(),
+                   indirect = 'undef' :: mfa_or_funlbl() | 'undef'}).
 
 -record(rcv_fun,  {msgs = []       :: [erl_types:erl_type()],
                    fun_mfa         :: mfa_or_funlbl(),
@@ -135,8 +138,20 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Callgraph) ->
   case PidTagGroups of
     [] -> Warns;
     [H|T] ->
-      {#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA, fun_mfa = CurrFun},
-       MsgVarMap} = H,
+      {PidTag, MsgVarMap} = H,
+      Kind = PidTag#pid_fun.kind,
+      {Pid, PidMFA, CurrFun} =
+        case Kind of
+          'self' ->
+            {PidTag#pid_fun.pid, PidTag#pid_fun.pid_mfa,
+             PidTag#pid_fun.fun_mfa};
+          'spawn' ->
+            {PidTag#pid_fun.pid, PidTag#pid_fun.pid_mfa,
+             case PidTag#pid_fun.indirect of
+               'undef' -> PidTag#pid_fun.fun_mfa;
+               Other -> Other
+             end}
+        end,
       Digraph = dialyzer_callgraph:get_digraph(Callgraph),
       CFSendTags = find_control_flow_send_tags(CurrFun, PidMFA, SendTags,
                                                Digraph),
@@ -475,7 +490,7 @@ get_ret_paths(RaceList) ->
         #end_case{} ->
           {RaceList1, Ret} = get_case_ret(T),
           Ret ++ get_ret_paths(RaceList1);
-        'self' -> ['self'|get_ret_paths(T)];
+        'self' -> [H|get_ret_paths(T)];
         #fun_call{callee = Callee} ->
           Ret =
             case ets:lookup(cfgs, Callee) of
@@ -484,7 +499,7 @@ get_ret_paths(RaceList) ->
             end,
           Ret ++ get_ret_paths(T);
         #dep_call{} -> get_ret_paths(T);
-        #spawn_call{} -> get_ret_paths(T);
+        #spawn_call{} -> [H|get_ret_paths(T)];
         #warn_call{} -> get_ret_paths(T);
         #let_tag{} -> get_ret_paths(T)
       end
@@ -494,23 +509,32 @@ get_ret_paths(RaceList) ->
 %% in the form of the highest ancestor
 group_pid_tags([], _Tags, OldTags, _Digraph) ->
   {OldTags, []};
-group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA} = H|T],
+group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA,
+                         indirect = Indirect} = H|T],
                Tags, OldTags, Digraph) ->
   {NewOldTags, Group} =
-    case Pid =:= ?no_label of
+    case lists:member(H, OldTags) of
       true -> {OldTags, []};
       false ->
-        case lists:member(H, OldTags) of
-          true -> {OldTags, []};
-          false ->
-            ReachableFrom = digraph_utils:reachable([PidMFA], Digraph),
-            ReachingTo = digraph_utils:reaching([PidMFA], Digraph),
-            case Kind =/= 'self' of
-              true ->
+        ReachableFrom = digraph_utils:reachable([PidMFA], Digraph),
+        ReachingTo = digraph_utils:reaching([PidMFA], Digraph),
+        case Kind =/= 'self' of
+          true ->
+            case Indirect of
+              'undef' ->
                 {RetTags, RetDad, RetMVM} =
                   group_spawn_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
-                                       ReachingTo, [], true, dict:new()),
-                {RetTags, [{RetDad, RetMVM}]};
+                                       ReachingTo, Digraph, [], true, [],
+                                       dict:new()),
+                case RetDad#pid_fun.pid =:= ?no_label of
+                  true -> {OldTags, []};
+                  false -> {RetTags, [{RetDad, RetMVM}]}
+                end;
+              _Else -> {OldTags, []}
+            end;
+          false ->
+            case Pid =:= ?no_label of
+              true -> {OldTags, []};
               false ->
                 {RetTags, RetDad, RetMVM} =
                   group_self_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
@@ -568,38 +592,82 @@ group_self_pid_tags(#pid_fun{pid = CurrPid, pid_mfa = CurrPidMFA} = CurrTag,
                       Digraph, NewDad, NewMsgVarMap).
 
 group_spawn_pid_tags(CurrTag, [], OldTags, _ReachableFrom, _ReachingTo,
-                     OldTagsAcc, true, MsgVarMap) ->
-  {lists:usort(OldTagsAcc ++ OldTags), CurrTag, MsgVarMap};
+                     _Digraph, OldTagsAcc, true, IndirectTags, MsgVarMap) ->
+  {IndirectTags ++ lists:usort(OldTagsAcc ++ OldTags), CurrTag, MsgVarMap};
 group_spawn_pid_tags(CurrTag, [], OldTags, _ReachableFrom, _ReachingTo,
-                     _OldTagsAcc, false, MsgVarMap) ->
-  {OldTags, CurrTag, MsgVarMap};
-group_spawn_pid_tags(#pid_fun{pid = CurrPid, pid_mfa = CurrPidMFA} = CurrTag,
-                     [#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA} = H|T],
-                     OldTags, ReachableFrom, ReachingTo, OldTagsAcc, AddOldTags,
-                     MsgVarMap) ->
-  {NewOldTagsAcc, NewAddOldTags, NewMsgVarMap} =
-    case Kind =/= 'self' orelse Pid =:= ?no_label of
-      true -> {OldTagsAcc, AddOldTags, MsgVarMap};
-      false ->
-        case CurrPidMFA =:= PidMFA of
+                     _Digraph, _OldTagsAcc, false, IndirectTags, MsgVarMap) ->
+  {IndirectTags ++ OldTags, CurrTag, MsgVarMap};
+group_spawn_pid_tags(#pid_fun{pid = CurrPid, fun_mfa = CurrFunMFA,
+                              pid_mfa = CurrPidMFA,
+                              indirect = CurrIndirect} = CurrTag,
+                     [#pid_fun{kind = Kind, pid = Pid, fun_mfa = FunMFA,
+                               pid_mfa = PidMFA, indirect = Indirect} = H|T],
+                     OldTags, ReachableFrom, ReachingTo, Digraph,
+                     OldTagsAcc, AddOldTags, IndirectTags, MsgVarMap) ->
+  {NewOldTagsAcc, NewAddOldTags, NewIndirectTags, NewCurrTag, NewMsgVarMap} =
+    case Kind =/= 'self' of
+      true ->
+        case CurrTag =:= H of
           true ->
-            {[H|OldTagsAcc], AddOldTags,
-             bind_dict_vars(CurrPid, Pid, MsgVarMap)};
+            {OldTagsAcc, AddOldTags, IndirectTags, CurrTag, MsgVarMap};
           false ->
-            case lists:member(PidMFA, ReachableFrom) of
+            case (CurrFunMFA =:= FunMFA) andalso
+              (CurrPidMFA =:= PidMFA) andalso (Indirect =/= 'undef') of
               true ->
-                {[H|OldTagsAcc], AddOldTags,
+                MsgVarMap1 =
+                  case Pid =:= ?no_label of
+                    true -> MsgVarMap;
+                    false -> bind_dict_vars(CurrPid, Pid, MsgVarMap)
+                  end,
+                case CurrIndirect =/= 'undef' of
+                  true ->
+                    Path = digraph:get_path(Digraph, Indirect,
+                                            CurrIndirect),
+                    case Path of
+                      false ->
+                        {OldTagsAcc, AddOldTags, [H|IndirectTags], CurrTag,
+                         MsgVarMap1};
+                      _Vertices ->
+                        {OldTagsAcc, AddOldTags, [H|IndirectTags], H,
+                         MsgVarMap1}
+                    end;
+                  false ->
+                    {OldTagsAcc, AddOldTags, [H|IndirectTags], H,
+                     MsgVarMap1}
+                end;
+              false ->
+                {OldTagsAcc, AddOldTags, IndirectTags, CurrTag, MsgVarMap}
+            end
+        end;
+      false ->
+        case Pid =:= ?no_label of
+          true ->
+            {OldTagsAcc, AddOldTags, IndirectTags, CurrTag, MsgVarMap};
+          false ->
+            case CurrPidMFA =:= PidMFA of
+              true ->
+                {[H|OldTagsAcc], AddOldTags, IndirectTags, CurrTag,
                  bind_dict_vars(CurrPid, Pid, MsgVarMap)};
               false ->
-                case lists:member(PidMFA, ReachingTo) of
-                  true -> {OldTagsAcc, false, MsgVarMap};
-                  false -> {OldTagsAcc, AddOldTags, MsgVarMap}
+                case lists:member(PidMFA, ReachableFrom) of
+                  true ->
+                    {[H|OldTagsAcc], AddOldTags, IndirectTags, CurrTag,
+                     bind_dict_vars(CurrPid, Pid, MsgVarMap)};
+                  false ->
+                    case lists:member(PidMFA, ReachingTo) of
+                      true ->
+                        {OldTagsAcc, false, IndirectTags, CurrTag, MsgVarMap};
+                      false ->
+                        {OldTagsAcc, AddOldTags, IndirectTags, CurrTag,
+                         MsgVarMap}
+                    end
                 end
             end
         end
     end,
-  group_spawn_pid_tags(CurrTag, T, OldTags, ReachableFrom, ReachingTo,
-                       NewOldTagsAcc, NewAddOldTags, NewMsgVarMap).
+  group_spawn_pid_tags(NewCurrTag, T, OldTags, ReachableFrom, ReachingTo,
+                       Digraph, NewOldTagsAcc, NewAddOldTags, NewIndirectTags,
+                       NewMsgVarMap).
 
 is_below_spawn(_Tag, []) ->
   false;
@@ -714,35 +782,33 @@ is_call_to_spawn(Tree) ->
   end.
 
 -spec is_call_to_spawn(cerl:cerl(), module(), dict()) ->
-      {boolean(), boolean()}.
+      {boolean(), 'false' | [dialyzer_races:pid_tags()]}.
 
-is_call_to_spawn(Tree, _M, VFTab) ->
+is_call_to_spawn(Tree, M, VFTab) ->
   case cerl:is_c_call(Tree) of
     false ->
       case cerl:is_c_apply(Tree) of
         true ->
           ApplyOp = cerl:apply_op(Tree),
           case cerl:var_name(ApplyOp) of
-            {_F, _A} ->
-              %% MFA = {M, F, A},
-              %% Ret =
-              %%   case ets:lookup(cfgs, MFA) of
-              %%     [] -> [];
-              %%     [{MFA, _Args, R, _Code}] -> R
-              %%   end,
-              %% {false, lists:member('self', Ret)};
-              {false, false};
+            {F, A} ->
+              MFA = {M, F, A},
+              Ret =
+                case ets:lookup(cfgs, MFA) of
+                  [] -> [];
+                  [{MFA, _Args, R, _Code}] -> R
+                end,
+              {false, Ret};
             _ ->
               case dict:find(cerl_trees:get_label(ApplyOp), VFTab) of
                 error -> {false, false};
-                {ok, _FunLabel} ->
-                  %% Ret =
-                  %%   case ets:lookup(cfgs, FunLabel) of
-                  %%     [] -> [];
-                  %%     [{FunLabel, _Args, R, _Code}] -> R
-                  %%   end,
-                  %% {false, lists:member('self', Ret)}
-                  {false, false}
+                {ok, FunLabel} ->
+                  Ret =
+                    case ets:lookup(cfgs, FunLabel) of
+                      [] -> [];
+                      [{FunLabel, _Args, R, _Code}] -> R
+                    end,
+                  {false, Ret}
               end
           end;
         false -> {false, false}
@@ -768,14 +834,13 @@ is_call_to_spawn(Tree, _M, VFTab) ->
             {'erlang', 'spawn_opt', 3} -> {true, false};
             {'erlang', 'spawn_opt', 4} -> {true, false};
             {'erlang', 'spawn_opt', 5} -> {true, false};
-            _MFA ->
-              %% Ret =
-              %%   case ets:lookup(cfgs, MFA) of
-              %%     [] -> [];
-              %%     [{MFA, _Args, R, _Code}] -> R
-              %%   end,
-              %% {false, lists:member('self', Ret)}
-              {false, false}
+            MFA ->
+              Ret =
+                case ets:lookup(cfgs, MFA) of
+                  [] -> [];
+                  [{MFA, _Args, R, _Code}] -> R
+                end,
+              {false, Ret}
           end;
         false -> {false, false}
       end
@@ -1050,25 +1115,42 @@ add_pid(Kind, Label, State) ->
       end
   end.
 
--spec add_pid_tag(pid_kind(), non_neg_integer(), dialyzer_dataflow:state()) ->
-      dialyzer_dataflow:state().
-
-add_pid_tag(Kind, Label, State) ->
-  Races = dialyzer_dataflow:state__get_races(State),
-  CurrFun = dialyzer_races:get_curr_fun(Races),
-  PidTags = dialyzer_dataflow:state__get_pid_tags(State),
-  NewPidTag =
-    case Kind of
-      'self' ->
-        #pid_fun{kind = Kind, pid = Label, pid_mfa = CurrFun,
-                 fun_mfa = CurrFun}
-    end,
-  dialyzer_dataflow:state__put_pid_tags([NewPidTag|PidTags], State).
-
 -spec add_pid_tags([pid_fun()], msgs()) -> msgs().
 
 add_pid_tags(PidTags, #msgs{pid_tags = PT} = Msgs) ->
   Msgs#msgs{pid_tags = lists:usort(PidTags ++ PT)}.
+
+-spec create_indirect_pid_tag_for_self(non_neg_integer(),
+                                       dialyzer_dataflow:state()) ->
+      dialyzer_dataflow:state().
+
+create_indirect_pid_tag_for_self(Label, State) ->
+  Races = dialyzer_dataflow:state__get_races(State),
+  CurrFun = dialyzer_races:get_curr_fun(Races),
+  PidTags = dialyzer_dataflow:state__get_pid_tags(State),
+  NewPidTag = #pid_fun{kind = 'self', pid = Label, pid_mfa = CurrFun,
+                       fun_mfa = CurrFun},
+  dialyzer_dataflow:state__put_pid_tags([NewPidTag|PidTags], State).
+
+-spec create_indirect_pid_tags_for_spawn([dialyzer_races:pid_tags()],
+                                         non_neg_integer(),
+                                         dialyzer_dataflow:state()) ->
+      dialyzer_dataflow:state().
+
+create_indirect_pid_tags_for_spawn([], _Label, State) ->
+  State;
+create_indirect_pid_tags_for_spawn(['self'|T], Label, State) ->
+  create_indirect_pid_tags_for_spawn(T, Label, State);
+create_indirect_pid_tags_for_spawn([H|T], Label, State) ->
+  #spawn_call{caller = Caller, callee = Callee} = H,
+  Races = dialyzer_dataflow:state__get_races(State),
+  CurrFun = dialyzer_races:get_curr_fun(Races),
+  PidTags = dialyzer_dataflow:state__get_pid_tags(State),
+  NewPidTag = #pid_fun{kind = 'spawn', pid = Label, pid_mfa = Callee,
+                       fun_mfa = Caller, indirect = CurrFun},
+  State1 = dialyzer_dataflow:state__put_pid_tags([NewPidTag|PidTags],
+                                                 State),
+  create_indirect_pid_tags_for_spawn(T, Label, State1).
 
 -spec create_pid_tag_for_self(mfa_or_funlbl()) -> pid_fun().
 

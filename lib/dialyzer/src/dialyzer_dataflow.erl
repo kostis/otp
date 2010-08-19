@@ -1176,8 +1176,8 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
                   dialyzer_messages:add_pid('self', cerl_trees:get_label(V),
                                             State2);
                 {false, true} ->
-                  dialyzer_messages:add_pid_tag('self', cerl_trees:get_label(V),
-                                                State2);
+                  dialyzer_messages:create_indirect_pid_tag_for_self(
+                    cerl_trees:get_label(V), State2);
                 {false, false} -> State2;
                 false -> State2
               end,
@@ -1185,9 +1185,9 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
               {true, false} ->
                 dialyzer_messages:add_pid('spawn', cerl_trees:get_label(V),
                                           State3);
-              {false, true} ->
-                dialyzer_messages:add_pid_tag('spawn', cerl_trees:get_label(V),
-                                              State3);
+              {false, Spawns} when is_list(Spawns) ->
+                dialyzer_messages:create_indirect_pid_tags_for_spawn(
+                  Spawns, cerl_trees:get_label(V), State3);
               {false, false} -> State3;
               false -> State3
             end;
