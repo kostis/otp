@@ -94,9 +94,9 @@
                      call_vars  :: [core_vars()],
                      var_map    :: dict()}).
 
--type code()        :: [#dep_call{} | #fun_call{} | #warn_call{} |
-                        #curr_fun{} | #let_tag{} | case_tags() |
-                        pid_tags() | race_tags()].
+-type code()        :: [#dep_call{} | #fun_call{} | #spawn_call{} |
+                        #warn_call{} | #curr_fun{} | #let_tag{} |
+                        case_tags() | pid_tags() | race_tags()].
 
 -type var_label()   :: label() | ?no_label.
 -type table()       :: {'named', var_label(), [string()]} | 'other' | 'no_t'.
@@ -444,19 +444,22 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                                A =:= 3 orelse A =:= 4) ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
-                        {RaceList, RaceListSize, RaceTags, 'no_t',
-                         [PidFun|PidTags], ProcReg, SendTags, WhereisArgtypes};
+                        {[#spawn_call{callee = Fun, vars = Args}|RaceList],
+                         RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
+                         ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_monitor, A} when A =:= 1 orelse A =:= 3 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
-                        {RaceList, RaceListSize, RaceTags, 'no_t',
-                         [PidFun|PidTags], ProcReg, SendTags, WhereisArgtypes};
+                        {[#spawn_call{callee = Fun, vars = Args}|RaceList],
+                         RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
+                         ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_opt, A} when A =:= 2 orelse A =:= 3 orelse
                                                   A =:= 4 orelse A =:= 5 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
                                    Fun, CurrFun),
-                        {RaceList, RaceListSize, RaceTags, 'no_t',
-                         [PidFun|PidTags], ProcReg, SendTags, WhereisArgtypes};
+                        {[#spawn_call{callee = Fun, vars = Args}|RaceList],
+                         RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
+                         ProcReg, SendTags, WhereisArgtypes};
                       _Else ->
                         {[#fun_call{caller = CurrFun, callee = Callee,
                                     arg_types =  ArgTypes, vars = Args}|
@@ -494,8 +497,9 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
-                                {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 [PidFun|PidTags], ProcReg, SendTags,
+                                {[#spawn_call{callee = Fun, vars = Args}|
+                                  RaceList], RaceListSize + 1, RaceTags,
+                                 'no_t', [PidFun|PidTags], ProcReg, SendTags,
                                  WhereisArgtypes}
                             end;
                           {erlang, spawn_monitor, A} when A =:= 1 orelse
@@ -508,8 +512,9 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
-                                {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 [PidFun|PidTags], ProcReg, SendTags,
+                                {[#spawn_call{callee = Fun, vars = Args}|
+                                  RaceList], RaceListSize + 1, RaceTags,
+                                 'no_t', [PidFun|PidTags], ProcReg, SendTags,
                                  WhereisArgtypes}
                             end;
                           {erlang, spawn_opt, A} when A =:= 2 orelse
@@ -523,8 +528,9 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                 PidFun =
                                   dialyzer_messages:create_pid_tag_for_spawn(
                                     Fun, CurrFun),
-                                {RaceList, RaceListSize, RaceTags, 'no_t',
-                                 [PidFun|PidTags], ProcReg, SendTags,
+                                {[#spawn_call{callee = Fun, vars = Args}|
+                                  RaceList], RaceListSize + 1, RaceTags,
+                                 'no_t', [PidFun|PidTags], ProcReg, SendTags,
                                  WhereisArgtypes}
                             end;
                           _Else ->
@@ -818,6 +824,7 @@ fixup_race_forward(CurrFun, CurrFunLabel, Calls, Code, RaceList,
             {[#curr_fun{status = 'in', var_map = RaceVarMap}|RaceList], [],
              NestingLevel + 1, false};
           'self' -> {RaceList, [], NestingLevel, false};
+          #spawn_call{} -> {RaceList, [], NestingLevel, false};
           RaceTag ->
             PublicTables = dialyzer_callgraph:get_public_tables(Callgraph),
             NamedTables = dialyzer_callgraph:get_named_tables(Callgraph),
@@ -2900,7 +2907,7 @@ spawn_result({mfargs, InpArgs, InpArgTypes}, State, CurrFun, SpawnArity) ->
 	      Arity = length(Args),
 	      MFA = {Module, Function, Arity},
 	      ArgTypes = lists:duplicate(Arity, erl_types:t_any()),
-	      {true, spawn_result1(MFA, ArgTypes, ArgsCerl, CurrFun, State)};
+	      {true, spawn_result1(MFA, ArgTypes, Args, CurrFun, State)};
 	    error -> false
 	  end;
 	error -> false
@@ -2931,12 +2938,7 @@ extract_atom(Cerl, Type) ->
   end.
 
 extract_list(Cerl, _Type) ->
-  case cerl:is_literal(Cerl) of
-    true ->
-      case cerl:concrete(Cerl) of
-	List when is_list(List) -> {ok, List};
-	_ -> error
-      end;
+  case cerl:is_c_list(Cerl) of
+    true -> {ok, cerl:list_elements(Cerl)};
     false -> error
   end.
-  

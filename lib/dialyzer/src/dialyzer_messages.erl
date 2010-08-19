@@ -175,11 +175,12 @@ forward_msg_analysis(Pid, Code, SendTags, {RegDict, RegMFAs}, MsgVarMap,
   MsgVarMap1 = bind_reg_labels(RegDict, MsgVarMap),
   PidSendTags = forward_msg_analysis(Pid, Code, SendTags,
                                      lists:usort(RegMFAs ++ SendMFAs),
-                                     RegDict, [], MsgVarMap1, Digraph),
+                                     RegDict, [], [], MsgVarMap1,
+                                     Digraph),
   lists:usort(PidSendTags).
 
-forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
-                     Digraph) ->
+forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
+                     MsgVarMap, Digraph) ->
   case Code of
     [] -> find_pid_send_tags(Pid, SendTags, RegDict, MsgVarMap);
     [Head|Tail] ->
@@ -204,7 +205,29 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
                           forward_msg_analysis(Pid, CalleeCode, SendTags,
                                                MFAs, RegDict,
                                                [{Caller, Callee}|Calls],
-                                               MsgVarMap1, Digraph)
+                                               Spawns, MsgVarMap1, Digraph)
+                      end
+                  end;
+                false -> []
+              end,                                                         
+            {PidSendTags, MsgVarMap};
+          #spawn_call{callee = Callee, vars = CallVars} ->
+            PidSendTags =
+              case follow_call(Callee, MFAs, Digraph) of
+                true ->
+                  case lists:member(Callee, Spawns) of
+                    true -> []; %% XXX: new MsgVarMap?
+                    false ->
+                      case ets:lookup(cfgs, Callee) of
+                        [] -> [];
+                        [{Callee, DefVars, _DefRet, CalleeCode}] ->
+                          MsgVarMap1 =
+                            dialyzer_races:race_var_map(DefVars, CallVars,
+                                                        MsgVarMap, 'bind'),
+                          forward_msg_analysis(Pid, CalleeCode, SendTags,
+                                               MFAs, RegDict, Calls,
+                                               [Callee|Spawns], MsgVarMap1,
+                                               Digraph)
                       end
                   end;
                 false -> []
@@ -228,7 +251,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, MsgVarMap,
         end,
       NewPidSendTags ++
         forward_msg_analysis(Pid, Tail, SendTags, MFAs, RegDict, Calls,
-                             NewMsgVarMap, Digraph)
+                             Spawns, NewMsgVarMap, Digraph)
   end.
 
 %%% ===========================================================================
@@ -461,6 +484,7 @@ get_ret_paths(RaceList) ->
             end,
           Ret ++ get_ret_paths(T);
         #dep_call{} -> get_ret_paths(T);
+        #spawn_call{} -> get_ret_paths(T);
         #warn_call{} -> get_ret_paths(T);
         #let_tag{} -> get_ret_paths(T)
       end

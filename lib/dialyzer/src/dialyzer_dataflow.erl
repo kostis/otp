@@ -315,21 +315,12 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
 
       %% EXPERIMENTAL: Turn all behaviour API calls into calls to the
       %%               respective callback module's functions.
-
-      case BehaviourTranslations of
-	[] ->
-          dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
-            dialyzer_races:race(State4)));
-	_ ->
-	  TempCG =
-            dialyzer_behaviours:translate_callgraph(State4#state.callgraph),
-          St =
-            dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
+      
+      TempCG = dialyzer_behaviours:translate_callgraph(State4#state.callgraph),
+      St = dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
               dialyzer_races:race(State4#state{callgraph = TempCG}))),
-          OriginalCG =
-	    dialyzer_callgraph:clear_behaviour_edges(TempCG),
-          St#state{callgraph = OriginalCG}
-      end;
+      OriginalCG = dialyzer_callgraph:clear_behaviour_edges(St#state.callgraph),
+      St#state{callgraph = OriginalCG};
     false -> State2
   end.
 
@@ -1581,8 +1572,13 @@ do_clause(C, Arg, ArgType0, OrigArgType, Map,
           true ->
             case PatTypes of
               [] -> State1;
-              _Other ->
-                RcvMsg = dialyzer_typesig:get_safe_underapprox(Pats, Guard),
+              [PatType] ->
+                None = t_none(),
+                RcvMsg =
+                  case dialyzer_typesig:get_safe_underapprox(Pats, Guard) of
+                    None -> PatType;
+                    MsgType -> MsgType
+                  end,
                 dialyzer_messages:add_msg(RcvMsg, State1)
             end;
           false -> State1
