@@ -209,7 +209,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
                   case lists:member({Caller, Callee}, Calls) of
-                    true -> []; %% XXX: new MsgVarMap?
+                    true -> [];
                     false ->
                       case ets:lookup(cfgs, Callee) of
                         [] -> [];
@@ -226,12 +226,12 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
                 false -> []
               end,                                                         
             {PidSendTags, MsgVarMap};
-          #spawn_call{callee = Callee, vars = CallVars} ->
+          #spawn_call{caller = Caller, callee = Callee, vars = CallVars} ->
             PidSendTags =
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
-                  case lists:member(Callee, Spawns) of
-                    true -> []; %% XXX: new MsgVarMap?
+                  case lists:member({Caller, Callee}, Spawns) of
+                    true -> [];
                     false ->
                       case ets:lookup(cfgs, Callee) of
                         [] -> [];
@@ -241,8 +241,8 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
                                                         MsgVarMap, 'bind'),
                           forward_msg_analysis(Pid, CalleeCode, SendTags,
                                                MFAs, RegDict, Calls,
-                                               [Callee|Spawns], MsgVarMap1,
-                                               Digraph)
+                                               [{Caller, Callee}|Spawns],
+                                               MsgVarMap1, Digraph)
                       end
                   end;
                 false -> []
