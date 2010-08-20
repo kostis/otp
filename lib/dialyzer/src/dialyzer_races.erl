@@ -130,7 +130,7 @@
 %%% ===========================================================================
 
 -spec store_call(mfa_or_funlbl(), [erl_types:erl_type()], [core_vars()],
-                 file_line(), dialyzer_dataflow:state()) -> 
+                 file_line(), dialyzer_dataflow:state()) ->
   dialyzer_dataflow:state().
 
 store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
@@ -149,7 +149,7 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
   SendTags = dialyzer_messages:get_send_tags(Msgs),
   CleanState = dialyzer_dataflow:state__records_only(State),
   {NewRaceList, NewRaceListSize, NewRaceTags, NewTable, NewPidTags,
-   NewProcReg, NewSendTags, NewWhereisArgtypes} = 
+   NewProcReg, NewSendTags, NewWhereisArgtypes} =
     case CurrFun of
       {_Module, module_info, A} when A =:= 0 orelse A =:= 1 ->
         {[], 0, RaceTags, 'no_t', PidTags, ProcReg, SendTags, WhereisArgtypes};
@@ -773,7 +773,7 @@ fixup_race_forward(CurrFun, CurrFunLabel, Calls, Code, RaceList,
               _Other ->
                 {RaceList, [], NestingLevel, false}
             end;
-  	  #warn_call{call_name = RegCall} when RegCall =:= 'register' orelse 
+  	  #warn_call{call_name = RegCall} when RegCall =:= 'register' orelse
                                                RegCall =:= 'unregister' ->
             case RaceWarnTag of
               WarnWhereis when WarnWhereis =:= ?WARN_WHEREIS_REGISTER orelse
@@ -1485,7 +1485,7 @@ are_bound_vars(Vars1, Vars2, RaceVarMap) ->
 callgraph__renew_tables(Table, Callgraph) ->
   case Table of
     {'named', NameLabel, Names} ->
-      PTablesToAdd = 
+      PTablesToAdd =
         case NameLabel of
           ?no_label -> [];
           _Other -> [NameLabel]
@@ -1639,8 +1639,8 @@ is_call_to_ets_new(Tree) ->
       Mod = cerl:call_module(Tree),
       Name = cerl:call_name(Tree),
       Arity = cerl:call_arity(Tree),
-      cerl:is_c_atom(Mod) 
-	andalso cerl:is_c_atom(Name) 
+      cerl:is_c_atom(Mod)
+	andalso cerl:is_c_atom(Name)
 	andalso (cerl:atom_val(Name) =:= 'new')
 	andalso (cerl:atom_val(Mod) =:= 'ets')
 	andalso (Arity =:= 2)
@@ -2733,7 +2733,7 @@ get_curr_fun_args(#races{curr_fun_args = CurrFunArgs}) ->
   CurrFunArgs.
 
 -spec get_curr_fun_label(races()) -> label().
-  
+
 get_curr_fun_label(#races{curr_fun_label = CurrFunLabel}) ->
   CurrFunLabel.
 
@@ -2743,7 +2743,7 @@ get_new_table(#races{new_table = Table}) ->
   Table.
 
 -spec get_heisen_anal(races()) -> boolean().
-  
+
 get_heisen_anal(#races{heisen_anal = HeisenAnal}) ->
   HeisenAnal.
 
@@ -2781,10 +2781,10 @@ put_fun_args(Args, #races{curr_fun_args = CurrFunArgs} = Races) ->
     'empty' -> Races#races{curr_fun_args = Args};
     _Other -> Races
   end.
-  
+
 -spec put_heisen_anal(boolean(), races()) ->
   races().
-  
+
 put_heisen_anal(Analysis, Races) ->
   Races#races{heisen_anal = Analysis}.
 
@@ -2846,17 +2846,17 @@ translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
     {true, Res} -> Res;
     false -> {InpFun, InpArgTypes, InpArgs, InpState};
     other ->
-      
+
       %% EXPERIMENTAL: Turn a behaviour's API call into a call to the
       %%               respective callback module's function.
-      
+
       BehApiDict = dialyzer_dataflow:state__get_behaviour_api_dict(InpState),
       CallbackRefList = dialyzer_dataflow:state__get_callback_ref_list(InpState),
       case dialyzer_behaviours:translate_behaviour_api_call(InpFun, InpArgTypes,
 							    InpArgs, BehApiDict,
 							    CallbackRefList,
 							    CurrFun) of
-	plain_call -> 
+	plain_call ->
 	  {InpFun, InpArgTypes, InpArgs, InpState};
 	{{TransFun, TransArgTypes, TransArgs}, NewCallbackRefList, Edge} ->
 	  TempState0 = add_translation_edge(Edge, InpState),
@@ -2895,7 +2895,7 @@ spawn_result({single, FunArg}, State, CurrFun, _SpawnArity) ->
   end;
 spawn_result({mfargs, InpArgs, InpArgTypes}, State, CurrFun, SpawnArity) ->
   {[ModuleCerl, FunctionCerl, ArgsCerl],
-   [ModuleType, FunctionType, ArgsType]} = 
+   [ModuleType, FunctionType, ArgsType]} =
     case SpawnArity of
       3 -> {InpArgs, InpArgTypes};
       4 -> [_|T1] = InpArgs,

@@ -1,27 +1,27 @@
 %% -*- erlang-indent-level: 2 -*-
 %%-----------------------------------------------------------------------
 %% %CopyrightBegin%
-%% 
+%%
 %% Copyright Ericsson AB 2008-2009. All Rights Reserved.
-%% 
+%%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
 %% compliance with the License. You should have received a copy of the
 %% Erlang Public License along with this software. If not, it can be
 %% retrieved online at http://www.erlang.org/.
-%% 
+%%
 %% Software distributed under the License is distributed on an "AS IS"
 %% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
 %% the License for the specific language governing rights and limitations
 %% under the License.
-%% 
+%%
 %% %CopyrightEnd%
 %%
 
 %%%----------------------------------------------------------------------
 %%% File    : dialyzer_deadlocks.erl
 %%% Author  : Maria Christakis <christakismaria@gmail.com>
-%%% Description : Utility functions for deadlock detection 
+%%% Description : Utility functions for deadlock detection
 %%%
 %%% Created : 30 Jan 2010 by Maria Christakis <christakismaria@gmail.com>
 %%%----------------------------------------------------------------------
@@ -45,7 +45,7 @@
              mfa2      :: mfa(),
              args      :: [dialyzer_races:core_vars()],
              arg_types :: [erl_types:erl_type()],
-             state     :: _, %% XXX: recursive 
+             state     :: _, %% XXX: recursive
              file_line :: file_line()}).
 
 %%% ===========================================================================
@@ -72,7 +72,7 @@ store_call(Fun, CurrFun, Args, ArgTypes, {File, Line}, InpState) ->
 
   %% EXPERIMENTAL: Turn a behaviour's API call into a call to the
   %%               respective callback module's function.
-  
+
   BehApiDict = dialyzer_dataflow:state__get_behaviour_api_dict(InpState),
   CallbackRefList = dialyzer_dataflow:state__get_callback_ref_list(InpState),
   {RealFun, State} =
@@ -80,7 +80,7 @@ store_call(Fun, CurrFun, Args, ArgTypes, {File, Line}, InpState) ->
 							  BehApiDict,
 							  CallbackRefList,
 							  CurrFun) of
-      plain_call -> 
+      plain_call ->
 	{Fun, InpState};
       {{TransFun, _TransArgTypes, _TransArgs}, NewCallbackRefList, Edge} ->
 	Callgraph = dialyzer_dataflow:state__get_callgraph(InpState),
@@ -121,7 +121,7 @@ deadlock(State) ->
 warn_about_cycles([], _Digraph, State) ->
   State;
 warn_about_cycles([#dl{mfa2 = MFA} = Tag|Tags] = L, Digraph, State) ->
-  {NewTags, NewState} = 
+  {NewTags, NewState} =
     case digraph:get_cycle(Digraph, MFA) of
       false -> {Tags, State};
       [MFA|SyncMFAs] ->

@@ -107,8 +107,8 @@
 		warnings = []        :: [dial_warning()],
 		work                 :: {[_], [_], set()},
 		module               :: module(),
-		behaviour_api_dict = 
-		  dialyzer_behaviours:new_behaviour_api_dict() :: 
+		behaviour_api_dict =
+		  dialyzer_behaviours:new_behaviour_api_dict() ::
 		    dialyzer_behaviours:behaviour_api_dict(),
 		callback_ref_list =
 		  dialyzer_behaviours:new_callback_ref_list() ::
@@ -315,7 +315,7 @@ analyze_module(Tree, Plt, Callgraph, Records, GetWarnings) ->
 
       %% EXPERIMENTAL: Turn all behaviour API calls into calls to the
       %%               respective callback module's functions.
-      
+
       TempCG = dialyzer_behaviours:translate_callgraph(State4#state.callgraph),
       St = dialyzer_messages:msg(dialyzer_deadlocks:deadlock(
               dialyzer_races:race(State4#state{callgraph = TempCG}))),
@@ -356,7 +356,7 @@ analyze_loop(#state{callgraph = Callgraph, races = Races} = State) ->
               HeisenAnal = dialyzer_races:get_heisen_anal(Races),
               NewState3 =
                 case (RaceDetection orelse MsgAnalysis) andalso HeisenAnal of
-                  true ->             
+                  true ->
                     NewState2 = state__renew_curr_fun(
                       state__lookup_name(FunLabel, NewState1), FunLabel,
                       NewState1),
@@ -717,7 +717,7 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	InfSig = t_inf(t_fun(SigArgs, SigRange),
 		       t_fun(BifArgs, BifRange(BifArgs))),
 	FailReason = apply_fail_reason(FailedSig, FailedBif, FailedContract),
-        Msg = get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes, InfSig, 
+        Msg = get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes, InfSig,
 				 Contr, CArgs, State2, FailReason),
 	WarnType = case Msg of
 		     {call, _} -> ?WARN_FAILING_CALL;
@@ -747,9 +747,9 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
       false -> [t_sup(X, Y) || {X, Y} <- lists:zip(NewArgTypes, AccArgTypes)]
     end,
   NewAccRet = t_sup(AccRet, t_inf(RetWithoutLocal, LocalRet, opaque)),
-  handle_apply_or_call(Left, Args, ArgTypes, Map, Tree, 
+  handle_apply_or_call(Left, Args, ArgTypes, Map, Tree,
 		       State4, NewAccArgTypes, NewAccRet);
-handle_apply_or_call([], Args, _ArgTypes, Map, _Tree, State, 
+handle_apply_or_call([], Args, _ArgTypes, Map, _Tree, State,
 		     AccArgTypes, AccRet) ->
   NewMap = enter_type_lists(Args, AccArgTypes, Map),
   {State, NewMap, AccRet}.
@@ -786,7 +786,7 @@ get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes,
 	false ->
 	  SigArgs = t_fun_args(Sig),
 	  case is_opaque_related_problem(ArgNs, ArgTypes) of
-	    true ->  
+	    true ->
 	      %% an opaque term is used where a structured term is expected
 	      ExpectedArgs =
 		case FailReason of
@@ -797,7 +797,7 @@ get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes,
 	    false ->
 	      case is_opaque_related_problem(ArgNs, SigArgs) orelse
 		is_opaque_related_problem(ArgNs, ContrArgs) of
-		true ->  
+		true ->
 		  %% a structured term is used where an opaque is expected
 		  ExpectedTriples =
 		    case FailReason of
@@ -1359,7 +1359,7 @@ handle_tuple(Tree, Map, State) ->
 			      Msg = {record_constr,
 				     [TagVal, format_patterns(ErrorPat),
 				      format_type(ErrorType, State1)]},
-			      State2 = state__add_warning(State1, 
+			      State2 = state__add_warning(State1,
 							  ?WARN_MATCHING,
 							  Tree, Msg),
 			      {State2, Map1, t_none()};
@@ -1455,7 +1455,7 @@ handle_clauses([C|Left], Arg, ArgType, OrigArgType,
 handle_clauses([], _Arg, _ArgType, _OrigArgType,
 	       #state{callgraph = Callgraph, races = Races} = State,
                CaseTypes, _MapIn, _WhereisArgtypes, Acc, ClauseAcc) ->
-  State1 = 
+  State1 =
     case (dialyzer_callgraph:get_race_detection(Callgraph) orelse
           dialyzer_callgraph:get_msg_analysis(Callgraph)) andalso
          dialyzer_races:get_heisen_anal(Races) of
@@ -1476,7 +1476,7 @@ do_clause(C, Arg, ArgType0, OrigArgType, Map,
   RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
   MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
   HeisenAnal = dialyzer_races:get_heisen_anal(Races),
-  State1 = 
+  State1 =
     case (RaceDetection orelse MsgAnalysis) andalso HeisenAnal of
       true -> state__renew_fun_args(Pats, State);
       false -> State
@@ -1589,7 +1589,7 @@ do_clause(C, Arg, ArgType0, OrigArgType, Map,
 	  false ->
 	    %% Try to bind the argument. Will only succeed if
 	    %% it is a simple structured term.
-	    case bind_pat_vars_reverse([Arg], [t_product(PatTypes)], 
+	    case bind_pat_vars_reverse([Arg], [t_product(PatTypes)],
 				       [], Map2, State2) of
 	      {error, _, _, _, _} -> Map2;
 	      {NewMap, _} -> NewMap
@@ -1603,8 +1603,8 @@ do_clause(C, Arg, ArgType0, OrigArgType, Map,
 	    t_subtract(t_product(t_to_tlist(ArgType0)), GenType)
 	end,
       case bind_guard(Guard, Map3, State2) of
-	{error, Reason} -> 
-	  ?debug("Failed guard: ~s\n", 
+	{error, Reason} ->
+	  ?debug("Failed guard: ~s\n",
 		 [cerl_prettypr:format(C, [{hook, cerl_typean:pp_hook()}])]),
 	  PatString = format_patterns(Pats),
 	  DefaultMsg =

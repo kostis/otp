@@ -1,20 +1,20 @@
 %% -*- erlang-indent-level: 2 -*-
 %%-----------------------------------------------------------------------
 %% %CopyrightBegin%
-%% 
+%%
 %% Copyright Ericsson AB 2008-2009. All Rights Reserved.
-%% 
+%%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
 %% compliance with the License. You should have received a copy of the
 %% Erlang Public License along with this software. If not, it can be
 %% retrieved online at http://www.erlang.org/.
-%% 
+%%
 %% Software distributed under the License is distributed on an "AS IS"
 %% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
 %% the License for the specific language governing rights and limitations
 %% under the License.
-%% 
+%%
 %% %CopyrightEnd%
 %%
 
@@ -205,7 +205,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
           #dep_call{} -> {[], MsgVarMap};
           #warn_call{} -> {[], MsgVarMap};
           #fun_call{caller = Caller, callee = Callee, vars = CallVars} ->
-            PidSendTags = 
+            PidSendTags =
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
                   case lists:member({Caller, Callee}, Calls) of
@@ -224,7 +224,7 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
                       end
                   end;
                 false -> []
-              end,                                                         
+              end,
             {PidSendTags, MsgVarMap};
           #spawn_call{caller = Caller, callee = Callee, vars = CallVars} ->
             PidSendTags =
@@ -887,7 +887,7 @@ var_fun_assignment(Arg, [Var], VFTab) ->
   end;
 var_fun_assignment(_Arg, _Vars, VFTab) ->
   VFTab.
-        
+
 %%% ===========================================================================
 %%%
 %%%  Warning Utilities
@@ -918,7 +918,7 @@ check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine}|T],
   Checks = [[erl_types:t_is_subtype(SentMsg, Msg) || Msg <- Msgs]
             || SentMsg <- SentMsgs],
   Checks1 = [lists:any(fun(E) -> E end, Check) || Check <- Checks],
-  Warns1 = 
+  Warns1 =
     case lists:any(fun(E) -> E end, lists:flatten(Checks1)) of
       true -> check_rcv_pats(Checks, FileLine, Warns);
       false ->

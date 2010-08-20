@@ -259,7 +259,7 @@ build_warnings([Opt|Opts], Warnings) ->
       messages ->
 	ordsets:add_element(?WARN_MESSAGE, Warnings);
       heisenbugs ->
-        S = ordsets:from_list([?WARN_RACE_CONDITION, 
+        S = ordsets:from_list([?WARN_RACE_CONDITION,
 			       ?WARN_DEADLOCK,
                                ?WARN_MESSAGE]),
 	ordsets:union(S, Warnings);

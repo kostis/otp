@@ -366,7 +366,7 @@ compile_src(File, Includes, Defines, Callgraph, CServer, UseContracts) ->
   case dialyzer_utils:get_abstract_code_from_src(File, CompOpts) of
     {error, _Msg} = Error -> Error;
     {ok, AbstrCode} ->
-      compile_common(File, AbstrCode, CompOpts, Callgraph, CServer, 
+      compile_common(File, AbstrCode, CompOpts, Callgraph, CServer,
 		     UseContracts)
   end.
 
@@ -388,14 +388,14 @@ compile_common(File, AbstrCode, CompOpts, Callgraph, CServer, UseContracts) ->
       case dialyzer_utils:get_record_and_type_info(AbstrCode) of
 	{error, _} = Error -> Error;
 	{ok, RecInfo} ->
-	  CServer1 = 
+	  CServer1 =
 	    dialyzer_codeserver:store_temp_records(Mod, RecInfo, CServer),
 	  case UseContracts of
 	    true ->
 	      case dialyzer_utils:get_spec_info(Mod, AbstrCode, RecInfo) of
 		{error, _} = Error -> Error;
 		{ok, SpecInfo, CallbackInfo} ->
-		  CServer2 = 
+		  CServer2 =
 		    dialyzer_codeserver:store_temp_contracts(Mod, SpecInfo,
 							     CallbackInfo,
 							     CServer1),

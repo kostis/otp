@@ -153,7 +153,7 @@ lookup_rec_var(Label, #callgraph{rec_var_map = RecVarMap})
   when is_integer(Label) ->
   dict:find(Label, RecVarMap).
 
--spec lookup_call_site(label(), callgraph()) -> 
+-spec lookup_call_site(label(), callgraph()) ->
         'error' | {'ok', [_]}. % XXX: refine
 
 lookup_call_site(Label, #callgraph{calls = Calls})
@@ -173,7 +173,7 @@ lookup_label({_,_,_} = MFA, #callgraph{rev_name_map = RevNameMap}) ->
 lookup_label(Label, #callgraph{}) when is_integer(Label) ->
   {ok, Label}.
 
--spec in_neighbours(mfa_or_funlbl(), callgraph()) -> 
+-spec in_neighbours(mfa_or_funlbl(), callgraph()) ->
         'none' | [mfa_or_funlbl(),...].
 
 in_neighbours(Label, #callgraph{digraph = Digraph, name_map = NameMap})
@@ -229,7 +229,7 @@ non_local_calls(#callgraph{digraph = DG}) ->
   Edges = digraph_edges(DG),
   find_non_local_calls(Edges, sets:new()).
 
--spec find_non_local_calls([{mfa_or_funlbl(), mfa_or_funlbl()}], set()) -> 
+-spec find_non_local_calls([{mfa_or_funlbl(), mfa_or_funlbl()}], set()) ->
         mfa_calls().
 
 find_non_local_calls([{{M,_,_}, {M,_,_}}|Left], Set) ->
@@ -362,7 +362,7 @@ reset_from_funs(Funs, #callgraph{fast_plt = FastPlt} = CG) ->
     false -> slow_reset_from_funs(Funs, CG)
   end.
 
-fast_reset_from_funs(Funs, 
+fast_reset_from_funs(Funs,
 		     #callgraph{digraph = DG, diff_mods = DiffMods} = CG) ->
   SubGraph = digraph_reaching_subgraph(Funs, DG),
   SG1 = digraph_utils:condensation(SubGraph),
@@ -381,7 +381,7 @@ slow_reset_from_funs(Funs, #callgraph{digraph = DG} = CG) ->
   digraph_delete(SubGraph),
   CG#callgraph{postorder = Postorder}.
 
--spec module_postorder_from_funs([mfa_or_funlbl()], callgraph()) -> 
+-spec module_postorder_from_funs([mfa_or_funlbl()], callgraph()) ->
         [[module()]].
 
 module_postorder_from_funs(Funs, #callgraph{digraph = DG} = CG) ->

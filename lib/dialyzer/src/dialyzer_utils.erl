@@ -316,7 +316,7 @@ merge_records(NewRecords, OldRecords) ->
         {'ok', dict(), dict()} | {'error', string()}.
 
 get_spec_info(ModName, AbstractCode, RecordsDict) ->
-  get_spec_info(AbstractCode, dict:new(), dict:new(), RecordsDict, ModName, 
+  get_spec_info(AbstractCode, dict:new(), dict:new(), RecordsDict, ModName,
 		"nofile").
 
 %% TypeSpec is a list of conditional contracts for a function.
@@ -325,7 +325,7 @@ get_spec_info(ModName, AbstractCode, RecordsDict) ->
 %%  - Constraint is of the form {subtype, T1, T2} where T1 and T2
 %%    are erl_types:erl_type()
 
-get_spec_info([{attribute, Ln, AttrType, {Id, TypeSpec}}|Left], 
+get_spec_info([{attribute, Ln, AttrType, {Id, TypeSpec}}|Left],
 	      SpecDict, CBSpecDict, RecordsDict, ModName, File)
   when is_list(TypeSpec),
        (AttrType =:= 'spec' orelse AttrType =:= 'callback') ->
@@ -343,7 +343,7 @@ get_spec_info([{attribute, Ln, AttrType, {Id, TypeSpec}}|Left],
 	dialyzer_contracts:store_tmp_contract(MFA, {File, Ln}, TypeSpec,
 					      Dict, RecordsDict),
       case AttrType of
-	spec -> 
+	spec ->
 	  get_spec_info(Left, NewDict, CBSpecDict, RecordsDict, ModName, File);
 	callback ->
 	  get_spec_info(Left, SpecDict, NewDict, RecordsDict, ModName, File)
@@ -391,7 +391,7 @@ sets_filter([Mod|Mods], ExpTypes) ->
 -spec src_compiler_opts() -> [compile:option(),...].
 
 src_compiler_opts() ->
-  [no_copt, to_core, binary, return_errors, 
+  [no_copt, to_core, binary, return_errors,
    no_inline, strict_record_tests, strict_record_updates,
    no_is_record_optimization].
 

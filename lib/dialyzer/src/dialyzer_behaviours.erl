@@ -94,7 +94,7 @@ check_callbacks(Module, Attrs, Plt, Codeserver) ->
 -spec translatable_behaviours() -> behaviour_api_dict().
 
 translatable_behaviours() ->
-  [{B, Calls} || B <- ?TRANSLATABLE_BEHAVIOURS, 
+  [{B, Calls} || B <- ?TRANSLATABLE_BEHAVIOURS,
 		 (Calls = behaviour_api_calls(B)) =/= []].
 
 -spec get_behaviour_apis([behaviour()]) -> [mfa()].
@@ -142,7 +142,7 @@ translate_behaviour_api_call({Module, Fun, Arity}, ArgTypes, Args,
 		    {ok, Name} when is_atom(Name)->
 		      {CM, TI, add_reference({Name,CM},CA)};
 		    {ok, {_,Name}} when is_atom(Name) ->
-		      {CM, TI, add_reference({Name,CM},CA)};		      
+		      {CM, TI, add_reference({Name,CM},CA)};
 		    _ -> plain_call
 		  end;
 		error -> plain_call
@@ -364,7 +364,7 @@ find_behaviours(Behaviours, Codeserver, Plt) ->
 find_behaviours([], _Codeserver, _Plt, KnownAcc, UnknownAcc) ->
   {lists:reverse(KnownAcc), lists:reverse(UnknownAcc)};
 find_behaviours([Behaviour|Rest], Codeserver, Plt, KnownAcc, UnknownAcc) ->
-  Found = 
+  Found =
     case dialyzer_plt:get_callbacks(Behaviour, Plt) of
       [_|_] -> true;
       [] ->
@@ -379,9 +379,9 @@ find_behaviours([Behaviour|Rest], Codeserver, Plt, KnownAcc, UnknownAcc) ->
 	end
     end,
   case Found of
-      false -> find_behaviours(Rest, Codeserver, Plt, 
+      false -> find_behaviours(Rest, Codeserver, Plt,
 			       KnownAcc, [Behaviour | UnknownAcc]);
-      true  -> find_behaviours(Rest, Codeserver, Plt, 
+      true  -> find_behaviours(Rest, Codeserver, Plt,
 			       [Behaviour | KnownAcc], UnknownAcc)
   end.
 

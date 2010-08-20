@@ -236,10 +236,10 @@ lookup_mfa_contract({M,_F,_A} = MFA, #codeserver{contracts = ContDict}) ->
 get_contracts(#codeserver{contracts = ContDict}) ->
   ContDict.
 
--spec store_temp_contracts(atom(), dict(), dict(), codeserver()) -> 
-    codeserver(). 
+-spec store_temp_contracts(atom(), dict(), dict(), codeserver()) ->
+    codeserver().
 
-store_temp_contracts(Mod, SpecDict, CBSpecDict, 
+store_temp_contracts(Mod, SpecDict, CBSpecDict,
 		     #codeserver{temp_contracts = TContr,
 				 temp_cb_contracts = TCBContr} = CS)
   when is_atom(Mod) ->
@@ -255,7 +255,7 @@ get_temp_contracts(#codeserver{temp_contracts    = TempContDict,
 -spec finalize_contracts(dict(), dict(), codeserver()) -> codeserver().
 
 finalize_contracts(CDict, CBCDict, CS)  ->
-  CS#codeserver{contracts = CDict, 
+  CS#codeserver{contracts = CDict,
 		temp_contracts = dict:new(),
 		callback_contracts = CBCDict,
 		temp_cb_contracts = dict:new()}.

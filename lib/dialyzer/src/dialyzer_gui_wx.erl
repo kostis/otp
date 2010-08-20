@@ -863,7 +863,7 @@ find_legal_warnings(#gui_state{menu = #menu{warnings = MenuWarnings},
 
 find_legal_warnings_list([], _) -> [];
 find_legal_warnings_list([{Tag, MenuItem}|Ws], MenuWarnings) ->
-  RetTag = 
+  RetTag =
     case wxMenu:isChecked(MenuWarnings, MenuItem) of
       true ->
         case Tag of

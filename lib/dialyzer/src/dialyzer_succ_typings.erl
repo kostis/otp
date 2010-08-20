@@ -296,7 +296,7 @@ compare_types_1([], [], _Strict, NotFixpoint) ->
 find_succ_typings(State) ->
   find_succ_typings(State, []).
 
-find_succ_typings(#st{callgraph = Callgraph, parent = Parent, 
+find_succ_typings(#st{callgraph = Callgraph, parent = Parent,
 		      fast_plt = Fast} = State, NotFixpoint) ->
   case dialyzer_callgraph:take_scc(Callgraph) of
     {ok, SCC, NewCallgraph} ->
@@ -371,7 +371,7 @@ fast_analyze_scc(SCC, #st{codeserver = Codeserver,
 		   dialyzer_codeserver:lookup_mfa_code(MFA, Codeserver),
 		   dialyzer_codeserver:lookup_mod_records(M, Codeserver)}
 		  || {M, _, _} = MFA <- SCC],
-      Contracts1 = 
+      Contracts1 =
 	[{MFA, dialyzer_codeserver:lookup_mfa_contract(MFA, Codeserver)}
 	 || {_, _, _} = MFA <- SCC],
       Contracts2 = [{MFA, Contract} || {MFA, {ok, Contract}} <- Contracts1],
@@ -386,7 +386,7 @@ fast_analyze_scc(SCC, #st{codeserver = Codeserver,
 		   {Callgraph,[]}
 	end,
       State2 = insert_into_plt(SuccTypes2, State),
-      ContrPlt2 = 
+      ContrPlt2 =
 	dialyzer_plt:insert_contract_list(State2#st.plt, PltContracts2),
       {State2#st{plt = ContrPlt2, callgraph = NewCallgraph2}, NotFixpoint};
     _ -> Result
@@ -661,7 +661,7 @@ analyze_module(LabeledTree, NextLbl, Plt, Records, Contracts) ->
   CodeServer2 = dialyzer_codeserver:insert(Mod, LabeledTree, CodeServer1),
   CodeServer3 = dialyzer_codeserver:set_next_core_label(NextLbl, CodeServer2),
   CodeServer4 = dialyzer_codeserver:store_records(Mod, Records, CodeServer3),
-  CodeServer5 = 
+  CodeServer5 =
     dialyzer_codeserver:store_contracts(Mod, Contracts, CodeServer4),
   Res = analyze_callgraph(CallGraph4, Plt, CodeServer5),
   dialyzer_callgraph:delete(CallGraph4),

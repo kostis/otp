@@ -142,7 +142,7 @@ lookup_contract(#plt{contracts = Contracts},
 		{M, F, _} = MFA) when is_atom(M), is_atom(F) ->
   table_lookup(Contracts, MFA).
 
--spec lookup_callback_contract(plt(), mfa_patt()) -> 
+-spec lookup_callback_contract(plt(), mfa_patt()) ->
     'none' | {'value', #contract{}}.
 
 lookup_callback_contract(#plt{callback_contracts = CBContracts},
@@ -186,7 +186,7 @@ insert_exported_types(PLT, Set) ->
 
 -spec insert_callback_contracts(plt(), dict()) -> plt().
 
-insert_callback_contracts(#plt{callback_contracts = OldCbContractsDict} = PLT, 
+insert_callback_contracts(#plt{callback_contracts = OldCbContractsDict} = PLT,
 			      NewCbContractsDictDict) ->
   KeepFirst = fun(_Key, Value1, _Value2) -> Value1 end,
   DictMerger = fun(_ModuleName, ContractDict, Acc) ->
@@ -194,7 +194,7 @@ insert_callback_contracts(#plt{callback_contracts = OldCbContractsDict} = PLT,
 	       end,
   RemoveFileInfo = fun(_MFA, {_File, Contract}) -> Contract end,
   NewCbContractsDict =
-    dict:map(RemoveFileInfo, 
+    dict:map(RemoveFileInfo,
 	     dict:fold(DictMerger, dict:new(),  NewCbContractsDictDict)),
   CBContracts =
     dict:merge(KeepFirst, NewCbContractsDict, OldCbContractsDict),
@@ -270,7 +270,7 @@ from_file(FileName, ReturnInfo) ->
 	error ->
 	  Msg = io_lib:format("Old PLT file ~s\n", [FileName]),
 	  error(Msg);
-	ok -> 
+	ok ->
 	  Plt = #plt{info = Rec#file_plt.info,
 		     types = Rec#file_plt.types,
 		     exported_types = Rec#file_plt.exported_types,

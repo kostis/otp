@@ -142,7 +142,7 @@ sequence([H|T], Delimiter) -> H ++ Delimiter ++ sequence(T, Delimiter).
 
 process_contract_remote_types(CodeServer) ->
   {TmpContractDict, TmpCbContractDict} =
-    dialyzer_codeserver:get_temp_contracts(CodeServer),  
+    dialyzer_codeserver:get_temp_contracts(CodeServer),
   ExpTypes = dialyzer_codeserver:get_exported_types(CodeServer),
   RecordDict = dialyzer_codeserver:get_records(CodeServer),
   ContractFun =
@@ -159,7 +159,7 @@ process_contract_remote_types(CodeServer) ->
   NewCbContractDict = dict:map(ModuleFun, TmpCbContractDict),
   dialyzer_codeserver:finalize_contracts(NewContractDict, NewCbContractDict,
 					 CodeServer).
-  
+
 -spec check_contracts([{mfa(), file_contract()}],
 		      dialyzer_callgraph:callgraph(), dict()) -> plt_contracts().
 
@@ -254,14 +254,14 @@ check_extraneous_1(Contract, SuccType) ->
   CRngs = erl_types:t_elements(erl_types:t_fun_range(Contract)),
   STRng = erl_types:t_fun_range(SuccType),
   %% io:format("CR = ~p\nSR = ~p\n", [CRngs, STRng]),
-  case [CR || CR <- CRngs, 
+  case [CR || CR <- CRngs,
 	      erl_types:t_is_none(erl_types:t_inf(CR, STRng, opaque))] of
     [] -> ok;
     CRs -> {error, {extra_range, erl_types:t_sup(CRs), STRng}}
   end.
 
 %% This is the heart of the "range function"
--spec process_contracts([contract_pair()], [erl_types:erl_type()]) -> 
+-spec process_contracts([contract_pair()], [erl_types:erl_type()]) ->
     erl_types:erl_type().
 
 process_contracts(OverContracts, Args) ->

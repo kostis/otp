@@ -327,7 +327,7 @@ start(DialyzerOptions = #options{from = From, init_plt = InitPltFile,
               {?WARN_DEADLOCK, MenuWarnDeadlock},
               {?WARN_MESSAGE, MenuWarnMessage},
               {?WARN_HEISENBUG, MenuWarnHeisenbug},
-	      %% For contracts. 
+	      %% For contracts.
 	      {?WARN_CONTRACT_TYPES, MenuWarnContractTypes},
 	      {?WARN_CONTRACT_SYNTAX, MenuWarnContractSyntax}
 	     ],
@@ -1349,7 +1349,7 @@ find_legal_warnings(#gui_state{menu = #menu{warnings = Warnings}}) ->
 
 find_legal_warnings_list([]) -> [];
 find_legal_warnings_list([{Tag, GSItem}|Ws]) ->
-  RetTag = 
+  RetTag =
     case gs:read(GSItem, select) of
       true ->
         case Tag of

@@ -152,7 +152,7 @@ $(EBIN)/dialyzer_utils.beam: dialyzer.hrl
 
 # ----------------------------------------------------
 # Release Target
-# ---------------------------------------------------- 
+# ----------------------------------------------------
 include $(ERL_TOP)/make/otp_release_targets.mk
 
 release_spec: opt
