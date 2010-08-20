@@ -29,21 +29,22 @@
 
 %% Message Analysis
 
--export([add_clauses_pid/2, is_call_to_self/3, is_call_to_send/1,
-         is_call_to_spawn/1, is_call_to_spawn/3, is_call_to_whereis/1,
-         msg/1, prioritize_msg_warns/1, var_fun_assignment/3]).
+-export([add_clauses_pid/2,  get_race_list_ret/2, is_call_to_self/3,
+         is_call_to_send/1, is_call_to_spawn/1, is_call_to_spawn/3,
+         is_call_to_whereis/1, msg/1, prioritize_msg_warns/1,
+         var_fun_assignment/3]).
 
 %% Record Interfaces
 
--export([add_msg/2, add_pid/3, add_pid_tags/2,
+-export([add_edge/2, add_msg/2, add_pid/3, add_pid_tags/2,
          create_indirect_pid_tag_for_self/2,
          create_indirect_pid_tags_for_spawn/3,
          create_pid_tag_for_self/1, create_pid_tag_for_spawn/2,
-         create_rcv_tag/2, create_send_tag/4, get_race_list_ret/2,
-         get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
-         get_warnings/1, get_whereis_argtypes/1, new/0,
-         put_proc_reg/2, put_rcv_tags/2, put_send_tags/2,
-         put_whereis_argtypes/2, update_proc_reg/4]).
+         create_rcv_tag/2, create_send_tag/4, get_proc_reg/1,
+         get_rcv_tags/1, get_send_tags/1, get_warnings/1,
+         get_whereis_argtypes/1, new/0, put_proc_reg/2,
+         put_rcv_tags/2, put_send_tags/2, put_whereis_argtypes/2,
+         update_proc_reg/4]).
 
 %% Exported Types
 
@@ -80,7 +81,8 @@
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
 
--record(msgs,     {old_pids  = []  :: [#pid_fun{}], %% already analyzed pid tags
+-record(msgs,     {edges     = []  :: [dialyzer_callgraph:callgraph_edge()],
+                   old_pids  = []  :: [#pid_fun{}], %% already analyzed pid tags
                    pid_tags  = []  :: [#pid_fun{}],
                    rcv_tags  = []  :: [#rcv_fun{}],
                    send_tags = []  :: [#send_fun{}],
@@ -110,6 +112,15 @@ msg(State) ->
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
   Digraph = dialyzer_callgraph:get_digraph(Callgraph),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+  Edges = Msgs#msgs.edges,
+  Filter = fun(E) ->
+               case digraph:edge(Digraph, E) of
+                 false -> true;
+                 _ -> false
+               end
+           end,
+  ExtraEdges = [E || E <- Edges, Filter(E)],
+  dialyzer_callgraph:add_edges(ExtraEdges, Callgraph),
   AllPidTags = Msgs#msgs.pid_tags,
   OldPidTags = Msgs#msgs.old_pids,
   PidTags1 = PidTags -- OldPidTags,
@@ -118,23 +129,26 @@ msg(State) ->
   SortedSendTags = lists:usort(Msgs#msgs.send_tags),
   SortedRcvTags = lists:usort(Msgs#msgs.rcv_tags),
   ProcReg = Msgs#msgs.proc_reg,
-  State1 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, ProcReg, State),
+  State1 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, ProcReg,
+                ExtraEdges, State),
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
   Msgs2 = renew_analyzed_pid_tags(OldPidTags1, Msgs1),
   Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
+  digraph:del_edges(Digraph, ExtraEdges),
   dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
 
-msg1(PidTagGroups, SendTags, RcvTags, ProcReg, State) ->
+msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Edges, State) ->
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State),
-  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, [], Callgraph1),
+  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, [], Edges,
+               Callgraph1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
   Msgs2 = add_warnings(Warns, Msgs1),
   Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
   State1 = dialyzer_dataflow:state__put_callgraph(Callgraph2, State),
   dialyzer_dataflow:state__put_pid_tags([], State1).
 
-msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Callgraph) ->
+msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Edges, Callgraph) ->
   case PidTagGroups of
     [] -> Warns;
     [H|T] ->
@@ -157,14 +171,16 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Callgraph) ->
                                                Digraph),
       PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, ProcReg,
                                     MsgVarMap, Callgraph),
+      digraph:del_edges(Digraph, Edges),
       PidMFAs =
         case Kind =:= 'self' of
           true -> backward_msg_analysis(PidMFA, Digraph);
           false -> [PidMFA]
         end,
       CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
+      dialyzer_callgraph:add_edges(Edges, Callgraph),
       Warns1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags),
-      msg1(T, SendTags, RcvTags, ProcReg, Warns1 ++ Warns, Callgraph)
+      msg1(T, SendTags, RcvTags, ProcReg, Warns1 ++ Warns, Edges, Callgraph)
   end.
 
 go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
@@ -1085,6 +1101,22 @@ warn_unused_send_stmts([Check|Checks], [#send_fun{file_line = FileLine}|Tags],
 %%%  Record Interfaces
 %%%
 %%% ===========================================================================
+
+-spec add_edge(dialyzer_callgraph:callgraph_edge(),
+               dialyzer_dataflow:state()) ->
+      dialyzer_dataflow:state().
+
+add_edge(Edge, State) ->
+  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
+  Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+  Edges = Msgs#msgs.edges,
+  case lists:member(Edge, Edges) of
+    true -> State;
+    false ->
+      NewMsgs = Msgs#msgs{edges = [Edge|Edges]},
+      NewCallgraph = dialyzer_callgraph:put_msgs(NewMsgs, Callgraph),
+      dialyzer_dataflow:state__put_callgraph(NewCallgraph, State)
+  end.
 
 -spec add_msg(erl_types:erl_type(), dialyzer_dataflow:state()) ->
       dialyzer_dataflow:state().

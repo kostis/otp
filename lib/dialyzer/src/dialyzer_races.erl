@@ -2922,7 +2922,8 @@ spawn_result({mfargs, InpArgs, InpArgTypes}, State, CurrFun, SpawnArity) ->
   end.
 
 spawn_result1(MFAorLbl, ArgTypes, Args, CurrFun, State) ->
-  {MFAorLbl, ArgTypes, Args, add_translation_edge({CurrFun, MFAorLbl}, State)}.
+  {MFAorLbl, ArgTypes, Args,
+   dialyzer_messages:add_edge({CurrFun, MFAorLbl}, State)}.
 
 extract_atom(Cerl, Type) ->
   case cerl:is_literal(Cerl) of

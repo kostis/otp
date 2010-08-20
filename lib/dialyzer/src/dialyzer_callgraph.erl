@@ -129,6 +129,7 @@
 %% Exported Types
 
 -type callgraph() :: #callgraph{}.
+-type callgraph_edge() :: {mfa_or_funlbl(), mfa_or_funlbl()}.
 
 %%----------------------------------------------------------------------
 
@@ -196,7 +197,6 @@ is_self_rec(MfaOrLabel, #callgraph{self_rec = SelfRecs}) ->
 is_escaping(Label, #callgraph{esc = Esc}) when is_integer(Label) ->
   sets:is_element(Label, Esc).
 
--type callgraph_edge() :: {mfa_or_funlbl(),mfa_or_funlbl()}.
 -spec add_edges([callgraph_edge()], callgraph()) -> callgraph().
 
 add_edges([], CG) ->
@@ -692,7 +692,7 @@ digraph_reaching_subgraph(Funs, DG) ->
   digraph_utils:subgraph(DG, Vertices).
 
 %%----------------------------------------------------------------------
-%% Races
+%% Heisenbugs
 %%----------------------------------------------------------------------
 
 -spec cleanup(callgraph()) -> callgraph().
@@ -841,7 +841,7 @@ put_behaviour_translation(Value, Callgraph) ->
 
 clear_behaviour_edges(#callgraph{digraph = DG, beh_edges = Edges} = CG) ->
   digraph:del_edges(DG, Edges),
-  CG.
+  CG#callgraph{beh_edges = []}.
 
 -spec add_behaviour_edges([callgraph_edge()],callgraph()) -> callgraph().
 
