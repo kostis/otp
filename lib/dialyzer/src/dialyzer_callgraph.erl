@@ -839,10 +839,9 @@ put_behaviour_translation(Value, Callgraph) ->
 
 -spec clear_behaviour_edges(callgraph()) -> callgraph().
 
-clear_behaviour_edges(#callgraph{digraph = DG,
-                                 beh_edges = Edges} = Callgraph) ->
+clear_behaviour_edges(#callgraph{digraph = DG, beh_edges = Edges} = CG) ->
   digraph:del_edges(DG, Edges),
-  Callgraph#callgraph{beh_edges = []}.
+  CG.
 
 -spec add_behaviour_edges([callgraph_edge()],callgraph()) -> callgraph().
 
