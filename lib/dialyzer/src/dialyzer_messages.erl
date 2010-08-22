@@ -32,7 +32,7 @@
 -export([add_clauses_pid/2,  get_race_list_ret/2, is_call_to_self/3,
          is_call_to_send/1, is_call_to_spawn/1, is_call_to_spawn/3,
          is_call_to_whereis/1, msg/1, prioritize_msg_warns/1,
-         var_fun_assignment/3]).
+         var_call_assignment/5, var_fun_assignment/3]).
 
 %% Record Interfaces
 
@@ -41,10 +41,10 @@
          create_indirect_pid_tags_for_spawn/3,
          create_pid_tag_for_self/1, create_pid_tag_for_spawn/2,
          create_rcv_tag/2, create_send_tag/4, get_proc_reg/1,
-         get_rcv_tags/1, get_send_tags/1, get_warnings/1,
-         get_whereis_argtypes/1, new/0, put_proc_reg/2,
-         put_rcv_tags/2, put_send_tags/2, put_whereis_argtypes/2,
-         update_proc_reg/4]).
+         get_rcv_tags/1, get_send_tags/1, get_var_fun_tab/1,
+         get_warnings/1, get_whereis_argtypes/1, new/0,
+         put_proc_reg/2, put_rcv_tags/2, put_send_tags/2,
+         put_whereis_argtypes/2, update_proc_reg/4]).
 
 %% Exported Types
 
@@ -86,8 +86,10 @@
                    pid_tags  = []  :: [#pid_fun{}],
                    rcv_tags  = []  :: [#rcv_fun{}],
                    send_tags = []  :: [#send_fun{}],
-                   proc_reg  = {dict:new(), []} :: proc_reg(),
-                   whereis_argtypes = [] :: [erl_types:erl_type()],
+                   proc_reg     = {dict:new(), []} :: proc_reg(),
+                   var_call_tab = dict:new()       :: dict(),
+                   var_fun_tab  = dict:new()       :: dict(),
+                   whereis_argtypes = []          :: [erl_types:erl_type()],
                    warnings  = []  :: [dial_warning()]}).
 
 %%% ===========================================================================
@@ -129,8 +131,9 @@ msg(State) ->
   SortedSendTags = lists:usort(Msgs#msgs.send_tags),
   SortedRcvTags = lists:usort(Msgs#msgs.rcv_tags),
   ProcReg = Msgs#msgs.proc_reg,
+  VCTab = Msgs#msgs.var_call_tab,
   State1 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, ProcReg,
-                ExtraEdges, State),
+                VCTab, ExtraEdges, State),
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
   Msgs2 = renew_analyzed_pid_tags(OldPidTags1, Msgs1),
@@ -138,17 +141,18 @@ msg(State) ->
   digraph:del_edges(Digraph, ExtraEdges),
   dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
 
-msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Edges, State) ->
+msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Edges, State) ->
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State),
-  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, [], Edges,
-               Callgraph1),
+  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, [],
+               Edges, Callgraph1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
   Msgs2 = add_warnings(Warns, Msgs1),
   Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
   State1 = dialyzer_dataflow:state__put_callgraph(Callgraph2, State),
   dialyzer_dataflow:state__put_pid_tags([], State1).
 
-msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Edges, Callgraph) ->
+msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Warns, Edges,
+     Callgraph) ->
   case PidTagGroups of
     [] -> Warns;
     [H|T] ->
@@ -170,7 +174,7 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Edges, Callgraph) ->
       CFSendTags = find_control_flow_send_tags(CurrFun, PidMFA, SendTags,
                                                Digraph),
       PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, ProcReg,
-                                    MsgVarMap, Callgraph),
+                                    VCTab, MsgVarMap, Callgraph),
       digraph:del_edges(Digraph, Edges),
       PidMFAs =
         case Kind =:= 'self' of
@@ -180,17 +184,18 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, Warns, Edges, Callgraph) ->
       CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
       dialyzer_callgraph:add_edges(Edges, Callgraph),
       Warns1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags),
-      msg1(T, SendTags, RcvTags, ProcReg, Warns1 ++ Warns, Edges, Callgraph)
+      msg1(T, SendTags, RcvTags, ProcReg, VCTab, Warns1 ++ Warns, Edges,
+           Callgraph)
   end.
 
-go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
+go_from_pid_tag(MFA, Pid, SendTags, ProcReg, VCTab, MsgVarMap, Callgraph) ->
   Code =
     case ets:lookup(cfgs, MFA) of
       [] -> [];
       [{MFA, _Args, _Ret, C}] -> C
     end,
-  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
-  forward_msg_analysis(Pid, Code, SendTags, ProcReg, MsgVarMap, Digraph).
+  forward_msg_analysis(Pid, Code, SendTags, ProcReg, VCTab, MsgVarMap,
+                       Callgraph).
 
 %%% ===========================================================================
 %%%
@@ -198,20 +203,21 @@ go_from_pid_tag(MFA, Pid, SendTags, ProcReg, MsgVarMap, Callgraph) ->
 %%%
 %%% ===========================================================================
 
-forward_msg_analysis(_Pid, _Code, [], _ProcReg, _MsgVarMap, _Digraph) ->
+forward_msg_analysis(_Pid, _Code, [], _ProcReg, _VCTab, _MsgVarMap,
+                     _Callgraph) ->
   [];
-forward_msg_analysis(Pid, Code, SendTags, {RegDict, RegMFAs}, MsgVarMap,
-                     Digraph) ->
+forward_msg_analysis(Pid, Code, SendTags, {RegDict, RegMFAs}, VCTab,
+                     MsgVarMap, Callgraph) ->
   SendMFAs = [S#send_fun.fun_mfa || S <- SendTags],
   MsgVarMap1 = bind_reg_labels(RegDict, MsgVarMap),
   PidSendTags = forward_msg_analysis(Pid, Code, SendTags,
                                      lists:usort(RegMFAs ++ SendMFAs),
-                                     RegDict, [], [], MsgVarMap1,
-                                     Digraph),
+                                     RegDict, VCTab, [], [], MsgVarMap1,
+                                     Callgraph),
   lists:usort(PidSendTags).
 
-forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
-                     MsgVarMap, Digraph) ->
+forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, VCTab, Calls,
+                     Spawns, MsgVarMap, Callgraph) ->
   case Code of
     [] -> find_pid_send_tags(Pid, SendTags, RegDict, MsgVarMap);
     [Head|Tail] ->
@@ -220,7 +226,9 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
           'self' -> {[], MsgVarMap};
           #dep_call{} -> {[], MsgVarMap};
           #warn_call{} -> {[], MsgVarMap};
-          #fun_call{caller = Caller, callee = Callee, vars = CallVars} ->
+          #fun_call{caller = Caller, callee = Callee, arg_types = ArgTypes,
+                    vars = CallVars} ->
+            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
             PidSendTags =
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
@@ -234,15 +242,30 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
                             dialyzer_races:race_var_map(DefVars, CallVars,
                                                         MsgVarMap, 'bind'),
                           forward_msg_analysis(Pid, CalleeCode, SendTags,
-                                               MFAs, RegDict,
+                                               MFAs, RegDict, VCTab,
                                                [{Caller, Callee}|Calls],
-                                               Spawns, MsgVarMap1, Digraph)
+                                               Spawns, MsgVarMap1, Callgraph)
                       end
                   end;
                 false -> []
               end,
-            {PidSendTags, MsgVarMap};
+            MsgVarMap2 =
+              case dialyzer_callgraph:lookup_label(Callee, Callgraph) of
+                'error' -> MsgVarMap;
+                {'ok', CalleeLabel} ->
+                  case dict:find(CalleeLabel, VCTab) of
+                    'error' -> MsgVarMap;
+                    {'ok', RetLabel} ->
+                      PidCallVars = find_pid_call_vars(ArgTypes, CallVars,
+                                                       erl_types:t_pid(),
+                                                       Pid, MsgVarMap),
+                      dialyzer_races:bind_dict_vars_list(RetLabel, PidCallVars,
+                                                         MsgVarMap)
+                  end
+              end,
+            {PidSendTags, MsgVarMap2};
           #spawn_call{caller = Caller, callee = Callee, vars = CallVars} ->
+            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
             PidSendTags =
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
@@ -256,9 +279,9 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
                             dialyzer_races:race_var_map(DefVars, CallVars,
                                                         MsgVarMap, 'bind'),
                           forward_msg_analysis(Pid, CalleeCode, SendTags,
-                                               MFAs, RegDict, Calls,
+                                               MFAs, RegDict, VCTab, Calls,
                                                [{Caller, Callee}|Spawns],
-                                               MsgVarMap1, Digraph)
+                                               MsgVarMap1, Callgraph)
                       end
                   end;
                 false -> []
@@ -281,8 +304,8 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, Calls, Spawns,
             {[], dialyzer_races:race_var_map(Var, Arg, MsgVarMap, 'bind')}
         end,
       NewPidSendTags ++
-        forward_msg_analysis(Pid, Tail, SendTags, MFAs, RegDict, Calls,
-                             Spawns, NewMsgVarMap, Digraph)
+        forward_msg_analysis(Pid, Tail, SendTags, MFAs, RegDict, VCTab,
+                             Calls, Spawns, NewMsgVarMap, Callgraph)
   end.
 
 %%% ===========================================================================
@@ -383,6 +406,30 @@ find_control_flow_send_tags(PidFun1, PidFun2,
         end
     end,
   find_control_flow_send_tags(PidFun1, PidFun2, T, NewAcc, ReachableFrom).
+
+find_pid_call_vars(ArgTypes, Vars, PidType, Pid, MVM) ->
+  find_pid_call_vars(ArgTypes, Vars, PidType, Pid, MVM, []).
+
+find_pid_call_vars([], [], _PidType, _Pid, _MVM, Acc) ->
+  Acc;
+find_pid_call_vars([AT|ATs], [V|Vs], PidType, Pid, MVM, Acc) ->
+  NewAcc =
+    case erl_types:t_is_subtype(PidType, AT) of
+      true ->
+        case cerl:is_c_var(V) of
+          true ->
+            L = cerl_trees:get_label(V),
+            case L =:= Pid orelse
+              dialyzer_races:are_bound_labels(Pid, L, MVM) orelse
+              dialyzer_races:are_bound_labels(L, Pid, MVM) of
+              true -> [L|Acc];
+              false -> Acc
+            end;
+          false -> Acc
+        end;
+      false -> Acc
+    end,
+  find_pid_call_vars(ATs, Vs, PidType, Pid, MVM, NewAcc).
 
 find_pid_send_tags(Pid, CFSendTags, RegDict, MsgVarMap) ->
   find_pid_send_tags(Pid, CFSendTags, RegDict, [], MsgVarMap).
@@ -886,23 +933,45 @@ lists_intersection(List1, List2) ->
 renew_analyzed_pid_tags(OldPidTags, Msgs) ->
   Msgs#msgs{old_pids = OldPidTags}.
 
--spec var_fun_assignment(cerl:cerl(), [cerl:cerl()], dict()) ->
-      dict().
+-spec var_call_assignment(non_neg_integer(), [cerl:cerl()],
+                          erl_types:erl_type(), erl_types:erl_type(),
+                          msgs()) ->
+      msgs().
 
-var_fun_assignment(Arg, [Var], VFTab) ->
+var_call_assignment(ArgLabel, [Var], ArgTypes, PidType,
+                    #msgs{var_call_tab = VCTab} = Msgs) ->
+  case erl_types:t_is_subtype(PidType, ArgTypes) of
+    true ->
+      case cerl:is_c_var(Var) of
+        true ->
+          VarLabel = cerl_trees:get_label(Var),
+          VCTab1 = dict:store(ArgLabel, VarLabel, VCTab),
+          Msgs#msgs{var_call_tab = VCTab1};
+        false -> Msgs
+      end;
+    false -> Msgs
+  end;
+var_call_assignment(_ArgLabel, _Vars, _ArgTypes, _PidType, Msgs) ->
+  Msgs.
+
+-spec var_fun_assignment(cerl:cerl(), [cerl:cerl()], msgs()) ->
+      msgs().
+
+var_fun_assignment(Arg, [Var], #msgs{var_fun_tab = VFTab} = Msgs) ->
   case cerl:is_c_fun(Arg) of
     true ->
       case cerl:is_c_var(Var) of
         true ->
           ArgLabel = cerl_trees:get_label(Arg),
           VarLabel = cerl_trees:get_label(Var),
-          dict:store(VarLabel, ArgLabel, VFTab);
-        false -> VFTab
+          VFTab1 = dict:store(VarLabel, ArgLabel, VFTab),
+          Msgs#msgs{var_fun_tab = VFTab1};
+        false -> Msgs
       end;
-    false -> VFTab
+    false -> Msgs
   end;
-var_fun_assignment(_Arg, _Vars, VFTab) ->
-  VFTab.
+var_fun_assignment(_Arg, _Vars, Msgs) ->
+  Msgs.
 
 %%% ===========================================================================
 %%%
@@ -1221,6 +1290,11 @@ get_rcv_tags(#msgs{rcv_tags = RcvTags}) ->
 
 get_send_tags(#msgs{send_tags = SendTags}) ->
   SendTags.
+
+-spec get_var_fun_tab(msgs()) -> dict().
+
+get_var_fun_tab(#msgs{var_fun_tab = VFTab}) ->
+  VFTab.
 
 -spec get_warnings(msgs()) -> [dial_warning()].
 
