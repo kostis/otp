@@ -477,7 +477,7 @@ follow_call_pred(From, To, Digraph) ->
 
 get_case_ret(RaceList) ->
   case RaceList of
-    [] -> [];
+    [] -> {[], []};
     [H|T] ->
       case H of
         #end_clause{} ->
