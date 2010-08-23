@@ -193,7 +193,7 @@ extract_atom(Cerl, Type) ->
 	    [AtomVal] -> {ok, AtomVal};
 	    _         -> error
 	  end;
-	false -> io:format("\n~p\n",[Type]),error
+	false -> error
       end
   end.
 
