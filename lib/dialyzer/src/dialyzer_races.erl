@@ -484,7 +484,7 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
               true ->
                 case digraph:vertex(dialyzer_callgraph:get_digraph(Callgraph),
                                     Fun) of
-                  {Fun, confirmed} ->
+                  {Fun, _Confirmed} ->
                     case MsgAnalysis of
                       true ->
                         case InpFun of
