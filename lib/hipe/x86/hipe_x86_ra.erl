@@ -70,6 +70,7 @@ ra(Defun0, Options) ->
   ?HIPE_X86_RA_FINALISE:finalise(Defun2, Coloring, Coloring_fp, Options).
 
 ra(Defun, SpillIndex, Options, RegAllocMod) ->
+  put(range_split_spills, []),
   hipe_regalloc_loop:ra(Defun, SpillIndex, Options, RegAllocMod, ?HIPE_X86_SPECIFIC).
 
 -ifdef(HIPE_AMD64).

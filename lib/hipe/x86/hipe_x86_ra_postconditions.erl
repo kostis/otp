@@ -41,13 +41,17 @@
 -include("../flow/hipe_bb.hrl").
 -define(count_temp(T), ?cons_counter(counter_mfa_mem_temps, T)).
 
+%%-define(MAX_RANGE_SPLIT_ITERATIONS, 10).
+-define(MAX_SPILL_COUNT, 9).
+
 check_and_rewrite(Defun, Coloring, Strategy, Options) ->
   %% io:format("Converting\n"),
   TempMap = hipe_temp_map:cols2tuple(Coloring, ?HIPE_X86_SPECIFIC),
   %% io:format("Rewriting\n"),
   #defun{code=Code0} = Defun,
   ?ASSERT(lists:all(fun ({Id, V}) -> element(Id+1, TempMap) =:= V end, Coloring)),
-  case proplists:get_bool(range_split, Options) of
+  case proplists:get_bool(range_split, Options)
+    andalso proplists:get_value(regalloc, Options) =/= linear_scan of
     true ->
       ?option_time(
 	check_and_rewrite_range_split(Defun, Coloring, Strategy, TempMap, Code0),
@@ -58,11 +62,11 @@ check_and_rewrite(Defun, Coloring, Strategy, Options) ->
 
 check_and_rewrite_spill(Defun, _Coloring, Strategy, TempMap, Code0) ->
   {Code1, DidSpill} = do_insns(Code0, TempMap, Strategy, [], false),
-  {Defun#defun{code=Code1,var_range={0,hipe_gensym:get_var(x86)}},
+  {Defun#defun{code = Code1, var_range = {0, hipe_gensym:get_var(x86)}},
    DidSpill}.
 
 %%
-%% Auxilary functions
+%% Auxiliary functions
 %%
 
 delay2([_A]) -> [];
@@ -98,88 +102,91 @@ replace_code(Cfg, Lbl, NewCode) ->
   Cfg#cfg{table = NewTable}.
 
 get_temp([], _TempId) -> notfound;
-get_temp([I|Code], TempId) ->
-  Temps = def(I) ++ use(I),
+get_temp([I|Is], TempId) ->
+  Temps = ?HIPE_X86_SPECIFIC:defines(I) ++ ?HIPE_X86_SPECIFIC:uses(I),
   case find(fun (#x86_temp{reg=Reg}) when Reg =:= TempId -> true;
                 (_) -> false
 	    end, Temps) of
-    {found, Temp} -> {found, Temp};
-    notfound -> get_temp(Code, TempId)
+    {found, _Temp} = Found -> Found;
+    notfound -> get_temp(Is, TempId)
   end.
 
 liveness_of_bb(BB, LiveOut) ->
-  Fun = fun (I, [Lo|Los]) ->
-	    Use = ordsets:from_list(use(I)),
-	    Def = ordsets:from_list(def(I)),
+  Fun = fun (I, [Lo|_]=Los) ->
+	    Uses = ordsets:from_list(?HIPE_X86_SPECIFIC:uses(I)),
+	    Defs = ordsets:from_list(?HIPE_X86_SPECIFIC:defines(I)),
 	    LOut = ordsets:from_list(Lo),
-	    [ordsets:to_list(ordsets:union(Use, ordsets:subtract(LOut, Def))), Lo | Los]
+	    [ordsets:to_list(ordsets:union(Uses, ordsets:subtract(LOut, Defs))) 
+	     | Los]
 	end,
-  [LiveInNew | LiveOutNew] = lists:foldr(Fun, [LiveOut], bb_code(BB)),
+  [LiveInNew | LiveOutNew] = lists:foldr(Fun, [LiveOut], hipe_bb:code(BB)),
   {LiveInNew, LiveOutNew}.
 
 complete_liveness(Cfg, Liveness) ->
   gb_trees:map(
     fun (K, _V) ->
-	{Li, Los} = liveness_of_bb(bb(Cfg, K), liveout(K, Liveness)),
-	?ASSERT(length(Los) =:= length(bb_code(bb(Cfg,K)))),
+	BB = hipe_x86_cfg:bb(Cfg, K),
+	LiveOut = ?HIPE_X86_SPECIFIC:liveout(Liveness, K),
+	{Li, Los} = liveness_of_bb(BB, LiveOut),
+	?ASSERT(length(Los) =:= length(hipe_bb:code(BB))),
 	R = delay2([ordsets:from_list(temp_ids(Temps)) || Temps <- [Li|Los]]),
-	?ASSERT(length(bb_code(bb(Cfg,K))) =:= length(R)),
+	?ASSERT(length(hipe_bb:code(BB)) =:= length(R)),
 	R
     end,
     Liveness).
 
 %%
-%% aliases
-%%
-bb(Cfg, Lbl)           -> hipe_x86_cfg:bb(Cfg, Lbl).
-bb_code(BB)            -> hipe_bb:code(BB).
-bbslabels(Cfg)         -> hipe_x86_cfg:labels(Cfg).
-def(I)                 -> ?HIPE_X86_SPECIFIC:defines(I).
-use(I)                 -> ?HIPE_X86_SPECIFIC:uses(I).
-liveout(Lbl, Liveness) -> ?HIPE_X86_SPECIFIC:liveout(Liveness, Lbl).
-defun_to_cfg(Defun)    -> ?HIPE_X86_SPECIFIC:defun_to_cfg(Defun).
-linearise(Cfg)         -> hipe_x86_cfg:linearise(Cfg).
-temp_id(Temp)          -> hipe_x86:temp_reg(Temp).
-temp_ids(Temps)        -> [temp_id(T) || T <- Temps].
-liveness_analysis(Cfg) -> ?HIPE_X86_SPECIFIC:analyze(Cfg).
-is_branch(I)           -> hipe_x86_cfg:is_branch(I).
-
-
-%%
 %% Constructs a map SpillId to colour to spill, from Coloring
 %%
-get_partial_spills(Coloring) ->
-  [Id || {Id, {spill, _}} <- Coloring].
+get_partial_spills(Defun, Coloring) ->
+  Spilled = ordsets:from_list([Id || {Id, {spill, _}} <- Coloring]),
+  %% if it is over MAX_SPILL_COUNT spill only formals (function arguments)
+  case length(Spilled) > ?MAX_SPILL_COUNT of
+    true ->
+      Formals = ordsets:from_list(temp_ids(Defun#defun.formals)),
+      ordsets:intersection(Formals, Spilled);
+    false ->
+      Spilled
+  end.
 
-construct_partial_spills(Coloring) ->
-  gb_trees_from_list([{Id, 7} || Id <- get_partial_spills(Coloring)]).
+construct_partial_spills(Defun, Coloring) ->
+  Regs = [hipe_amd64_registers:proc_pointer(), hipe_x86_registers:sp()],
+  Color = lists:nth(random:uniform(length(Regs)), Regs),
+  Spills = [{Id, Color} || Id <- get_partial_spills(Defun, Coloring)],
+  gb_trees_from_list(Spills).
 
 check_and_rewrite_range_split(Defun, Coloring, Strategy, TempMap, Code0) ->
-  Cfg = defun_to_cfg(Defun),
-  ?ASSERT(defun_to_cfg(linearise(defun_to_cfg(linearise(defun_to_cfg(Defun)))))
-	  == defun_to_cfg(linearise(defun_to_cfg(Defun)))),
-  SpillCosts = construct_partial_spills(Coloring),
-  Spills = get_partial_spills(Coloring),
+  ?inc_counter(range_split_iterations, 1),
+  Cfg = ?HIPE_X86_SPECIFIC:defun_to_cfg(Defun),
+  ?ASSERT(?HIPE_X86_SPECIFIC:defun_to_cfg(hipe_x86_cfg:linearise(
+	     ?HIPE_X86_SPECIFIC:defun_to_cfg(hipe_x86_cfg:linearise(Cfg))))
+	  == ?HIPE_X86_SPECIFIC:defun_to_cfg(hipe_x86_cfg:linearise(Cfg))),
+  Spills = get_partial_spills(Defun, Coloring),
+  %% Additional heuristic so that a temp cannot be continually spilled;
+  %% this will be optional as it only sometimes improves performance
+  NotSpilt = ordsets:to_list(ordsets:subtract(ordsets:from_list(Spills), ordsets:from_list(get(range_split_spills)))),
+  put(range_split_spills, Spills),
   R =
-    case Spills =:= [] of
+    case NotSpilt =:= [] of
       true ->
 	check_and_rewrite_spill(Defun, ignore, Strategy, TempMap, Code0);
       false ->
+	SpillCosts = construct_partial_spills(Defun, Coloring),
 	Temps =
 	  gb_trees_from_list(lists:map(fun (Id) ->
 					   {found, Temp} = get_temp(Code0, Id),
 					   {Id, Temp}
-				       end, Spills)),
+				       end, NotSpilt)),
 	NewTemps =
 	  gb_trees_from_list(lists:map(fun (Id) ->
 					   {Id, hipe_x86:mk_new_nonallocatable_temp(hipe_x86:temp_type(gb_trees:get(Id, Temps)))}
-				       end, Spills)),
+				       end, NotSpilt)),
 	{NewCfg, DidSpill1} =
-	  do_rs_cfg(Cfg, Spills, Coloring, SpillCosts, Temps, NewTemps),
+	  do_rs_cfg(Cfg, NotSpilt, Coloring, SpillCosts, Temps, NewTemps),
 	case DidSpill1 of
-	  true -> {linearise(NewCfg), true};
+	  true -> {hipe_x86_cfg:linearise(NewCfg), true};
 	  false ->
-	    %% no IRs were found (graph colorer failed to color), so try to spill
+	    %% no IRs were found (graph colorer failed to color); try to spill
 	    check_and_rewrite_spill(Defun, ignore, Strategy, TempMap, Code0)
 	end
     end,
@@ -201,18 +208,19 @@ is_reload(I, SpillId, SpilledId) ->
       (temp_ids(hipe_x86_liveness:uses(I)) =:= [SpilledId]).
 
 reloads_closed(Defun, NewTemps) ->
-  Cfg = defun_to_cfg(Defun),
+  Cfg = ?HIPE_X86_SPECIFIC:defun_to_cfg(Defun),
   lists:all(
     fun (SpillId) ->
 	lists:all(
 	  fun (Lbl) ->
-	      reloads_closed_for_bb(Cfg, Lbl, SpillId, temp_id(gb_trees:get(SpillId, NewTemps)))
-	  end, bbslabels(Cfg))
+	      TempId = hipe_x86:temp_reg(gb_trees:get(SpillId, NewTemps)),
+	      reloads_closed_for_bb(Cfg, Lbl, SpillId, TempId)
+	  end, hipe_x86_cfg:labels(Cfg))
     end, gb_trees:keys(NewTemps)).
 
 reloads_closed_for_bb(Cfg, Lbl, SpillId, SpilledId) ->
-  Code = bb_code(bb(Cfg, Lbl)),
-  NumberedCode = lists:zip(lists:seq(1,length(Code)), Code),
+  Code = get_code(Cfg, Lbl),
+  NumberedCode = lists:zip(lists:seq(1, length(Code)), Code),
   lists:all(fun ({In, I}) ->
 		?IMPLIES(is_reload(I, SpillId, SpilledId),
 			 reload_has_a_store(Cfg, Lbl, I, In, SpillId, SpilledId))
@@ -231,7 +239,7 @@ bfs_search_upwards(Cfg, Lbl, Nr, F) ->
   bfs_search_upwards(Cfg, Lbl, Nr, F, []).
 
 bfs_search_upwards(Cfg, Lbl, Nr, F, Visited) ->
-  Code = enumerate_list(bb_code(bb(Cfg, Lbl))),
+  Code = enumerate_list(get_code(Cfg, Lbl)),
   C = lists:reverse(case Nr of
 		      all -> Code;
 		      _ -> lists:filter(fun ({N, _I}) -> N < Nr end, Code)
@@ -264,19 +272,24 @@ bfs_search_upwards(Cfg, Lbl, Nr, F, Visited) ->
 %% Live Range splitting for all partial spills
 %%
 do_rs_cfg(Cfg, Spills, Coloring, SpillCosts, Temps, NewTemps) ->
-  Liveness = liveness_analysis(Cfg),
+  Liveness = ?HIPE_X86_SPECIFIC:analyze(Cfg),
   lists:foldr(
     fun (SpillId, {Cfg0, DidSpill}) ->
         LivenessComplete = complete_liveness(Cfg0, Liveness),
         SpillColor = gb_trees:get(SpillId, SpillCosts),
-        InterferingVars = interfering_vars(Coloring, SpillColor),
-        Apps = cfg_traverse_flow(Cfg0, SpillId, LivenessComplete, InterferingVars),
+        InterfVars0 = interfering_vars(Coloring, SpillColor),
+        InterfVars = case length(Spills) > ?MAX_SPILL_COUNT of
+                            true -> InterfVars0 ++ (Spills -- [SpillId]);
+                            false -> InterfVars0
+                        end,
+        Apps = cfg_traverse_flow(Cfg0, SpillId, LivenessComplete, InterfVars),
         case Apps of
           [] -> {Cfg0, DidSpill}; % did not find any interfering live ranges
           _ ->
             Map = construct_app_map(Apps),
-            {cfg_apply_apps(Cfg0, Map, SpillId,
-                gb_trees:get(SpillId, Temps), gb_trees:get(SpillId, NewTemps)), true}
+	    Temp = gb_trees:get(SpillId, Temps),
+	    NewTemp = gb_trees:get(SpillId, NewTemps),
+            {cfg_apply_apps(Cfg0, Map, SpillId, Temp, NewTemp), true}
         end
     end,
     {Cfg, false}, Spills).
@@ -349,7 +362,7 @@ app_instr_storep(Storeps, Code, Temp, NewTemp) ->
     [] -> Code;
     [_] ->
       [Last|Other] = lists:reverse(Code),
-      N = case is_branch(Last) of
+      N = case hipe_x86_cfg:is_branch(Last) of
 	    true ->
 	      [Last, app_comment(Temp, storep), hipe_x86:mk_move(Temp, NewTemp)];
 	    false ->
@@ -361,7 +374,7 @@ app_instr_storep(Storeps, Code, Temp, NewTemp) ->
 cfg_apply_apps(Cfg, Map, SpillId, Temp, NewTemp) ->
   lists:foldr(
     fun (Lbl, Cfg0) ->
-	Code = bb_code(bb(Cfg0, Lbl)),
+	Code = get_code(Cfg0, Lbl),
 	{Storeps, InMap} = gb_trees:get(Lbl,Map),
 	NewCodeI = lists:map(
 	  fun ({I,In}) ->
@@ -391,32 +404,36 @@ gb_trees_from_keys(F, Keys) ->
   gb_trees_from_list([{K, F(K)} || K <- Keys]).
 
 cfg_traverse_flow(Cfg, SpillId, Liveness, InterferingVars) ->
-  BBs = bbslabels(Cfg),
+  BBs = hipe_x86_cfg:labels(Cfg),
   lists:foldl(
     fun (Lbl, Apps0) ->
 	%% Predecessors
 	PredBBs = hipe_x86_cfg:pred(Cfg, Lbl),
-	PredLivenessInit = gb_trees_from_keys(
-	  fun (P) -> lists:last(gb_trees:get(P, Liveness)) end,
-	  PredBBs),
-	PredI = gb_trees_from_keys(
-	  fun (P) -> lists:last(bb_code(bb(Cfg, P))) end,
-	  PredBBs),
-	PredDefs = gb_trees:map(fun (_, I) -> temp_ids(def(I)) end, PredI),
+	MapFun = fun (_, I) ->
+		     temp_ids(?HIPE_X86_SPECIFIC:defines(I))
+		 end,
+	PredLivenessInit =
+	  gb_trees_from_keys(fun (P) ->
+				 lists:last(gb_trees:get(P, Liveness))
+			     end, PredBBs),
+	PredI =
+	  gb_trees_from_keys(fun (P) -> lists:last(get_code(Cfg, P)) end,
+			     PredBBs),
+	PredDefs = gb_trees:map(MapFun, PredI),
 
 	%% Successors
 	SuccBBs = hipe_x86_cfg:succ(Cfg, Lbl),
-	SuccLivenessInit = gb_trees_from_keys(
-	  fun (S) -> [LiLo|_] = gb_trees:get(S, Liveness), LiLo end,
-	  SuccBBs),
-	SuccI = gb_trees_from_keys(
-	  fun (S) -> hd(bb_code(bb(Cfg, S))) end,
-	  SuccBBs),
-	SuccDefs = gb_trees:map(fun (_, I) -> temp_ids(def(I)) end, SuccI),
+	SuccLivenessInit =
+	  gb_trees_from_keys(fun (S) ->
+				 [LiLo|_] = gb_trees:get(S, Liveness),
+				 LiLo
+			     end, SuccBBs),
+	SuccI =
+	  gb_trees_from_keys(fun (S) -> hd(get_code(Cfg, S)) end, SuccBBs),
+	SuccDefs = gb_trees:map(MapFun, SuccI),
 
-	BB      = bb(Cfg, Lbl),
-	Code    = bb_code(BB),
-	Defs    = [temp_ids(def(I)) || I <- Code],
+	Code    = get_code(Cfg, Lbl),
+	Defs    = [temp_ids(?HIPE_X86_SPECIFIC:defines(I)) || I <- Code],
 	DefsT   = [gb_trees_from_list([{Lbl, Def}]) || Def <- Defs],
 	Live    = gb_trees:get(Lbl, Liveness),
 	LiveT   = [gb_trees_from_list([{Lbl, LiLo}]) || LiLo <- Live],
@@ -458,6 +475,7 @@ traverse_flow_run_detect([I|Code],
 
 interfering_vars(Coloring, SpillColor) ->
   [Id || {Id, {reg, X}} <- Coloring, X =:= SpillColor].
+  %%++ (get_partial_spills(Defun, Coloring) -- [SpillColor]).
 
 is_live(SpillId, {LiveIn, LiveOut}) ->
   lists:member(SpillId, LiveIn) orelse lists:member(SpillId, LiveOut).
@@ -491,22 +509,22 @@ detect(PLiveT, _CLiveT, _NLiveT,
   StorePred =
     case ((In =:= 1) andalso PI andalso CL andalso not(CI)) of
       true ->
-	lists:map(fun (L) -> {storep, L} end,
-		  lists:filter(
-          fun (J) ->
-              IsLive = is_live(SpillId, gb_trees:get(J, PLiveT)),
-	      IsLive andalso
-		       (not(is_interfering(
-			      InterferingVars,
-			      IsLive,
-			      gb_trees:get(J, PLiveT),
-			      SpillId,
-			      gb_trees:get(J, PDefT))))
-          end, gb_trees:keys(PLiveT)));
+	[{storep, L} || L <- [K || K <- gb_trees:keys(PLiveT),
+				   begin
+				     LV = gb_trees:get(K, PLiveT),
+				     IsLive = is_live(SpillId, LV),
+				     IsLive andalso
+				       not is_interfering(
+					     InterferingVars,
+					     IsLive,
+					     LV,
+					     SpillId,
+					     gb_trees:get(K, PDefT))
+				   end]];
       false -> []
     end,
   %% Stores
-  IsBranch = is_branch(I),
+  IsBranch = hipe_x86_cfg:is_branch(I),
   %% Invariant: currently the last instructions is always a branch
   %% IsBranch iff _N = In
   ?ASSERT((not(IsBranch) or (_N =:= In)) and (not(_N =:= In) or IsBranch)),
@@ -524,7 +542,8 @@ detect(PLiveT, _CLiveT, _NLiveT,
       true -> [{reload, BBLbl, In, b}];
       false -> []
     end,
-  IsUsedInInstr = lists:member(SpillId, temp_ids(def(I) ++ use(I))),
+  Temps = temp_ids(?HIPE_X86_SPECIFIC:defines(I) ++ ?HIPE_X86_SPECIFIC:uses(I)),
+  IsUsedInInstr = lists:member(SpillId, Temps),
   Rename =
     case CI andalso IsUsedInInstr of
       true -> [{rename, BBLbl, In, c}];
@@ -534,6 +553,12 @@ detect(PLiveT, _CLiveT, _NLiveT,
 		 ordsets:from_list(Rename),
 		 ordsets:from_list(Store),
 		 ordsets:from_list(StorePred)]).
+
+get_code(CFG, Lbl) ->
+  hipe_bb:code(hipe_x86_cfg:bb(CFG, Lbl)).
+
+temp_ids(Temps) ->
+  [hipe_x86:temp_reg(T) || T <- Temps].
 
 rename_temp(TempId, NewTemp) ->
   ?ASSERT(TempId =/= hipe_x86:temp_reg(NewTemp)),
@@ -756,7 +781,7 @@ do_byte_move(Src0, Dst0, TempMap, Strategy) ->
 
 do_move64(I, TempMap, Strategy) ->
   #move64{dst=Dst} = I,
-  case is_spilled(Dst, TempMap) of
+  case is_spilled(Dst, TempMap) of
     false ->
       {[I], false};
     true ->
