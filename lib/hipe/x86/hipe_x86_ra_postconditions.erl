@@ -150,8 +150,8 @@ get_partial_spills(Defun, Coloring) ->
   end.
 
 construct_partial_spills(Defun, Coloring) ->
-  Regs = [hipe_amd64_registers:proc_pointer(), hipe_x86_registers:sp()],
-  Color = lists:nth(random:uniform(length(Regs)), Regs),
+  %% pick a color which is the least likely to be used
+  Color = lists:last(?HIPE_X86_REGISTERS:allocatable()),
   Spills = [{Id, Color} || Id <- get_partial_spills(Defun, Coloring)],
   gb_trees_from_list(Spills).
 
