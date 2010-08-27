@@ -38,12 +38,6 @@
 %% webtool
 -export([configData/0]).
 
-
-%% The following directive caters for (significantly) faster native
-%% code compilation of one function in this file by the HiPE compiler
-%% on register-poor architectures like the x86.
--compile([{hipe,[{regalloc,graph_color}]}]).
-
 -behaviour(gen_server).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
