@@ -268,6 +268,8 @@ cert_options(Config) ->
 				      "client", "cacerts.pem"]),
     ClientCertFile = filename:join([?config(priv_dir, Config), 
 				    "client", "cert.pem"]),
+    ClientCertFileDigitalSignatureOnly = filename:join([?config(priv_dir, Config),
+				    "client", "digital_signature_only_cert.pem"]),
     ServerCaCertFile = filename:join([?config(priv_dir, Config), 
 				      "server", "cacerts.pem"]),
     ServerCertFile = filename:join([?config(priv_dir, Config), 
@@ -292,6 +294,10 @@ cert_options(Config) ->
 				{certfile, ClientCertFile},  
 				{keyfile, ClientKeyFile},
 				{ssl_imp, new}]}, 
+     {client_verification_opts_digital_signature_only, [{cacertfile, ClientCaCertFile},
+				{certfile, ClientCertFileDigitalSignatureOnly},
+				{keyfile, ClientKeyFile},
+				{ssl_imp, new}]},
      {server_opts, [{ssl_imp, new},{reuseaddr, true}, 
 		    {certfile, ServerCertFile}, {keyfile, ServerKeyFile}]},
      {server_verification_opts, [{ssl_imp, new},{reuseaddr, true}, 
@@ -325,6 +331,10 @@ make_dsa_cert(Config) ->
     [{server_dsa_opts, [{ssl_imp, new},{reuseaddr, true}, 
 				 {cacertfile, ServerCaCertFile},
 				 {certfile, ServerCertFile}, {keyfile, ServerKeyFile}]},
+     {server_dsa_verify_opts, [{ssl_imp, new},{reuseaddr, true}, 
+			       {cacertfile, ClientCaCertFile},
+			       {certfile, ServerCertFile}, {keyfile, ServerKeyFile},
+			       {verify, verify_peer}]},
      {client_dsa_opts, [{ssl_imp, new},{reuseaddr, true}, 
 			{cacertfile, ClientCaCertFile},
 			{certfile, ClientCertFile}, {keyfile, ClientKeyFile}]}
@@ -342,9 +352,9 @@ make_dsa_cert_files(RoleStr, Config) ->
     KeyFile = filename:join([?config(priv_dir, Config), 
 				   RoleStr, "dsa_key.pem"]),
     
-    public_key:der_to_pem(CaCertFile, [{cert, CaCert, not_encrypted}]),
-    public_key:der_to_pem(CertFile, [{cert, Cert, not_encrypted}]),
-    public_key:der_to_pem(KeyFile, [CertKey]),
+    der_to_pem(CaCertFile, [{'Certificate', CaCert, not_encrypted}]),
+    der_to_pem(CertFile, [{'Certificate', Cert, not_encrypted}]),
+    der_to_pem(KeyFile, [CertKey]),
     {CaCertFile, CertFile, KeyFile}.
 
 start_upgrade_server(Args) ->
@@ -567,6 +577,14 @@ rsa_suites() ->
 		 end,
 		 ssl:cipher_suites()).
 
+rsa_non_signed_suites() ->
+    lists:filter(fun({rsa, _, _}) ->
+			 true;
+		    (_) ->
+			 false
+		 end,
+		 ssl:cipher_suites()).
+
 dsa_suites() ->
      lists:filter(fun({dhe_dss, _, _}) ->
 			 true;
@@ -597,3 +615,28 @@ openssl_dsa_suites() ->
 				 true
 			 end 
 		 end, Ciphers).
+
+pem_to_der(File) ->
+    {ok, PemBin} = file:read_file(File),
+    public_key:pem_decode(PemBin).
+
+der_to_pem(File, Entries) ->
+    PemBin = public_key:pem_encode(Entries),
+    file:write_file(File, PemBin).
+
+cipher_result(Socket, Result) ->
+    Result = ssl:connection_info(Socket),
+    test_server:format("Successfull connect: ~p~n", [Result]),
+    %% Importante to send two packets here
+    %% to properly test "cipher state" handling
+    ssl:send(Socket, "Hello\n"),
+    receive 
+	{ssl, Socket, "Hello\n"} ->
+	    ssl:send(Socket, " world\n"),
+	    receive 
+		{ssl, Socket, " world\n"} ->
+		    ok
+	    end;       
+	Other ->
+	    {unexpected, Other}
+    end.

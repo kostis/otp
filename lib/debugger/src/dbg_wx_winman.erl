@@ -133,7 +133,7 @@ handle_cast({insert, Pid, Title, Win}, State) ->
 handle_cast({clear_process, Title}, State) ->
     OldWins = State#state.wins,
     Wins = case lists:keyfind(Title, #win.title, OldWins) of
-	       #win{owner=Pid} ->     
+	       #win{owner=Pid} ->
 		   Msg = {dbg_ui_winman, destroy},
 		   Pid ! Msg,
 		   lists:keydelete(Title, #win.title, OldWins);

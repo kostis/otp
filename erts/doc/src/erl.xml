@@ -603,6 +603,24 @@
       <item>
         <p>Force ets memory block to be moved on realloc.</p>
       </item>
+      <tag><marker id="+rg"><c><![CDATA[+rg ReaderGroupsLimit]]></c></marker></tag>
+      <item>
+        <p>Limits the amount of reader groups used by read/write locks
+	   optimized for read operations in the Erlang runtime system. By
+	   default the reader groups limit equals 8.</p>
+	<p>When the amount of schedulers is less than or equal to the reader
+	   groups limit, each scheduler has its own reader group. When the
+	   amount of schedulers is larger than the reader groups limit,
+	   schedulers share reader groups. Shared reader groups degrades
+	   read lock and read unlock performance while a large amount of
+	   reader groups degrades write lock performance, so the limit is a
+	   tradeoff between performance for read operations and performance
+	   for write operations. Each reader group currently consumes 64 byte
+	   in each read/write lock. Also note that a runtime system using
+	   shared reader groups benefits from <seealso marker="#+sbt">binding
+	   schedulers to logical processors</seealso>, since the reader groups
+	   are distributed better between schedulers.</p>
+      </item>
       <tag><marker id="+S"><c><![CDATA[+S Schedulers:SchedulerOnline]]></c></marker></tag>
       <item>
         <p>Sets the amount of scheduler threads to create and scheduler
@@ -667,8 +685,8 @@
 	      <seealso marker="erlang#system_flag_scheduler_bind_type">erlang:system_flag(scheduler_bind_type, default_bind)</seealso>.
 	      </p></item>
 	    </taglist>
-	    <p>Binding of schedulers are currently only supported on newer
-	       Linux and Solaris systems.</p>
+	    <p>Binding of schedulers is currently only supported on newer
+	       Linux, Solaris, and Windows systems.</p>
 	    <p>If no CPU topology is available when the <c>+sbt</c> flag
 	       is processed and <c>BindType</c> is any other type than
 	       <c>u</c>, the runtime system will fail to start. CPU
@@ -813,13 +831,27 @@
 	    <p>For more information, see
 	    <seealso marker="erlang#system_flag_cpu_topology">erlang:system_flag(cpu_topology, CpuTopology)</seealso>.</p>
           </item>
+	  <tag><marker id="+swt"><c>+swt very_low|low|medium|high|very_high</c></marker></tag>
+	  <item>
+             <p>Set scheduler wakeup threshold. Default is <c>medium</c>.
+	        The threshold determines when to wake up sleeping schedulers
+		when more work than can be handled by currently awake schedulers
+		exist. A low threshold will cause earlier wakeups, and a high
+		threshold will cause later wakeups. Early wakeups will
+		distribute work over multiple schedulers faster, but work will
+		more easily bounce between schedulers.
+	     </p>
+             <p><em>NOTE:</em> This flag may be removed or changed at any time
+	        without prior notice.
+	     </p>
+	  </item>
+	  <tag><marker id="sched_thread_stack_size"><c><![CDATA[+sss size]]></c></marker></tag>
+	  <item>
+	    <p>Suggested stack size, in kilowords, for scheduler threads.
+            Valid range is 4-8192 kilowords. The default stack size
+            is OS dependent.</p>
+	  </item>
         </taglist>
-      </item>
-      <tag><marker id="sched_thread_stack_size"><c><![CDATA[+sss size]]></c></marker></tag>
-      <item>
-        <p>Suggested stack size, in kilowords, for scheduler threads.
-          Valid range is 4-8192 kilowords. The default stack size
-          is OS dependent.</p>
       </item>
       <tag><marker id="+t"><c><![CDATA[+t size]]></c></marker></tag>
       <item>

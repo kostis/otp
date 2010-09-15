@@ -623,12 +623,16 @@ int db_create_hash(Process *p, DbTable *tbl)
     erts_smp_atomic_init(&tb->is_resizing, 0);
 #ifdef ERTS_SMP
     if (tb->common.type & DB_FINE_LOCKED) {
+	erts_smp_rwmtx_opt_t rwmtx_opt = ERTS_SMP_RWMTX_OPT_DEFAULT_INITER;
 	int i;
+	if (tb->common.type & DB_FREQ_READ)
+	    rwmtx_opt.type = ERTS_SMP_RWMTX_TYPE_FREQUENT_READ;
 	tb->locks = (DbTableHashFineLocks*) erts_db_alloc_fnf(ERTS_ALC_T_DB_SEG, /* Other type maybe? */ 
 							      (DbTable *) tb,
 							      sizeof(DbTableHashFineLocks));	    	    
 	for (i=0; i<DB_HASH_LOCK_CNT; ++i) {
-	    erts_rwmtx_init_x(&tb->locks->lck_vec[i].lck, "db_hash_slot", make_small(i));
+	    erts_smp_rwmtx_init_opt_x(&tb->locks->lck_vec[i].lck, &rwmtx_opt,
+				      "db_hash_slot", make_small(i));
 	}
 	/* This important property is needed to guarantee that the buckets
     	 * involved in a grow/shrink operation it protected by the same lock:
@@ -2741,6 +2745,7 @@ static void db_finalize_dbterm_hash(DbUpdateHandle* handle)
     ASSERT(&oldp->dbterm == handle->dbterm);
 
     if (handle->mustResize) {
+	ErlOffHeap tmp_offheap;
 	Eterm* top;
 	Eterm copy;
 	DbTerm* newDbTerm;
@@ -2751,18 +2756,15 @@ static void db_finalize_dbterm_hash(DbUpdateHandle* handle)
 	newDbTerm = &newp->dbterm;
     
 	newDbTerm->size = handle->new_size;
-	newDbTerm->off_heap.mso = NULL;
-	newDbTerm->off_heap.externals = NULL;
-    #ifndef HYBRID /* FIND ME! */
-	newDbTerm->off_heap.funs = NULL;
-    #endif
-	newDbTerm->off_heap.overhead = 0;
+	tmp_offheap.first = NULL;
+	tmp_offheap.overhead = 0;
 	
 	/* make a flat copy */
 	top = DBTERM_BUF(newDbTerm);
 	copy = copy_struct(make_tuple(handle->dbterm->tpl),
 			   handle->new_size,
-			   &top, &newDbTerm->off_heap);
+			   &top, &tmp_offheap);
+	newDbTerm->first_oh = tmp_offheap.first;
 	DBTERM_SET_TPL(newDbTerm,tuple_val(copy));
 
 	WUNLOCK_HASH(lck);
@@ -2805,7 +2807,11 @@ void db_foreach_offheap_hash(DbTable *tbl,
     for (i = 0; i < nactive; i++) {
 	list = BUCKET(tb,i);
 	while(list != 0) {
-	    (*func)(&(list->dbterm.off_heap), arg);
+	    ErlOffHeap tmp_offheap;
+	    tmp_offheap.first = list->dbterm.first_oh;
+	    tmp_offheap.overhead = 0;
+	    (*func)(&tmp_offheap, arg);
+	    list->dbterm.first_oh = tmp_offheap.first;
 	    list = list->next;
 	}
     }

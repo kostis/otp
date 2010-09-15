@@ -3385,12 +3385,12 @@ apply_bif_or_nif_epilogue:
 	 HTOP += PROC_BIN_SIZE;
 	 pb->thing_word = HEADER_PROC_BIN;
 	 pb->size = num_bytes;
-	 pb->next = MSO(c_p).mso;
-	 MSO(c_p).mso = pb;
+	 pb->next = MSO(c_p).first;
+	 MSO(c_p).first = (struct erl_off_heap_header*) pb;
 	 pb->val = bptr;
 	 pb->bytes = (byte*) bptr->orig_bytes;
 	 pb->flags = 0;
-	 MSO(c_p).overhead += pb->size / sizeof(Eterm);
+	 OH_OVERHEAD(&(MSO(c_p)), pb->size / sizeof(Eterm));
 	 new_binary = make_binary(pb);
 	 goto do_bits_sub_bin;
      }
@@ -3486,13 +3486,13 @@ apply_bif_or_nif_epilogue:
 	 HTOP += PROC_BIN_SIZE;
 	 pb->thing_word = HEADER_PROC_BIN;
 	 pb->size = tmp_arg1;
-	 pb->next = MSO(c_p).mso;
-	 MSO(c_p).mso = pb;
+	 pb->next = MSO(c_p).first;
+	 MSO(c_p).first = (struct erl_off_heap_header*) pb;
 	 pb->val = bptr;
 	 pb->bytes = (byte*) bptr->orig_bytes;
 	 pb->flags = 0;
 	 
-	 MSO(c_p).overhead += tmp_arg1 / sizeof(Eterm);
+	 OH_OVERHEAD(&(MSO(c_p)), tmp_arg1 / sizeof(Eterm));
 
 	 StoreBifResult(2, make_binary(pb));
      }
@@ -4373,7 +4373,7 @@ apply_bif_or_nif_epilogue:
 	     ASSERT(is_CP((BeamInstr)(ep->code)));
 	     ASSERT(is_internal_pid(c_p->tracer_proc) || 
 		    is_internal_port(c_p->tracer_proc));
-	     E[2] = make_cp(c_p->cp); /* XXX:PaN - code in lower range on halfword */
+	     E[2] = make_cp(c_p->cp); /* Code in lower range on halfword */
 	     E[1] = am_true; /* Process tracer */
 	     E[0] = make_cp(ep->code);
 	     c_p->cp = (flags & MATCH_SET_EXCEPTION_TRACE)
@@ -4463,7 +4463,7 @@ apply_bif_or_nif_epilogue:
 	     E -= 2;
 	     E[0] = make_cp(I);
 	     E[1] = make_cp(c_p->cp);     /* original return address */
-	     c_p->cp = (BeamInstr *) make_cp(beam_return_time_trace);
+	     c_p->cp = beam_return_time_trace;
 	 }
      }
 
@@ -4493,20 +4493,20 @@ apply_bif_or_nif_epilogue:
      BeamInstr real_I;
      Uint32 flags;
      Eterm tracer_pid;
-     BeamInstr *cpp;
+     Uint* cpp;
      int return_to_trace = 0, need = 0;
      flags = 0;
      SWAPOUT;
      reg[0] = r(0);
 
      if (*(c_p->cp) == (BeamInstr) OpCode(return_trace)) {
-	 cpp = (BeamInstr*)&E[2];
+	 cpp = &E[2];
      } else if (*(c_p->cp) == (BeamInstr) OpCode(i_return_to_trace)) {
 	 return_to_trace = !0;
-	 cpp = (BeamInstr*)&E[0];
+	 cpp = &E[0];
      } else if (*(c_p->cp) == (BeamInstr) OpCode(i_return_time_trace)) {
 	 return_to_trace = !0;
-	 cpp = (BeamInstr*)&E[0];
+	 cpp = &E[0];
      } else {
 	 cpp = NULL;
      }
@@ -4889,7 +4889,7 @@ apply_bif_or_nif_epilogue:
      neg_o_reds = -c_p->def_arg_reg[4];
      FCALLS = c_p->fcalls;
      SWAPIN;
-     switch( c_p->def_arg_reg[3] ) { /* XXX:PaN - Halfword wont work with hipe yet... */
+     switch( c_p->def_arg_reg[3] ) { /* Halfword wont work with hipe yet! */
        case HIPE_MODE_SWITCH_RES_RETURN:
 	 ASSERT(is_value(reg[0]));
 	 MoveReturn(reg[0], r(0));
@@ -6323,8 +6323,8 @@ new_fun(Process* p, Eterm* reg, ErlFunEntry* fe, int num_free)
     erts_refc_inc(&fe->refc, 2);
     funp->thing_word = HEADER_FUN;
 #ifndef HYBRID /* FIND ME! */
-    funp->next = MSO(p).funs;
-    MSO(p).funs = funp;
+    funp->next = MSO(p).first;
+    MSO(p).first = (struct erl_off_heap_header*) funp;
 #endif
     funp->fe = fe;
     funp->num_free = num_free;

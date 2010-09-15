@@ -57,7 +57,7 @@
  * A datatype for a database entry stored out of a process heap
  */
 typedef struct db_term {
-    ErlOffHeap off_heap;   /* Off heap data for term. */
+    struct erl_off_heap_header* first_oh; /* Off heap data for term. */
     Uint size;		   /* Size of term in "words" */
     Eterm tpl[1];          /* Untagged "constant pointer" to top tuple */
                            /* (assumed to be first in buffer) */
@@ -240,8 +240,9 @@ typedef struct db_table_common {
 #define DB_DUPLICATE_BAG (1 << 8)
 #define DB_ORDERED_SET   (1 << 9)
 #define DB_DELETE        (1 << 10) /* table is being deleted */
+#define DB_FREQ_READ     (1 << 11)
 
-#define ERTS_ETS_TABLE_TYPES (DB_BAG|DB_SET|DB_DUPLICATE_BAG|DB_ORDERED_SET|DB_FINE_LOCKED)
+#define ERTS_ETS_TABLE_TYPES (DB_BAG|DB_SET|DB_DUPLICATE_BAG|DB_ORDERED_SET|DB_FINE_LOCKED|DB_FREQ_READ)
 
 #define IS_HASH_TABLE(Status) (!!((Status) & \
 				  (DB_BAG | DB_SET | DB_DUPLICATE_BAG)))

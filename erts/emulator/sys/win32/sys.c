@@ -37,7 +37,7 @@
 void erts_sys_init_float(void);
 
 void erl_start(int, char**);
-void erl_exit(int n, char*, _DOTS_);
+void erl_exit(int n, char*, ...);
 void erl_error(char*, va_list);
 void erl_crash_dump(char*, int, char*, ...);
 
@@ -67,10 +67,10 @@ static void async_read_file(struct async_io* aio, LPVOID buf, DWORD numToRead);
 static int async_write_file(struct async_io* aio, LPVOID buf, DWORD numToWrite);
 static int get_overlapped_result(struct async_io* aio,
 				 LPDWORD pBytesRead, BOOL wait);
-static FUNCTION(BOOL, CreateChildProcess, (char *, HANDLE, HANDLE,
-					   HANDLE, LPHANDLE, BOOL,
-					   LPVOID, LPTSTR, unsigned, 
-					   char **, int *));
+static BOOL CreateChildProcess(char *, HANDLE, HANDLE,
+			       HANDLE, LPHANDLE, BOOL,
+			       LPVOID, LPTSTR, unsigned,
+			       char **, int *);
 static int create_pipe(LPHANDLE, LPHANDLE, BOOL, BOOL);
 static int ApplicationType(const char* originalName, char fullPath[MAX_PATH],
 			   BOOL search_in_path, BOOL handle_quotes,
@@ -93,7 +93,7 @@ static erts_smp_mtx_t sys_driver_data_lock;
 #define APPL_WIN3X 2
 #define APPL_WIN32 3
 
-static FUNCTION(int, driver_write, (long, HANDLE, byte*, int));
+static int driver_write(long, HANDLE, byte*, int);
 static void common_stop(int);
 static int create_file_thread(struct async_io* aio, int mode);
 #ifdef ERTS_SMP
@@ -2627,7 +2627,6 @@ erts_sys_main_thread(void)
 
 void erts_sys_alloc_init(void)
 {
-    elib_ensure_initialized();
 }
 
 void *erts_sys_alloc(ErtsAlcType_t t, void *x, Uint sz)
@@ -2974,19 +2973,6 @@ check_supported_os_version(void)
 }
 
 #ifdef USE_THREADS
-static void *ethr_internal_alloc(size_t size)
-{
-    return erts_alloc_fnf(ERTS_ALC_T_ETHR_INTERNAL, (Uint) size);
-}
-static void *ethr_internal_realloc(void *ptr, size_t size)
-{
-    return erts_realloc_fnf(ERTS_ALC_T_ETHR_INTERNAL, ptr, (Uint) size);
-}
-static void ethr_internal_free(void *ptr)
-{
-    erts_free(ERTS_ALC_T_ETHR_INTERNAL, ptr);
-}
-
 #ifdef ERTS_ENABLE_LOCK_COUNT
 static void
 thr_create_prepare_child(void *vtcdp)
@@ -3005,14 +2991,9 @@ erts_sys_pre_init(void)
 #ifdef USE_THREADS
     {
 	erts_thr_init_data_t eid = ERTS_THR_INIT_DATA_DEF_INITER;
-	eid.alloc = ethr_internal_alloc;
-	eid.realloc = ethr_internal_realloc;
-	eid.free = ethr_internal_free;
-
 #ifdef ERTS_ENABLE_LOCK_COUNT
 	eid.thread_create_child_func = thr_create_prepare_child;
 #endif
-
 	erts_thr_init(&eid);
 #ifdef ERTS_ENABLE_LOCK_COUNT
 	erts_lcnt_init();
@@ -3020,7 +3001,6 @@ erts_sys_pre_init(void)
     }
 #endif
     erts_smp_atomic_init(&sys_misc_mem_sz, 0);
-    erts_sys_env_init();
 }
 
 void noinherit_std_handle(DWORD type)
@@ -3035,6 +3015,8 @@ void noinherit_std_handle(DWORD type)
 void erl_sys_init(void)
 {
     HANDLE handle;
+
+    erts_sys_env_init();
 
     noinherit_std_handle(STD_OUTPUT_HANDLE);
     noinherit_std_handle(STD_INPUT_HANDLE);

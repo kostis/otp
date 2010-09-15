@@ -363,12 +363,7 @@ static ErtsMatchPseudoProcess *match_pseudo_process;
 static ERTS_INLINE void
 cleanup_match_pseudo_process(ErtsMatchPseudoProcess *mpsp, int keep_heap)
 {
-    if (mpsp->process.mbuf
-	|| mpsp->process.off_heap.mso
-#ifndef HYBRID /* FIND ME! */
-	|| mpsp->process.off_heap.funs
-#endif
-	|| mpsp->process.off_heap.externals) {
+    if (mpsp->process.mbuf || mpsp->process.off_heap.first) {
 	erts_cleanup_empty_process(&mpsp->process);
     }
 #ifdef DEBUG
@@ -1738,8 +1733,7 @@ restart:
 		FAIL();
 	    ep = termp;
 	    break;
-	case matchArrayBind: /* When the array size is unknown. */ /* XXX:PaN - where does
-								      this array come from? */
+	case matchArrayBind: /* When the array size is unknown. */
 	    n = *pc++;
 	    hp[n] = dpm_array_to_list(psp, termp, arity);
 	    break;
@@ -2457,9 +2451,13 @@ void* db_get_term(DbTableCommon *tb, DbTerm* old, Uint offset, Eterm obj)
     DbTerm* p;
     Eterm copy;
     Eterm *top;
+    ErlOffHeap tmp_offheap;
 
     if (old != 0) {
-	erts_cleanup_offheap(&old->off_heap);
+	tmp_offheap.first  = old->first_oh;
+	tmp_offheap.overhead = 0;
+	erts_cleanup_offheap(&tmp_offheap);
+	old->first_oh = tmp_offheap.first;
 	if (size == old->size) {
 	    p = old;
 	} else {
@@ -2495,15 +2493,12 @@ void* db_get_term(DbTableCommon *tb, DbTerm* old, Uint offset, Eterm obj)
 	p = (DbTerm*) ((void *)(((char *) structp) + offset));
     }
     p->size = size;
-    p->off_heap.mso = NULL;
-    p->off_heap.externals = NULL;
-#ifndef HYBRID /* FIND ME! */
-    p->off_heap.funs = NULL;
-#endif
-    p->off_heap.overhead = 0;
+    tmp_offheap.first  = NULL;
+    tmp_offheap.overhead = 0;
 
     top = DBTERM_BUF(p);
-    copy = copy_struct(obj, size, &top, &p->off_heap);
+    copy = copy_struct(obj, size, &top, &tmp_offheap);
+    p->first_oh = tmp_offheap.first;
     DBTERM_SET_TPL(p,tuple_val(copy));
 
     return structp;
@@ -2512,7 +2507,10 @@ void* db_get_term(DbTableCommon *tb, DbTerm* old, Uint offset, Eterm obj)
 
 void db_free_term_data(DbTerm* p)
 {
-    erts_cleanup_offheap(&p->off_heap);
+    ErlOffHeap tmp_offheap;
+    tmp_offheap.first = p->first_oh;
+    tmp_offheap.overhead = 0;
+    erts_cleanup_offheap(&tmp_offheap);
 }
 
 

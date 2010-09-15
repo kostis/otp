@@ -284,7 +284,7 @@ add_module(WinInfo, MenuName, Mod) ->
 	    
 	    ModInfo = #moduleInfo{module=Mod, menubtn={Menu,MenuBtn}},
 	    WinInfo#winInfo{modules=[ModInfo | Modules]};
- 	true -> WinInfo
+	true -> WinInfo
    end.
     
 %%--------------------------------------------------------------------

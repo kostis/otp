@@ -88,8 +88,8 @@ new_binary(Process *p, byte *buf, int len)
     pb = (ProcBin *) HAlloc(p, PROC_BIN_SIZE);
     pb->thing_word = HEADER_PROC_BIN;
     pb->size = len;
-    pb->next = MSO(p).mso;
-    MSO(p).mso = pb;
+    pb->next = MSO(p).first;
+    MSO(p).first = (struct erl_off_heap_header*)pb;
     pb->val = bptr;
     pb->bytes = (byte*) bptr->orig_bytes;
     pb->flags = 0;
@@ -97,7 +97,7 @@ new_binary(Process *p, byte *buf, int len)
     /*
      * Miscellanous updates. Return the tagged binary.
      */
-    MSO(p).overhead += pb->size / sizeof(Eterm);
+    OH_OVERHEAD(&(MSO(p)), pb->size / sizeof(Eterm));
     return make_binary(pb);
 }
 
@@ -127,8 +127,8 @@ Eterm erts_new_mso_binary(Process *p, byte *buf, int len)
     pb = (ProcBin *) HAlloc(p, PROC_BIN_SIZE);
     pb->thing_word = HEADER_PROC_BIN;
     pb->size = len;
-    pb->next = MSO(p).mso;
-    MSO(p).mso = pb;
+    pb->next = MSO(p).first;
+    MSO(p).first = (struct erl_off_heap_header*)pb;
     pb->val = bptr;
     pb->bytes = (byte*) bptr->orig_bytes;
     pb->flags = 0;
@@ -136,7 +136,7 @@ Eterm erts_new_mso_binary(Process *p, byte *buf, int len)
     /*
      * Miscellanous updates. Return the tagged binary.
      */
-    MSO(p).overhead += pb->size / sizeof(Eterm);
+    OH_OVERHEAD(&(MSO(p)), pb->size / sizeof(Eterm));
     return make_binary(pb);
 }
 
@@ -487,16 +487,6 @@ BIF_RETTYPE split_binary_2(BIF_ALIST_2)
 	BIF_ERROR(BIF_P, BADARG);
 }
 
-void
-erts_cleanup_mso(ProcBin* pb)
-{
-    while (pb != NULL) {
-	ProcBin* next = pb->next;
-	if (erts_refc_dectest(&pb->val->refc, 0) == 0)
-	    erts_bin_free(pb->val);
-	pb = next;
-    }
-}
 
 /*
  * Local functions.

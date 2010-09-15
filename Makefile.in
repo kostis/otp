@@ -485,11 +485,13 @@ dep depend:
 # Creates "erl" and "erlc" in bootstrap/bin which uses the precompiled 
 # libraries in the bootstrap directory
 
+.PHONY: bootstrap_setup_target
+
 # ----------------------------------------------------------------------
 # Bootstraps... 
 # ----------------------------------------------------------------------
 ifeq ($(TARGET),win32)
-bootstrap_setup: check_recreate_primary_bootstrap
+bootstrap_setup: check_recreate_primary_bootstrap bootstrap_setup_target
 	@rm -f $(BOOTSTRAP_ROOT)/bootstrap/bin/erl.exe \
 		$(BOOTSTRAP_ROOT)/bootstrap/bin/erlc.exe \
 		$(BOOTSTRAP_ROOT)/bootstrap/bin/erl.ini \
@@ -501,9 +503,9 @@ bootstrap_setup: check_recreate_primary_bootstrap
 	@cp $(ERL_TOP)/bin/$(TARGET)/erl.exe \
 		$(BOOTSTRAP_ROOT)/bootstrap/bin/erl.exe
 else
-bootstrap_setup: check_recreate_primary_bootstrap $(BOOTSTRAP_ROOT)/bootstrap/bin/erl $(BOOTSTRAP_ROOT)/bootstrap/bin/erlc
+bootstrap_setup: check_recreate_primary_bootstrap bootstrap_setup_target $(BOOTSTRAP_ROOT)/bootstrap/bin/erl $(BOOTSTRAP_ROOT)/bootstrap/bin/erlc
 
-$(BOOTSTRAP_ROOT)/bootstrap/bin/erl:  $(ERL_TOP)/erts/etc/unix/erl.src.src
+$(BOOTSTRAP_ROOT)/bootstrap/bin/erl: $(ERL_TOP)/erts/etc/unix/erl.src.src $(BOOTSTRAP_ROOT)/bootstrap/target
 	@rm -f $(BOOTSTRAP_ROOT)/bootstrap/bin/erl 
 	@sed	-e "s;%FINAL_ROOTDIR%;$(BOOTSTRAP_ROOT)/bootstrap;"   \
 		-e "s;\$$ROOTDIR/erts-.*/bin;$(ERL_TOP)/bin/$(TARGET);"    \
@@ -512,11 +514,16 @@ $(BOOTSTRAP_ROOT)/bootstrap/bin/erl:  $(ERL_TOP)/erts/etc/unix/erl.src.src
 			$(BOOTSTRAP_ROOT)/bootstrap/bin/erl
 	@chmod 755 $(BOOTSTRAP_ROOT)/bootstrap/bin/erl
 
-$(BOOTSTRAP_ROOT)/bootstrap/bin/erlc:  $(ERL_TOP)/bin/$(TARGET)/erlc
+$(BOOTSTRAP_ROOT)/bootstrap/bin/erlc: $(ERL_TOP)/bin/$(TARGET)/erlc $(BOOTSTRAP_ROOT)/bootstrap/target
 	@rm -f $(BOOTSTRAP_ROOT)/bootstrap/bin/erlc
 	@cp $(ERL_TOP)/bin/$(TARGET)/erlc $(BOOTSTRAP_ROOT)/bootstrap/bin/erlc
 	@chmod 755 $(BOOTSTRAP_ROOT)/bootstrap/bin/erlc
 endif
+
+bootstrap_setup_target:
+	@{ test -r $(BOOTSTRAP_ROOT)/bootstrap/target && \
+	   test $(TARGET) = `cat $(BOOTSTRAP_ROOT)/bootstrap/target`; } || \
+	 echo $(TARGET) > $(BOOTSTRAP_ROOT)/bootstrap/target
 
 secondary_bootstrap_build:
 	cd lib && \
@@ -743,14 +750,16 @@ recreate_primary_bootstrap:
 # of the emulator possible
 
 .PHONY: primary_bootstrap						\
-	primary_bootstrap_check_make					\
 	primary_bootstrap_build						\
 	primary_bootstrap_compiler					\
 	primary_bootstrap_mkdirs					\
 	primary_bootstrap_copy
 
-primary_bootstrap: primary_bootstrap_check_make
+primary_bootstrap:
 	@echo "=== Building a bootstrap compiler in $(BOOTSTRAP_ROOT)/bootstrap"
+	$(MAKE) BOOTSTRAP_ROOT=$(BOOTSTRAP_ROOT) \
+		ERL_TOP=$(ERL_TOP) \
+		bootstrap_clean
 	cd $(ERL_TOP) && \
 		$(MAKE) TESTROOT=$(BOOTSTRAP_TOP) \
 		BOOTSTRAP_TOP=$(BOOTSTRAP_TOP) \
@@ -767,22 +776,6 @@ primary_bootstrap: primary_bootstrap_check_make
 			copy_primary_bootstrap \
 			$(BOOTSTRAP_TOP) \
 			$(BOOTSTRAP_ROOT)
-
-#
-# Dependencies are not complete in all makefiles; therefore, remove bootstrap
-# build result and build from scratch if we are not using clearmake (which
-# tracks dependencies itself).
-#
-primary_bootstrap_check_make:
-	@ case "$(MAKE)" in						\
-	    *clearmake*)						\
-		;;							\
-	    *)								\
-		$(MAKE) BOOTSTRAP_ROOT=$(BOOTSTRAP_ROOT)		\
-		ERL_TOP=$(ERL_TOP)					\
-		bootstrap_clean						\
-		;;							\
-	esac
 
 primary_bootstrap_build: primary_bootstrap_mkdirs primary_bootstrap_compiler \
   primary_bootstrap_stdlib
@@ -1023,6 +1016,7 @@ bootstrap_root_clean:
 # $(BOOTSTRAP_TOP) for some reason should be empty).
 bootstrap_clean:
 	rm -f $(ERL_TOP)/bootstrap/lib/*/ebin/*.beam
+	rm -f $(ERL_TOP)/bootstrap/lib/*/ebin/*.app
 	rm -f $(ERL_TOP)/bootstrap/lib/*/egen/*
 	rm -f $(ERL_TOP)/bootstrap/lib/*/include/*.hrl
 	rm -f $(ERL_TOP)/bootstrap/primary_compiler/ebin/*

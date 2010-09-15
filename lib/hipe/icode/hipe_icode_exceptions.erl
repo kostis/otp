@@ -1,20 +1,20 @@
 %% -*- erlang-indent-level: 2 -*-
 %%
 %% %CopyrightBegin%
-%% 
-%% Copyright Ericsson AB 2004-2009. All Rights Reserved.
-%% 
+%%
+%% Copyright Ericsson AB 2004-2010. All Rights Reserved.
+%%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
 %% compliance with the License. You should have received a copy of the
 %% Erlang Public License along with this software. If not, it can be
 %% retrieved online at http://www.erlang.org/.
-%% 
+%%
 %% Software distributed under the License is distributed on an "AS IS"
 %% basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See
 %% the License for the specific language governing rights and limitations
 %% under the License.
-%% 
+%%
 %% %CopyrightEnd%
 %%
 %% ====================================================================
@@ -70,9 +70,6 @@
 %%              exit value and jump directly to the catch handler. An
 %%              alternative solution would be to have a new type of
 %%              fail instruction that takes a fail-to label...
-%%
-%%  CVS:
-%%    $Id$
 %% ====================================================================
 
 -module(hipe_icode_exceptions).
@@ -84,7 +81,7 @@
 
 %%----------------------------------------------------------------------------
 
--spec fix_catches(#cfg{}) -> #cfg{}.
+-spec fix_catches(cfg()) -> cfg().
 
 fix_catches(CFG) ->
   {Map, State} = build_mapping(find_catches(init_state(CFG))),
@@ -93,8 +90,7 @@ fix_catches(CFG) ->
 %% This finds the set of possible catch-stacks for each basic block
 
 find_catches(State) ->
-  find_catches(get_start_labels(State),
-	       clear_visited(clear_changed(State))).
+  find_catches(get_start_labels(State), clear_visited(clear_changed(State))).
 
 find_catches([L|Ls], State0) ->
   case is_visited(L, State0) of
@@ -145,8 +141,7 @@ catches_out_instr(I, Cs) ->
 %% This builds the mapping used for cloning
 
 build_mapping(State) ->
-  build_mapping(get_start_labels(State), clear_visited(State),
-		new_mapping()).
+  build_mapping(get_start_labels(State), clear_visited(State), new_mapping()).
 
 build_mapping([L|Ls], State0, Map) ->
   case is_visited(L, State0) of
@@ -344,6 +339,16 @@ pop_catch(Cs) ->
 
 pop_catch_1([[_|C] | Cs]) ->
   [C | pop_catch_1(Cs)];
+pop_catch_1([[] | Cs]) ->
+  %% The elements in the list represent different possible incoming
+  %% stacks of catch handlers to this BB.  Before the fixpoint has
+  %% been found these elements are underapproximations of the true
+  %% stacks, therefore it's possible for these elements to be too
+  %% short for the number of pops implied by the code in the BB.
+  %% We must not fail in that case, so we set pop([]) = [].
+  %% This fixes find_catches_crash.erl and compiler_tests in the
+  %% HiPE test suite.
+  [[] | pop_catch_1(Cs)];
 pop_catch_1([]) ->
   [].
 
@@ -382,10 +387,10 @@ get_renaming(C, Map) ->
 %%---------------------------------------------------------------------
 %% State abstraction
 
--record(state, {cfg					:: #cfg{},
+-record(state, {cfg					:: cfg(),
 		changed = false				:: boolean(),
-		succ					:: #cfg{},
-		pred					:: #cfg{},
+		succ					:: cfg(),
+		pred					:: cfg(),
 		start_labels				:: [icode_lbl(),...],
 		visited = hipe_icode_cfg:none_visited()	:: gb_set(),
 		out     = gb_trees:empty()		:: gb_tree(),

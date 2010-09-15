@@ -1081,11 +1081,12 @@ static int db_select_continue_tree(Process *p,
 static int db_select_tree(Process *p, DbTable *tbl, 
 			  Eterm pattern, int reverse, Eterm *ret)
 {
+    /* Strategy: Traverse backwards to build resulting list from tail to head */
     DbTableTree *tb = &tbl->tree;
     DbTreeStack* stack;
     struct select_context sc;
     struct mp_info mpi;
-    Eterm lastkey = NIL;
+    Eterm lastkey = THE_NON_VALUE;
     Eterm key;
     Eterm continuation;
     unsigned sz;
@@ -1293,7 +1294,7 @@ static int db_select_count_tree(Process *p, DbTable *tbl,
     DbTreeStack* stack;
     struct select_count_context sc;
     struct mp_info mpi;
-    Eterm lastkey = NIL;
+    Eterm lastkey = THE_NON_VALUE;
     Eterm key;
     Eterm continuation;
     unsigned sz;
@@ -1395,7 +1396,7 @@ static int db_select_chunk_tree(Process *p, DbTable *tbl,
     DbTreeStack* stack;
     struct select_context sc;
     struct mp_info mpi;
-    Eterm lastkey = NIL;
+    Eterm lastkey = THE_NON_VALUE;
     Eterm key;
     Eterm continuation;
     unsigned sz;
@@ -1636,7 +1637,7 @@ static int db_select_delete_tree(Process *p, DbTable *tbl,
     DbTableTree *tb = &tbl->tree;
     struct select_delete_context sc;
     struct mp_info mpi;
-    Eterm lastkey = NIL;
+    Eterm lastkey = THE_NON_VALUE;
     Eterm key;
     Eterm continuation;
     unsigned sz;
@@ -1817,10 +1818,14 @@ do_db_tree_foreach_offheap(TreeDbTerm *tdbt,
 			   void (*func)(ErlOffHeap *, void *),
 			   void * arg)
 {
+    ErlOffHeap tmp_offheap;
     if(!tdbt)
 	return;
     do_db_tree_foreach_offheap(tdbt->left, func, arg);
-    (*func)(&(tdbt->dbterm.off_heap), arg);
+    tmp_offheap.first = tdbt->dbterm.first_oh;
+    tmp_offheap.overhead = 0;
+    (*func)(&tmp_offheap, arg);
+    tdbt->dbterm.first_oh = tmp_offheap.first;
     do_db_tree_foreach_offheap(tdbt->right, func, arg);
 }
 
@@ -2574,6 +2579,7 @@ static int db_lookup_dbterm_tree(DbTable *tbl, Eterm key, DbUpdateHandle* handle
 static void db_finalize_dbterm_tree(DbUpdateHandle* handle)
 {
     if (handle->mustResize) {
+	ErlOffHeap tmp_offheap;
 	Eterm* top;
 	Eterm copy;
 	DbTerm* newDbTerm;
@@ -2588,18 +2594,15 @@ static void db_finalize_dbterm_tree(DbUpdateHandle* handle)
 	newDbTerm = &newp->dbterm;
     
 	newDbTerm->size = handle->new_size;
-	newDbTerm->off_heap.mso = NULL;
-	newDbTerm->off_heap.externals = NULL;
-    #ifndef HYBRID /* FIND ME! */
-	newDbTerm->off_heap.funs = NULL;
-    #endif
-	newDbTerm->off_heap.overhead = 0;
+	tmp_offheap.first = NULL;
+	tmp_offheap.overhead = 0;
 	
 	/* make a flat copy */
 	top = DBTERM_BUF(newDbTerm);
 	copy = copy_struct(make_tuple(handle->dbterm->tpl),
 			   handle->new_size,
-			   &top, &newDbTerm->off_heap);
+			   &top, &tmp_offheap);
+	newDbTerm->first_oh = tmp_offheap.first;
 	DBTERM_SET_TPL(newDbTerm,tuple_val(copy));
     
 	db_free_term_data(handle->dbterm);
@@ -2628,7 +2631,7 @@ static void traverse_backwards(DbTableTree *tb,
 {
     TreeDbTerm *this, *next;
 
-    if (lastkey == NIL) {
+    if (lastkey == THE_NON_VALUE) {
 	stack->pos = stack->slot = 0;
 	if (( this = tb->root ) == NULL) {
 	    return;
@@ -2666,7 +2669,7 @@ static void traverse_forward(DbTableTree *tb,
 {
     TreeDbTerm *this, *next;
 
-    if (lastkey == NIL) {
+    if (lastkey == THE_NON_VALUE) {
 	stack->pos = stack->slot = 0;
 	if (( this = tb->root ) == NULL) {
 	    return;

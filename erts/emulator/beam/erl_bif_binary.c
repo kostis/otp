@@ -555,8 +555,12 @@ static void ac_init_find_all(ACFindAllState *state, ACTrie *act, Sint startpos, 
 static void ac_restore_find_all(ACFindAllState *state, char *buff)
 {
     memcpy(state,buff,sizeof(ACFindAllState));
-    state->out = erts_alloc(ERTS_ALC_T_TMP, sizeof(FindallData) * (state->allocated));
-    memcpy(state->out,buff+sizeof(ACFindAllState),sizeof(FindallData)*state->m);
+    if (state->allocated > 0) {
+	state->out = erts_alloc(ERTS_ALC_T_TMP, sizeof(FindallData) * (state->allocated));
+	memcpy(state->out,buff+sizeof(ACFindAllState),sizeof(FindallData)*state->m);
+    } else {
+	state->out = NULL;
+    }
 }
 
 static void ac_serialize_find_all(ACFindAllState *state, char *buff)
@@ -828,10 +832,14 @@ static void bm_init_find_all(BMFindAllState *state, Sint startpos, Uint len)
 static void bm_restore_find_all(BMFindAllState *state, char *buff)
 {
     memcpy(state,buff,sizeof(BMFindAllState));
-    state->out = erts_alloc(ERTS_ALC_T_TMP, sizeof(FindallData) *
-			    (state->allocated));
-    memcpy(state->out,buff+sizeof(BMFindAllState),
-	   sizeof(FindallData)*state->m);
+    if (state->allocated > 0) {
+	state->out = erts_alloc(ERTS_ALC_T_TMP, sizeof(FindallData) *
+				(state->allocated));
+	memcpy(state->out,buff+sizeof(BMFindAllState),
+	       sizeof(FindallData)*state->m);
+    } else {
+	state->out = NULL;
+    }
 }
 
 static void bm_serialize_find_all(BMFindAllState *state, char *buff)
@@ -1128,7 +1136,7 @@ static int do_binary_match(Process *p, Eterm subject, Uint hsstart, Uint hsend,
 	    ret = am_nomatch;
 	} else if (acr == AC_RESTART) {
 	    int x = (sizeof(state) / sizeof(Eterm)) +
-		!!(sizeof(BMFindFirstState) % sizeof(Eterm));
+		!!(sizeof(ACFindFirstState) % sizeof(Eterm));
 #ifdef HARDDEBUG
 	    erts_printf("Trap ac!\n");
 #endif
@@ -2511,13 +2519,13 @@ BIF_RETTYPE binary_copy_trap(BIF_ALIST_2)
 	pb = (ProcBin *) HAlloc(BIF_P, PROC_BIN_SIZE);
 	pb->thing_word = HEADER_PROC_BIN;
 	pb->size = target_size;
-	pb->next = MSO(BIF_P).mso;
-	MSO(BIF_P).mso = pb;
+	pb->next = MSO(BIF_P).first;
+	MSO(BIF_P).first = (struct erl_off_heap_header*) pb;
 	pb->val = save;
 	pb->bytes = t;
 	pb->flags = 0;
 
-	MSO(BIF_P).overhead += target_size / sizeof(Eterm);
+	OH_OVERHEAD(&(MSO(BIF_P)), target_size / sizeof(Eterm));
 	BUMP_REDS(BIF_P,(pos - opos) / BINARY_COPY_LOOP_FACTOR);
 
 	BIF_RET(make_binary(pb));
@@ -2551,7 +2559,8 @@ BIF_RETTYPE binary_referenced_byte_size_1(BIF_ALIST_1)
     }
     pb = (ProcBin *) binary_val(bin);
     if (pb->thing_word == HEADER_PROC_BIN) {
-	res = erts_make_integer((Uint) pb->val->orig_size, BIF_P); /* XXX:PaN Halfword? orig_size is a long */
+	/* XXX:PaN - Halfword - orig_size is a long, we should handle that */
+	res = erts_make_integer((Uint) pb->val->orig_size, BIF_P);
     } else { /* heap binary */
 	res = erts_make_integer((Uint) ((ErlHeapBin *) pb)->size, BIF_P);
     }

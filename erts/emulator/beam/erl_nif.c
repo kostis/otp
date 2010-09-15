@@ -258,9 +258,7 @@ void enif_free_env(ErlNifEnv* env)
 
 static ERTS_INLINE void clear_offheap(ErlOffHeap* oh)
 {
-    oh->mso = NULL;
-    oh->externals = NULL;
-    oh->funs = NULL;
+    oh->first = NULL;
     oh->overhead = 0;
 }
 
@@ -364,7 +362,7 @@ ERL_NIF_TERM enif_make_copy(ErlNifEnv* dst_env, ERL_NIF_TERM src_term)
 #ifdef DEBUG
 static int is_offheap(const ErlOffHeap* oh)
 {
-    return oh->mso != NULL || oh->funs != NULL || oh->externals != NULL;
+    return oh->first != NULL;
 }
 #endif
 
@@ -627,13 +625,13 @@ Eterm enif_make_binary(ErlNifEnv* env, ErlNifBinary* bin)
 	pb = (ProcBin *) alloc_heap(env, PROC_BIN_SIZE);
 	pb->thing_word = HEADER_PROC_BIN;
 	pb->size = bptr->orig_size;
-	pb->next = MSO(env->proc).mso;
-	MSO(env->proc).mso = pb;
+	pb->next = MSO(env->proc).first;
+	MSO(env->proc).first = (struct erl_off_heap_header*) pb;
 	pb->val = bptr;
 	pb->bytes = (byte*) bptr->orig_bytes;
 	pb->flags = 0;
 	
-	MSO(env->proc).overhead += pb->size / sizeof(Eterm);
+	OH_OVERHEAD(&(MSO(env->proc)), pb->size / sizeof(Eterm));
 	bin_term = make_binary(pb);	
 	if (erts_refc_read(&bptr->refc, 1) == 1) {
 	    /* Total ownership transfer */
@@ -752,7 +750,19 @@ int enif_get_ulong(ErlNifEnv* env, Eterm term, unsigned long* ip)
 #endif     
 }
 
-int enif_get_double(ErlNifEnv* env, Eterm term, double* dp)
+#if HAVE_INT64 && SIZEOF_LONG != 8
+int enif_get_int64(ErlNifEnv* env, ERL_NIF_TERM term, ErlNifSInt64* ip)
+{
+    return term_to_Sint64(term, ip);
+}
+
+int enif_get_uint64(ErlNifEnv* env, ERL_NIF_TERM term, ErlNifUInt64* ip)
+{
+    return term_to_Uint64(term, ip);
+}
+#endif /* HAVE_INT64 && SIZEOF_LONG != 8 */
+
+int enif_get_double(ErlNifEnv* env, ERL_NIF_TERM term, double* dp)
 {
     FloatDef f;
     if (is_not_float(term)) {
@@ -818,6 +828,26 @@ ERL_NIF_TERM enif_make_ulong(ErlNifEnv* env, unsigned long i)
 {
     return IS_USMALL(0,i) ? make_small(i) : uint_to_big(i,alloc_heap(env,2));
 }
+
+#if HAVE_INT64 && SIZEOF_LONG != 8
+ERL_NIF_TERM enif_make_int64(ErlNifEnv* env, ErlNifSInt64 i)
+{
+    Uint* hp;
+    Uint need = 0;
+    erts_bld_sint64(NULL, &need, i);
+    hp = alloc_heap(env, need);
+    return erts_bld_sint64(&hp, NULL, i);
+}
+
+ERL_NIF_TERM enif_make_uint64(ErlNifEnv* env, ErlNifUInt64 i)
+{
+    Uint* hp;
+    Uint need = 0;
+    erts_bld_uint64(NULL, &need, i);
+    hp = alloc_heap(env, need);
+    return erts_bld_uint64(&hp, NULL, i);
+}
+#endif /* HAVE_INT64 && SIZEOF_LONG != 8 */
 
 ERL_NIF_TERM enif_make_double(ErlNifEnv* env, double d)
 {

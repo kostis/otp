@@ -64,8 +64,8 @@
 
     #  define ERL_VALGRIND_ASSERT_MEM_DEFINED(ptr,size) \
     ((void) ((VALGRIND_CHECK_MEM_IS_DEFINED(ptr,size) == 0) ? 1 : \
-    (fprintf(stderr,"\r\n####### VALGRIND_ASSSERT(%p,%d) failed at %s:%d\r\n",\
-	(ptr),(size), __FILE__, __LINE__), abort(), 0)))
+    (fprintf(stderr,"\r\n####### VALGRIND_ASSSERT(%p,%ld) failed at %s:%d\r\n",\
+	(ptr),(long)(size), __FILE__, __LINE__), abort(), 0)))
 #else
     #  define ERL_VALGRIND_MAKE_MEM_DEFINED(ptr,size)
     #  define ERL_VALGRIND_ASSERT_MEM_DEFINED(ptr,size)
@@ -706,12 +706,13 @@ static int get_bn_from_mpint(ErlNifEnv* env, ERL_NIF_TERM term, BIGNUM** bnp)
 
 static ERL_NIF_TERM rand_uniform_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {/* (Lo,Hi) */
-    BIGNUM *bn_from, *bn_to, *bn_rand;
+    BIGNUM *bn_from = NULL, *bn_to, *bn_rand;
     unsigned char* data;
     unsigned dlen;
     ERL_NIF_TERM ret;
     if (!get_bn_from_mpint(env, argv[0], &bn_from)
 	|| !get_bn_from_mpint(env, argv[1], &bn_rand)) {
+	if (bn_from) BN_free(bn_from);
 	return enif_make_badarg(env);
     }
 
@@ -770,7 +771,7 @@ static int inspect_mpint(ErlNifEnv* env, ERL_NIF_TERM term, ErlNifBinary* bin)
 static ERL_NIF_TERM dss_verify(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {/* (DigestType,Data,Signature,Key=[P, Q, G, Y]) */
     ErlNifBinary data_bin, sign_bin;
-    BIGNUM *dsa_p, *dsa_q, *dsa_g, *dsa_y;
+    BIGNUM *dsa_p = NULL, *dsa_q = NULL, *dsa_g = NULL, *dsa_y = NULL;
     unsigned char hmacbuf[SHA_DIGEST_LENGTH];
     ERL_NIF_TERM head, tail;
     DSA *dsa;
@@ -786,6 +787,11 @@ static ERL_NIF_TERM dss_verify(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 	|| !enif_get_list_cell(env, tail, &head, &tail)
 	|| !get_bn_from_mpint(env, head, &dsa_y)
 	|| !enif_is_empty_list(env,tail)) {
+    badarg:
+	if (dsa_p) BN_free(dsa_p);
+	if (dsa_q) BN_free(dsa_q);
+	if (dsa_g) BN_free(dsa_g);
+	if (dsa_y) BN_free(dsa_y);
 	return enif_make_badarg(env);
     }
     if (argv[0] == atom_sha && inspect_mpint(env, argv[1], &data_bin)) {
@@ -796,7 +802,7 @@ static ERL_NIF_TERM dss_verify(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 	memcpy(hmacbuf, data_bin.data, SHA_DIGEST_LENGTH);
     }
     else {
-	return enif_make_badarg(env);
+	goto badarg;
     }
 
     dsa = DSA_new();
@@ -950,7 +956,7 @@ static ERL_NIF_TERM rc4_encrypt_with_state(ErlNifEnv* env, int argc, const ERL_N
     RC4(rc4_key, data.size, data.data,
 	enif_make_new_binary(env, data.size, &new_data));
 
-    return enif_make_tuple2(env,argv[0],new_data);
+    return enif_make_tuple2(env,new_state,new_data);
 }   
 
 static ERL_NIF_TERM rc2_40_cbc_crypt(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -1119,7 +1125,7 @@ static ERL_NIF_TERM rsa_public_crypt(ErlNifEnv* env, int argc, const ERL_NIF_TER
     enif_alloc_binary(RSA_size(rsa), &ret_bin); 
 
     if (argv[3] == atom_true) {
-	ERL_VALGRIND_ASSERT_MEM_DEFINED(buf+i,data_len);
+	ERL_VALGRIND_ASSERT_MEM_DEFINED(data_bin.data,data_bin.size);
 	i = RSA_public_encrypt(data_bin.size, data_bin.data,
 			       ret_bin.data, rsa, padding);
 	if (i > 0) {
@@ -1139,6 +1145,7 @@ static ERL_NIF_TERM rsa_public_crypt(ErlNifEnv* env, int argc, const ERL_NIF_TER
 	return enif_make_binary(env,&ret_bin);
     }
     else {
+	enif_release_binary(&ret_bin);
 	return atom_error;
     }
 }
@@ -1167,7 +1174,7 @@ static ERL_NIF_TERM rsa_private_crypt(ErlNifEnv* env, int argc, const ERL_NIF_TE
     enif_alloc_binary(RSA_size(rsa), &ret_bin); 
 
     if (argv[3] == atom_true) {
-	ERL_VALGRIND_ASSERT_MEM_DEFINED(buf+i,data_len);
+	ERL_VALGRIND_ASSERT_MEM_DEFINED(data_bin.data,data_bin.size);
 	i = RSA_private_encrypt(data_bin.size, data_bin.data,
 				ret_bin.data, rsa, padding);
 	if (i > 0) {
@@ -1187,6 +1194,7 @@ static ERL_NIF_TERM rsa_private_crypt(ErlNifEnv* env, int argc, const ERL_NIF_TE
 	return enif_make_binary(env,&ret_bin);
     }
     else {
+	enif_release_binary(&ret_bin);
 	return atom_error;
     }
 }
@@ -1266,7 +1274,7 @@ static ERL_NIF_TERM dh_generate_key_nif(ErlNifEnv* env, int argc, const ERL_NIF_
 	|| !enif_get_list_cell(env, tail, &head, &tail)
 	|| !get_bn_from_mpint(env, head, &dh_params->g)
 	|| !enif_is_empty_list(env, tail)) {
-
+	DH_free(dh_params);
 	return enif_make_badarg(env);
     }
 
@@ -1293,7 +1301,7 @@ static ERL_NIF_TERM dh_generate_key_nif(ErlNifEnv* env, int argc, const ERL_NIF_
 static ERL_NIF_TERM dh_compute_key_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {/* (OthersPublicKey, MyPrivateKey, DHParams=[P,G]) */
     DH* dh_params = DH_new();
-    BIGNUM* pubkey;
+    BIGNUM* pubkey = NULL;
     int i;
     ErlNifBinary ret_bin;
     ERL_NIF_TERM ret, head, tail;
@@ -1321,6 +1329,7 @@ static ERL_NIF_TERM dh_compute_key_nif(ErlNifEnv* env, int argc, const ERL_NIF_T
 	    ret = atom_error;
 	}
     }
+    if (pubkey) BN_free(pubkey);
     DH_free(dh_params);
     return ret;
 }

@@ -28,13 +28,22 @@ struct external_thing_;
  * but is stored outside of any heap.
  */
 
-typedef struct erl_off_heap {
-    struct proc_bin* mso;	/* List of associated binaries. */
-#ifndef HYBRID /* FIND ME! */
-    struct erl_fun_thing* funs;	/* List of funs. */
+struct erl_off_heap_header {
+    Eterm thing_word;
+    Uint size;
+#if HALFWORD_HEAP
+    void* dummy_ptr_padding__;
 #endif
-    struct external_thing_* externals; /* List of external things. */
-    int overhead;		/* Administrative overhead (used to force GC). */
+    struct erl_off_heap_header* next;
+};
+
+#define OH_OVERHEAD(oh, size) do { \
+    (oh)->overhead += size;        \
+} while(0)
+
+typedef struct erl_off_heap {
+    struct erl_off_heap_header* first;
+    Uint64 overhead;     /* Administrative overhead (used to force GC). */
 } ErlOffHeap;
 
 #include "external.h"
@@ -201,9 +210,7 @@ do {							\
     (HEAP_FRAG_P)->next = NULL;				\
     (HEAP_FRAG_P)->alloc_size = (DATA_WORDS);		\
     (HEAP_FRAG_P)->used_size = (DATA_WORDS);            \
-    (HEAP_FRAG_P)->off_heap.mso = NULL;			\
-    (HEAP_FRAG_P)->off_heap.funs = NULL;		\
-    (HEAP_FRAG_P)->off_heap.externals = NULL;		\
+    (HEAP_FRAG_P)->off_heap.first = NULL; 	        \
     (HEAP_FRAG_P)->off_heap.overhead = 0;		\
 } while (0)
 

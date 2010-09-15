@@ -1575,14 +1575,14 @@ static void deliver_read_message(Port* prt, Eterm to,
 	pb = (ProcBin *) hp;
 	pb->thing_word = HEADER_PROC_BIN;
 	pb->size = len;
-	pb->next = ohp->mso;
-	ohp->mso = pb;
+	pb->next = ohp->first;
+	ohp->first = (struct erl_off_heap_header*)pb;
 	pb->val = bptr;
 	pb->bytes = (byte*) bptr->orig_bytes;
 	pb->flags = 0;
 	hp += PROC_BIN_SIZE;
 
-	ohp->overhead += pb->size / sizeof(Eterm);
+	OH_OVERHEAD(ohp, pb->size / sizeof(Eterm));
 	listp = make_binary(pb);
     }
 
@@ -1725,14 +1725,14 @@ deliver_vec_message(Port* prt,			/* Port */
 	    }
 	    pb->thing_word = HEADER_PROC_BIN;
 	    pb->size = iov->iov_len;
-	    pb->next = ohp->mso;
-	    ohp->mso = pb;
+	    pb->next = ohp->first;
+	    ohp->first = (struct erl_off_heap_header*)pb;
 	    pb->val = ErlDrvBinary2Binary(b);
 	    pb->bytes = base;
 	    pb->flags = 0;
 	    hp += PROC_BIN_SIZE;
 	    
-	    ohp->overhead += iov->iov_len / sizeof(Eterm);
+	    OH_OVERHEAD(ohp, iov->iov_len / sizeof(Eterm));
 
 	    if (listp == NIL) {  /* compatible with deliver_bin_message */
 		listp = make_binary(pb);
@@ -2259,12 +2259,12 @@ erts_port_control(Process* p, Port* prt, Uint command, Eterm iolist)
 		ProcBin* pb = (ProcBin *) HAlloc(p, PROC_BIN_SIZE);
 		pb->thing_word = HEADER_PROC_BIN;
 		pb->size = dbin->orig_size;
-		pb->next = MSO(p).mso;
-		MSO(p).mso = pb;
+		pb->next = MSO(p).first;
+		MSO(p).first = (struct erl_off_heap_header*)pb;
 		pb->val = ErlDrvBinary2Binary(dbin);
 		pb->bytes = (byte*) dbin->orig_bytes;
 		pb->flags = 0;
-		MSO(p).overhead += dbin->orig_size / sizeof(Eterm);
+		OH_OVERHEAD(&(MSO(p)), dbin->orig_size / sizeof(Eterm));
 		return make_binary(pb);
 	    }
 	    port_resp = dbin->orig_bytes;
@@ -3033,14 +3033,14 @@ driver_deliver_term(ErlDrvPort port,
 		driver_binary_inc_refc(b);  /* caller will free binary */
 		pb->thing_word = HEADER_PROC_BIN;
 		pb->size = size;
-		pb->next = ohp->mso;
-		ohp->mso = pb;
+		pb->next = ohp->first;
+		ohp->first = (struct erl_off_heap_header*)pb;
 		pb->val = ErlDrvBinary2Binary(b);
 		pb->bytes = ((byte*) b->orig_bytes) + offset;
 		pb->flags = 0;
 		mess =  make_binary(pb);
 		hp += PROC_BIN_SIZE;
-		ohp->overhead += pb->size / sizeof(Eterm);
+		OH_OVERHEAD(ohp, pb->size / sizeof(Eterm));
 	    }
 	    ptr += 3;
 	    break;
@@ -3072,12 +3072,12 @@ driver_deliver_term(ErlDrvPort port,
 		hp += PROC_BIN_SIZE;
 		pbp->thing_word = HEADER_PROC_BIN;
 		pbp->size = size;
-		pbp->next = ohp->mso;
-		ohp->mso = pbp;
+		pbp->next = ohp->first;
+		ohp->first = (struct erl_off_heap_header*)pbp;
 		pbp->val = bp;
 		pbp->bytes = (byte*) bp->orig_bytes;
 		pbp->flags = 0;
-		ohp->overhead += (pbp->size / sizeof(Eterm));
+		OH_OVERHEAD(ohp, pbp->size / sizeof(Eterm));
 		mess = make_binary(pbp);
 	    }
 	    ptr += 2;

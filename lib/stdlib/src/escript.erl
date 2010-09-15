@@ -43,9 +43,9 @@
                 exports_main :: boolean(),
                 has_records  :: boolean()}).
 
--type shebang()  :: string() | 'default' | 'undefined'.
--type comment()  :: string() | 'default' | 'undefined'.
--type emu_args() :: string() | 'undefined'.
+-type shebang() :: string().
+-type comment() :: string().
+-type emu_args() :: string().
 
 -record(sections, {type,
 		   shebang  :: shebang(),

@@ -115,7 +115,7 @@ interpret_all(Dir, [File0|Files], Mode, Window, Errors) ->
 interpret_all(_Dir, [], _Mode, _Window, []) ->
     true;
 interpret_all(Dir, [], _Mode, Window, Errors) ->
-    Msg = [begin		      
+    Msg = [begin
 	       File = filename:join(Dir, Name),
 	       Error = format_error(int:interpretable(File)),
 	       ["\n   ",Name,": ",Error]

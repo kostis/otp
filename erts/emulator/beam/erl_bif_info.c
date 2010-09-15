@@ -38,9 +38,6 @@
 #include "erl_instrument.h"
 #include "dist.h"
 #include "erl_gc.h"
-#ifdef ELIB_ALLOC_IS_CLIB
-#include "elib_stat.h"
-#endif
 #ifdef HIPE
 #include "hipe_arch.h"
 #endif
@@ -122,22 +119,26 @@ static char erts_system_version[] = ("Erlang " ERLANG_OTP_RELEASE
 #endif
 
 static Eterm
-bld_bin_list(Uint **hpp, Uint *szp, ProcBin* pb)
+bld_bin_list(Uint **hpp, Uint *szp, ErlOffHeap* oh)
 {
+    struct erl_off_heap_header* ohh;
     Eterm res = NIL;
     Eterm tuple;
 
-    for (; pb; pb = pb->next) {
-	Eterm val = erts_bld_uword(hpp, szp, (UWord) pb->val);
-	Eterm orig_size = erts_bld_uint(hpp, szp, pb->val->orig_size);
-
-	if (szp)
-	    *szp += 4+2;
-	if (hpp) {
-	    Uint refc = (Uint) erts_smp_atomic_read(&pb->val->refc);
-	    tuple = TUPLE3(*hpp, val, orig_size, make_small(refc));
-	    res = CONS(*hpp + 4, tuple, res);
-	    *hpp += 4+2;
+    for (ohh = oh->first; ohh; ohh = ohh->next) {
+	if (ohh->thing_word == HEADER_PROC_BIN) {
+	    ProcBin* pb = (ProcBin*) ohh;
+	    Eterm val = erts_bld_uword(hpp, szp, (UWord) pb->val);
+	    Eterm orig_size = erts_bld_uint(hpp, szp, pb->val->orig_size);
+    
+	    if (szp)
+		*szp += 4+2;
+	    if (hpp) {
+		Uint refc = (Uint) erts_smp_atomic_read(&pb->val->refc);
+		tuple = TUPLE3(*hpp, val, orig_size, make_small(refc));
+		res = CONS(*hpp + 4, tuple, res);
+		*hpp += 4+2;
+	    }
 	}
     }
     return res;
@@ -176,10 +177,10 @@ static void do_make_one_mon_element(ErtsMonitor *mon, void * vpmlc)
     Eterm tup;
     Eterm r = (IS_CONST(mon->ref)
 	       ? mon->ref
-	       : STORE_NC(&(pmlc->hp), &MSO(pmlc->p).externals, mon->ref));
+	       : STORE_NC(&(pmlc->hp), &MSO(pmlc->p), mon->ref));
     Eterm p = (IS_CONST(mon->pid)
 	       ? mon->pid
-	       : STORE_NC(&(pmlc->hp), &MSO(pmlc->p).externals, mon->pid));
+	       : STORE_NC(&(pmlc->hp), &MSO(pmlc->p), mon->pid));
     tup = TUPLE5(pmlc->hp, pmlc->tag, make_small(mon->type), r, p, mon->name);
     pmlc->hp += 6;
     pmlc->res = CONS(pmlc->hp, tup, pmlc->res);
@@ -240,7 +241,7 @@ static void do_make_one_lnk_element(ErtsLink *lnk, void * vpllc)
     Eterm old_res, targets = NIL;
     Eterm p = (IS_CONST(lnk->pid)
 	       ? lnk->pid
-	       : STORE_NC(&(pllc->hp), &MSO(pllc->p).externals, lnk->pid));
+	       : STORE_NC(&(pllc->hp), &MSO(pllc->p), lnk->pid));
     if (lnk->type == LINK_NODE) {
 	targets = make_small(ERTS_LINK_REFC(lnk));
     } else if (ERTS_LINK_ROOT(lnk) != NULL) {
@@ -1225,7 +1226,7 @@ process_info_aux(Process *BIF_P,
 	hp = HAlloc(BIF_P, 3 + mic.sz);
 	res = NIL;
 	for (i = 0; i < mic.mi_i; i++) {
-	    item = STORE_NC(&hp, &MSO(BIF_P).externals, mic.mi[i].entity); 
+	    item = STORE_NC(&hp, &MSO(BIF_P), mic.mi[i].entity); 
 	    res = CONS(hp, item, res);
 	    hp += 2;
 	}
@@ -1258,9 +1259,7 @@ process_info_aux(Process *BIF_P,
 	    else {
 		/* Monitor by pid. Build {process, Pid} and cons it. */
 		Eterm t;
-		Eterm pid = STORE_NC(&hp,
-				     &MSO(BIF_P).externals,
-				     mic.mi[i].entity);
+		Eterm pid = STORE_NC(&hp, &MSO(BIF_P), mic.mi[i].entity);
 		t = TUPLE2(hp, am_process, pid);
 		hp += 3;
 		res = CONS(hp, t, res);
@@ -1282,7 +1281,7 @@ process_info_aux(Process *BIF_P,
 
 	res = NIL;
 	for (i = 0; i < mic.mi_i; ++i) {
-	    item = STORE_NC(&hp, &MSO(BIF_P).externals, mic.mi[i].entity); 
+	    item = STORE_NC(&hp, &MSO(BIF_P), mic.mi[i].entity); 
 	    res = CONS(hp, item, res);
 	    hp += 2;
 	}
@@ -1491,7 +1490,7 @@ process_info_aux(Process *BIF_P,
     case am_group_leader: {
 	int sz = NC_HEAP_SIZE(rp->group_leader);
 	hp = HAlloc(BIF_P, 3 + sz);
-	res = STORE_NC(&hp, &MSO(BIF_P).externals, rp->group_leader);
+	res = STORE_NC(&hp, &MSO(BIF_P), rp->group_leader);
 	break;
     }
 
@@ -1516,9 +1515,9 @@ process_info_aux(Process *BIF_P,
 
     case am_binary: {
 	Uint sz = 3;
-	(void) bld_bin_list(NULL, &sz, MSO(rp).mso);
+	(void) bld_bin_list(NULL, &sz, &MSO(rp));
 	hp = HAlloc(BIF_P, sz);
-	res = bld_bin_list(&hp, NULL, MSO(rp).mso);
+	res = bld_bin_list(&hp, NULL, &MSO(rp));
 	break;
     }
 
@@ -1956,6 +1955,35 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 		    : am_enabled);
 	}
 #endif
+    } else if (BIF_ARG_1 == am_build_type) {
+#if defined(DEBUG)
+	ERTS_DECL_AM(debug);
+	BIF_RET(AM_debug);
+#elif defined(PURIFY)
+	ERTS_DECL_AM(purify);
+	BIF_RET(AM_purify);
+#elif defined(QUANTIFY)
+	ERTS_DECL_AM(quantify);
+	BIF_RET(AM_quantify);
+#elif defined(PURECOV)
+	ERTS_DECL_AM(purecov);
+	BIF_RET(AM_purecov);
+#elif defined(ERTS_GCOV)
+	ERTS_DECL_AM(gcov);
+	BIF_RET(AM_gcov);
+#elif defined(VALGRIND)
+	ERTS_DECL_AM(valgrind);
+	BIF_RET(AM_valgrind);
+#elif defined(GPROF)
+	ERTS_DECL_AM(gprof);
+	BIF_RET(AM_gprof);
+#elif defined(ERTS_ENABLE_LOCK_COUNT)
+	ERTS_DECL_AM(lcnt);
+	BIF_RET(AM_lcnt);
+#else
+	BIF_RET(am_opt);
+#endif
+	BIF_RET(res);
     } else if (BIF_ARG_1 == am_allocated_areas) {
 	res = erts_allocated_areas(NULL, NULL, BIF_P);
 	BIF_RET(res);
@@ -2124,86 +2152,8 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	BIF_RET(erts_alloc_util_allocators((void *) BIF_P));
     }
     else if (BIF_ARG_1 == am_elib_malloc) {
-#ifdef ELIB_ALLOC_IS_CLIB
-	struct elib_stat stat;
-	DECL_AM(heap_size);
-	DECL_AM(max_alloced_size);
-	DECL_AM(alloced_size);
-	DECL_AM(free_size);
-	DECL_AM(no_alloced_blocks);
-	DECL_AM(no_free_blocks);
-	DECL_AM(smallest_alloced_block);
-	DECL_AM(largest_free_block);
-	Eterm atoms[8];
-	Eterm ints[8];
-	Uint **hpp;
-	Uint sz;
-	Uint *szp;
-	int length;
-#ifdef DEBUG
-	Uint *endp;
-#endif
-
-	elib_stat(&stat);
-
-	/* First find out the heap size needed ... */
-	hpp = NULL;
-	szp = &sz;
-	sz = 0;
-
-    build_elib_malloc_term:
-	length = 0;
-	atoms[length] = AM_heap_size;
-	ints[length++] = erts_bld_uint(hpp, szp,
-				       (Uint) stat.mem_total*sizeof(Uint));
-	atoms[length] = AM_max_alloced_size;
-	ints[length++] = erts_bld_uint(hpp, szp,
-				       (Uint) stat.mem_max_alloc*sizeof(Uint));
-	atoms[length] = AM_alloced_size;
-	ints[length++] = erts_bld_uint(hpp, szp,
-				       (Uint) stat.mem_alloc*sizeof(Uint));
-	atoms[length] = AM_free_size;
-	ints[length++] = erts_bld_uint(hpp, szp,
-				       (Uint) stat.mem_free*sizeof(Uint));
-	atoms[length] = AM_no_alloced_blocks;
-	ints[length++] = erts_bld_uint(hpp, szp, (Uint) stat.mem_blocks);
-	atoms[length] = AM_no_free_blocks;
-	ints[length++] = erts_bld_uint(hpp, szp, (Uint) stat.free_blocks);
-	atoms[length] = AM_smallest_alloced_block;
-	ints[length++] = erts_bld_uint(hpp, szp,
-				       (Uint) stat.min_used*sizeof(Uint));
-	atoms[length] = AM_largest_free_block;
-	ints[length++] = erts_bld_uint(hpp, szp,
-				       (Uint) stat.max_free*sizeof(Uint));
-
-
-
-	ASSERT(length <= sizeof(atoms)/sizeof(Eterm));
-	ASSERT(length <= sizeof(ints)/sizeof(Eterm));
-
-	res = erts_bld_2tup_list(hpp, szp, length, atoms, ints);
-
-	if (szp) {
-	    /* ... and then build the term */
-	    hp = HAlloc(BIF_P, sz);
-#ifdef DEBUG
-	    endp = hp + sz;
-#endif
-
-	    szp = NULL;
-	    hpp = &hp;
-	    goto build_elib_malloc_term;
-	}
-
-#ifdef DEBUG
-	ASSERT(endp == hp);
-#endif
-
-#else /* #ifdef ELIB_ALLOC_IS_CLIB */
-	res = am_false;
-#endif /* #ifdef ELIB_ALLOC_IS_CLIB */
-
-	BIF_RET(res);
+	/* To be removed in R15 */
+        BIF_RET(am_false);
     }
     else if (BIF_ARG_1 == am_os_version) {
        int major, minor, build;
@@ -2314,6 +2264,15 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
     } else if (ERTS_IS_ATOM_STR("cpu_topology", BIF_ARG_1)) {
 	res = erts_get_cpu_topology_term(BIF_P, am_used);
 	BIF_TRAP1(erts_format_cpu_topology_trap, BIF_P, res);
+    } else if (ERTS_IS_ATOM_STR("update_cpu_info", BIF_ARG_1)) {
+	if (erts_update_cpu_info()) {
+	    ERTS_DECL_AM(changed);
+	    BIF_RET(AM_changed);
+	}
+	else {
+	    ERTS_DECL_AM(unchanged);
+	    BIF_RET(AM_unchanged);
+	}
 #if defined(__GNUC__) && defined(HAVE_SOLARIS_SPARC_PERFMON)
     } else if (ERTS_IS_ATOM_STR("ultrasparc_read_tick1", BIF_ARG_1)) {
 	register unsigned high asm("%l0");
@@ -2385,7 +2344,10 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
     }
     /* Arguments that are unusual follow ... */
     else if (ERTS_IS_ATOM_STR("logical_processors", BIF_ARG_1)) {
-	int no = erts_get_cpu_configured(erts_cpuinfo);
+	int no;
+	erts_smp_rwmtx_rlock(&erts_cpu_bind_rwmtx);
+	no = erts_get_cpu_configured(erts_cpuinfo);
+	erts_smp_rwmtx_runlock(&erts_cpu_bind_rwmtx);
 	if (no > 0)
 	    BIF_RET(make_small((Uint) no));
 	else {
@@ -2394,7 +2356,10 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	}
     }
     else if (ERTS_IS_ATOM_STR("logical_processors_online", BIF_ARG_1)) {
-	int no = erts_get_cpu_online(erts_cpuinfo);
+	int no;
+	erts_smp_rwmtx_rlock(&erts_cpu_bind_rwmtx);
+	no = erts_get_cpu_online(erts_cpuinfo);
+	erts_smp_rwmtx_runlock(&erts_cpu_bind_rwmtx);
 	if (no > 0)
 	    BIF_RET(make_small((Uint) no));
 	else {
@@ -2403,7 +2368,10 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	}
     }
     else if (ERTS_IS_ATOM_STR("logical_processors_available", BIF_ARG_1)) {
-	int no = erts_get_cpu_available(erts_cpuinfo);
+	int no;
+	erts_smp_rwmtx_rlock(&erts_cpu_bind_rwmtx);
+	no = erts_get_cpu_available(erts_cpuinfo);
+	erts_smp_rwmtx_runlock(&erts_cpu_bind_rwmtx);
 	if (no > 0)
 	    BIF_RET(make_small((Uint) no));
 	else {
@@ -2563,6 +2531,8 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
 	BIF_RET(erts_sched_stat_term(BIF_P, 1));
     } else if (ERTS_IS_ATOM_STR("taints", BIF_ARG_1)) {
 	BIF_RET(erts_nif_taints(BIF_P));
+    } else if (ERTS_IS_ATOM_STR("reader_groups_map", BIF_ARG_1)) {
+	BIF_RET(erts_get_reader_groups_map(BIF_P));
     }
 
     BIF_ERROR(BIF_P, BADARG);
@@ -2678,7 +2648,7 @@ BIF_RETTYPE port_info_2(BIF_ALIST_2)
 	hp = HAlloc(BIF_P, 3 + mic.sz);
 	res = NIL;
 	for (i = 0; i < mic.mi_i; i++) {
-	    item = STORE_NC(&hp, &MSO(BIF_P).externals, mic.mi[i].entity); 
+	    item = STORE_NC(&hp, &MSO(BIF_P), mic.mi[i].entity); 
 	    res = CONS(hp, item, res);
 	    hp += 2;
 	}
@@ -2698,7 +2668,7 @@ BIF_RETTYPE port_info_2(BIF_ALIST_2)
 	res = NIL;
 	for (i = 0; i < mic.mi_i; i++) {
 	    Eterm t;
-	    item = STORE_NC(&hp, &MSO(BIF_P).externals, mic.mi[i].entity); 
+	    item = STORE_NC(&hp, &MSO(BIF_P), mic.mi[i].entity); 
 	    t = TUPLE2(hp, am_process, item);
 	    hp += 3;
 	    res = CONS(hp, t, res);
@@ -3426,6 +3396,16 @@ BIF_RETTYPE erts_debug_get_internal_state_1(BIF_ALIST_1)
 	    else if (ERTS_IS_ATOM_STR("fake_scheduler_bindings", tp[1])) {
 		return erts_fake_scheduler_bindings(BIF_P, tp[2]);
 	    }
+	    else if (ERTS_IS_ATOM_STR("reader_groups_map", tp[1])) {
+		Sint groups;
+		if (is_not_small(tp[2]))
+		    BIF_ERROR(BIF_P, BADARG);
+		groups = signed_val(tp[2]);
+		if (groups < (Sint) 1 || groups > (Sint) INT_MAX)
+		    BIF_ERROR(BIF_P, BADARG);
+
+		BIF_RET(erts_debug_reader_groups_map(BIF_P, (int) groups));
+	    }
 	    break;
 	}
 	default:
@@ -3730,8 +3710,8 @@ static Eterm lcnt_build_lock_stats_term(Eterm **hpp, Uint *szp, erts_lcnt_lock_s
      * [{{file, line}, {tries, colls, {seconds, nanoseconds, n_blocks}}}]
      */
     
-    ethr_atomic_read(&stats->tries, (long *)&tries);
-    ethr_atomic_read(&stats->colls, (long *)&colls);
+    tries = (unsigned long) ethr_atomic_read(&stats->tries);
+    colls = (unsigned long) ethr_atomic_read(&stats->colls);
    
     line     = stats->line; 
     timer_s  = stats->timer.s;

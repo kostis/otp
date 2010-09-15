@@ -65,11 +65,9 @@
 #  endif
 #endif
 
-/*
- * For backward compatibility reasons, only encode integers that
- * fit in 28 bits (signed) using INTEGER_EXT.
+/* Does Sint fit in Sint32?
  */
-#define IS_SSMALL28(x) (((Uint) (((x) >> (28-1)) + 1)) < 2)
+#define IS_SSMALL32(x) (((Uint) (((x) >> (32-1)) + 1)) < 2)
 
 /*
  *   Valid creations for nodes are 1, 2, or 3. 0 can also be sent
@@ -504,7 +502,7 @@ erts_make_dist_ext_copy(ErtsDistExternal *edep, Uint xsize)
     ASSERT(edep->ext_endp >= edep->extp);
     ext_sz = edep->ext_endp - edep->extp;
 
-    align_sz = ERTS_WORD_ALIGN_PAD_SZ(dist_ext_sz + ext_sz);
+    align_sz = ERTS_EXTRA_DATA_ALIGN_SZ(dist_ext_sz + ext_sz);
 
     new_edep = erts_alloc(ERTS_ALC_T_EXT_TERM_DATA,
 			  dist_ext_sz + ext_sz + align_sz + xsize);
@@ -1470,11 +1468,11 @@ dec_pid(ErtsDistExternal *edep, Eterm** hpp, byte* ep, ErlOffHeap* off_heap, Ete
 	*hpp += EXTERNAL_THING_HEAD_SIZE + 1;
 
 	etp->header = make_external_pid_header(1);
-	etp->next = off_heap->externals;
+	etp->next = off_heap->first;
 	etp->node = node;
 	etp->data.ui[0] = data;
 
-	off_heap->externals = etp;
+	off_heap->first = (struct erl_off_heap_header*) etp;
 	*objp = make_external_pid(etp);
     }
     return ep;
@@ -1571,13 +1569,15 @@ enc_term(ErtsAtomCacheMap *acmp, Eterm obj, byte* ep, Uint32 dflags)
 
 	case SMALL_DEF:
 	    {
+		/* From R14B we no longer restrict INTEGER_EXT to 28 bits,
+		 * as done earlier for backward compatibility reasons. */
 		Sint val = signed_val(obj);
 
 		if ((Uint)val < 256) {
 		    *ep++ = SMALL_INTEGER_EXT;
 		    put_int8(val, ep);
 		    ep++;
-		} else if (sizeof(Sint) == 4 || IS_SSMALL28(val)) {
+		} else if (sizeof(Sint) == 4 || IS_SSMALL32(val)) {
 		    *ep++ = INTEGER_EXT;
 		    put_int32(val, ep);
 		    ep += 4;
@@ -1599,18 +1599,32 @@ enc_term(ErtsAtomCacheMap *acmp, Eterm obj, byte* ep, Uint32 dflags)
 	    break;
 
 	case BIG_DEF:
-	    if ((n = big_bytes(obj)) < 256) {
-		*ep++ = SMALL_BIG_EXT;
-		put_int8(n, ep);
-		ep += 1;
+	    {
+		int sign = big_sign(obj);
+		n = big_bytes(obj);
+		if (sizeof(Sint)==4 && n<=4) {
+		    Uint dig = big_digit(obj,0);		   
+		    Sint val = sign ? -dig : dig;
+		    if ((val<0) == sign) {
+			*ep++ = INTEGER_EXT;
+			put_int32(val, ep);
+			ep += 4;
+			break;
+		    }
+		}
+		if (n < 256) {
+		    *ep++ = SMALL_BIG_EXT;
+		    put_int8(n, ep);
+		    ep += 1;
+		}
+		else {
+		    *ep++ = LARGE_BIG_EXT;
+		    put_int32(n, ep);
+		    ep += 4;
+		}
+		*ep++ = sign;
+		ep = big_to_bytes(obj, ep);
 	    }
-	    else {
-		*ep++ = LARGE_BIG_EXT;
-		put_int32(n, ep);
-		ep += 4;
-	    }
-	    *ep++ = big_sign(obj);
-	    ep = big_to_bytes(obj, ep);
 	    break;
 
 	case PID_DEF:
@@ -1896,69 +1910,30 @@ is_external_string(Eterm list, int* p_is_string)
     return len;
 }
 
-/* Assumes that the ones to undo are preluding the lists. */ 
+/* Assumes that the ones to undo are preluding the list. */ 
 static void
 undo_offheap_in_area(ErlOffHeap* off_heap, Eterm* start, Eterm* end)
 {
     const Uint area_sz = (end - start) * sizeof(Eterm);
-    struct proc_bin* mso;
-    struct proc_bin** mso_nextp = NULL;
-#ifndef HYBRID /* FIND ME! */
-    struct erl_fun_thing* funs;
-    struct erl_fun_thing** funs_nextp = NULL;
-#endif
-    struct external_thing_* ext;
-    struct external_thing_** ext_nextp = NULL;
+    struct erl_off_heap_header* hdr;
+    struct erl_off_heap_header** hdr_nextp = NULL;
 
-    for (mso = off_heap->mso; ; mso=mso->next) {
-	if (!in_area(mso, start, area_sz)) {
-	    if (mso_nextp != NULL) {
-		*mso_nextp = NULL;
-		erts_cleanup_mso(off_heap->mso);
-		off_heap->mso = mso;
+    for (hdr = off_heap->first; ; hdr=hdr->next) {
+	if (!in_area(hdr, start, area_sz)) {
+	    if (hdr_nextp != NULL) {
+		*hdr_nextp = NULL;
+		erts_cleanup_offheap(off_heap);
+		off_heap->first = hdr;
 	    }
 	    break;
 	}
-	mso_nextp = &mso->next;
+	hdr_nextp = &hdr->next;
     }    
 
-#ifndef HYBRID /* FIND ME! */
-    for (funs = off_heap->funs; ; funs=funs->next) {
-	if (!in_area(funs, start, area_sz)) {
-	    if (funs_nextp != NULL) {
-		*funs_nextp = NULL;
-		erts_cleanup_funs(off_heap->funs);
-		off_heap->funs = funs;
-	    }
-	    break;
-	}
-	funs_nextp = &funs->next;
-    }    
-#endif
-    for (ext = off_heap->externals; ; ext=ext->next) {
-	if (!in_area(ext, start, area_sz)) {
-	    if (ext_nextp != NULL) {
-		*ext_nextp = NULL;
-		erts_cleanup_externals(off_heap->externals);
-		off_heap->externals = ext;
-	    }
-	    break;
-	}
-	ext_nextp = &ext->next;
-    }
-
-    /* Assert that the ones to undo were indeed preluding the lists. */ 
+    /* Assert that the ones to undo were indeed preluding the list. */ 
 #ifdef DEBUG
-    for (mso = off_heap->mso; mso != NULL; mso=mso->next) {
-	ASSERT(!in_area(mso, start, area_sz));
-    }    
-# ifndef HYBRID /* FIND ME! */
-    for (funs = off_heap->funs; funs != NULL; funs=funs->next) {
-	ASSERT(!in_area(funs, start, area_sz));
-    }    
-# endif
-    for (ext = off_heap->externals; ext != NULL; ext=ext->next) {
-	ASSERT(!in_area(ext, start, area_sz));
+    for (hdr = off_heap->first; hdr != NULL; hdr = hdr->next) {
+	ASSERT(!in_area(hdr, start, area_sz));
     }    
 #endif /* DEBUG */
 }
@@ -2202,11 +2177,11 @@ dec_term_atom_common:
 		    hp += EXTERNAL_THING_HEAD_SIZE + 1;
 		    
 		    etp->header = make_external_port_header(1);
-		    etp->next = off_heap->externals;
+		    etp->next = off_heap->first;
 		    etp->node = node;
 		    etp->data.ui[0] = num;
 
-		    off_heap->externals = etp;
+		    off_heap->first = (struct erl_off_heap_header*)etp;
 		    *objp = make_external_port(etp);
 		}
 
@@ -2284,10 +2259,10 @@ dec_term_atom_common:
 #else
 		    etp->header = make_external_ref_header(ref_words);
 #endif
-		    etp->next = off_heap->externals;
+		    etp->next = off_heap->first;
 		    etp->node = node;
 
-		    off_heap->externals = etp;
+		    off_heap->first = (struct erl_off_heap_header*)etp;
 		    *objp = make_external_ref(etp);
 		    ref_num = &(etp->data.ui32[0]);
 		}
@@ -2330,8 +2305,8 @@ dec_term_atom_common:
 		    hp += PROC_BIN_SIZE;
 		    pb->thing_word = HEADER_PROC_BIN;
 		    pb->size = n;
-		    pb->next = off_heap->mso;
-		    off_heap->mso = pb;
+		    pb->next = off_heap->first;
+		    off_heap->first = (struct erl_off_heap_header*)pb;
 		    pb->val = dbin;
 		    pb->bytes = (byte*) dbin->orig_bytes;
 		    pb->flags = 0;
@@ -2367,8 +2342,8 @@ dec_term_atom_common:
 		    pb = (ProcBin *) hp;
 		    pb->thing_word = HEADER_PROC_BIN;
 		    pb->size = n;
-		    pb->next = off_heap->mso;
-		    off_heap->mso = pb;
+		    pb->next = off_heap->first;
+		    off_heap->first = (struct erl_off_heap_header*)pb;
 		    pb->val = dbin;
 		    pb->bytes = (byte*) dbin->orig_bytes;
 		    pb->flags = 0;
@@ -2488,8 +2463,8 @@ dec_term_atom_common:
 		 * It is safe to link the fun into the fun list only when
 		 * no more validity tests can fail.
 		 */
-		funp->next = off_heap->funs;
-		off_heap->funs = funp;
+		funp->next = off_heap->first;
+		off_heap->first = (struct erl_off_heap_header*)funp;
 #endif
 
 		funp->fe = erts_put_fun_entry2(module, old_uniq, old_index,
@@ -2566,8 +2541,8 @@ dec_term_atom_common:
 		 * It is safe to link the fun into the fun list only when
 		 * no more validity tests can fail.
 		 */
-		funp->next = off_heap->funs;
-		off_heap->funs = funp;
+		funp->next = off_heap->first;
+		off_heap->first = (struct erl_off_heap_header*)funp;
 #endif
 		old_uniq = unsigned_val(temp);
 
@@ -2687,7 +2662,7 @@ encode_size_struct2(ErtsAtomCacheMap *acmp, Eterm obj, unsigned dflags)
 
 		if ((Uint)val < 256)
 		    result += 1 + 1;		/* SMALL_INTEGER_EXT */
-		else if (sizeof(Sint) == 4 || IS_SSMALL28(val))
+		else if (sizeof(Sint) == 4 || IS_SSMALL32(val))
 		    result += 1 + 4;		/* INTEGER_EXT */
 		else {
 		    DeclareTmpHeapNoproc(tmp_big,2);
@@ -2699,7 +2674,10 @@ encode_size_struct2(ErtsAtomCacheMap *acmp, Eterm obj, unsigned dflags)
 	    }
 	    break;
 	case BIG_DEF:
-	    if ((i = big_bytes(obj)) < 256)
+	    i = big_bytes(obj);
+	    if (sizeof(Sint)==4 && i <= 4 && (big_digit(obj,0)-big_sign(obj)) < (1<<31))
+		result += 1 + 4;          /* INTEGER_EXT */
+	    else if (i < 256)
 		result += 1 + 1 + 1 + i;  /* tag,size,sign,digits */
 	    else
 		result += 1 + 4 + 1 + i;  /* tag,size,sign,digits */

@@ -19,6 +19,10 @@
 -module(beam_lib).
 -behaviour(gen_server).
 
+%% Avoid warning for local function error/1 clashing with autoimported BIF.
+-compile({no_auto_import,[error/1]}).
+%% Avoid warning for local function error/2 clashing with autoimported BIF.
+-compile({no_auto_import,[error/2]}).
 -export([info/1,
 	 cmp/2,
 	 cmp_dirs/2,
@@ -105,6 +109,7 @@
                    | info_rsn().
 -type cmp_rsn()   :: {'modules_different', module(), module()}
                    | {'chunks_different', chunkid()}
+                   | 'different_chunks'
                    | info_rsn().
 
 %%-------------------------------------------------------------------------

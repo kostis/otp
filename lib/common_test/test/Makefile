@@ -32,6 +32,9 @@ MODULES= \
 	ct_event_handler_SUITE \
 	ct_groups_test_1_SUITE \
 	ct_groups_test_2_SUITE \
+	ct_sequence_1_SUITE \
+	ct_repeat_1_SUITE \
+	ct_testspec_1_SUITE \
 	ct_skip_SUITE \
 	ct_error_SUITE \
 	ct_test_server_if_1_SUITE \
@@ -91,7 +94,7 @@ release_spec: opt
 release_tests_spec:
 	$(INSTALL_DIR) $(RELSYSDIR)
 	$(INSTALL_DATA) $(ERL_FILES) $(COVERFILE) $(RELSYSDIR)
-	$(INSTALL_PROGRAM) common_test.spec $(RELSYSDIR)
+	$(INSTALL_DATA) common_test.spec $(RELSYSDIR)
 	chmod -f -R u+w $(RELSYSDIR)
 	@tar cf - *_SUITE_data | (cd $(RELSYSDIR); tar xf -)
 

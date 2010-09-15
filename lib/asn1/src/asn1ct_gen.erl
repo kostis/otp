@@ -536,14 +536,19 @@ gen_part_decode_funcs({primitive,bif},_TypeName,
 gen_part_decode_funcs(WhatKind,_TypeName,{_,Directive,_,_}) ->
     throw({error,{asn1,{"Not implemented yet",WhatKind," partial incomplete directive:",Directive}}}).
 
+
 gen_types(Erules,Tname,{RootL1,ExtList,RootL2}) 
   when is_list(RootL1), is_list(RootL2) ->
     gen_types(Erules,Tname,RootL1),
-    gen_types(Erules,Tname,ExtList),
+    Rtmod = list_to_atom(lists:concat(["asn1ct_gen_",erule(Erules),
+				       rt2ct_suffix(Erules)])),
+    gen_types(Erules,Tname,Rtmod:extaddgroup2sequence(ExtList)),
     gen_types(Erules,Tname,RootL2);
 gen_types(Erules,Tname,{RootList,ExtList}) when is_list(RootList) ->
     gen_types(Erules,Tname,RootList),
-    gen_types(Erules,Tname,ExtList);
+    Rtmod = list_to_atom(lists:concat(["asn1ct_gen_",erule(Erules),
+				       rt2ct_suffix(Erules)])),
+    gen_types(Erules,Tname,Rtmod:extaddgroup2sequence(ExtList));
 gen_types(Erules,Tname,[{'EXTENSIONMARK',_,_}|Rest]) ->
     gen_types(Erules,Tname,Rest);
 gen_types(Erules,Tname,[ComponentType|Rest]) ->
@@ -1543,19 +1548,18 @@ gen_record2(Name,SeqOrSet,Comps) ->
 
 gen_record2(_Name,_SeqOrSet,[],_Com,_Extension) ->
     true;
-gen_record2(Name,SeqOrSet,[{'EXTENSIONMARK',_,_}|T],Com,Extension) ->
-    gen_record2(Name,SeqOrSet,T,Com,Extension);
-gen_record2(_Name,_SeqOrSet,[H],Com,Extension) ->
-    #'ComponentType'{name=Cname} = H,
+gen_record2(_Name,_SeqOrSet,[H = #'ComponentType'{name=Cname}],Com,Extension) ->
     emit(Com),
     emit({asis,Cname}),
     gen_record_default(H, Extension);
-gen_record2(Name,SeqOrSet,[H|T],Com, Extension) ->
-    #'ComponentType'{name=Cname} = H,
+gen_record2(Name,SeqOrSet,[H = #'ComponentType'{name=Cname}|T],Com, Extension) ->
     emit(Com),
     emit({asis,Cname}),
     gen_record_default(H, Extension),
-    gen_record2(Name,SeqOrSet,T,", ", Extension).
+    gen_record2(Name,SeqOrSet,T,", ", Extension);
+gen_record2(Name,SeqOrSet,[_|T],Com,Extension) ->
+    %% skip EXTENSIONMARK, ExtensionAdditionGroup and other markers
+    gen_record2(Name,SeqOrSet,T,Com,Extension).
 
 gen_record_default(#'ComponentType'{prop='OPTIONAL'}, _)->
     emit(" = asn1_NOVALUE"); 

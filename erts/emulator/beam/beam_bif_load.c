@@ -337,7 +337,6 @@ BIF_RETTYPE finish_after_on_load_2(BIF_ALIST_2)
 		ep->code[0] == BIF_ARG_1 &&
 		ep->code[4] != 0) {
 		ep->address = (void *) ep->code[4];
-		ep->code[3] = 0;
 		ep->code[4] = 0;
 	    }
 	}
@@ -402,7 +401,7 @@ check_process_code(Process* rp, Module* modp)
     BeamInstr* end;
     Eterm* sp;
 #ifndef HYBRID /* FIND ME! */
-    ErlFunThing* funp;
+    struct erl_off_heap_header* oh;
     int done_gc = 0;
 #endif
 
@@ -470,27 +469,30 @@ check_process_code(Process* rp, Module* modp)
 
 #ifndef HYBRID /* FIND ME! */
  rescan:
-    for (funp = MSO(rp).funs; funp; funp = funp->next) {
-	BeamInstr* fun_code;
+    for (oh = MSO(rp).first; oh; oh = oh->next) {
+	if (thing_subtag(oh->thing_word) == FUN_SUBTAG) {
+	    ErlFunThing* funp = (ErlFunThing*) oh;
+	    BeamInstr* fun_code;
 
-	fun_code = funp->fe->address;
+	    fun_code = funp->fe->address;
 
-	if (INSIDE((BeamInstr *) funp->fe->address)) {
-	    if (done_gc) {
-		return am_true;
-	    } else {
-		/*
-		 * Try to get rid of this fun by garbage collecting.
-		 * Clear both fvalue and ftrace to make sure they
-		 * don't hold any funs.
-		 */
-		rp->freason = EXC_NULL;
-		rp->fvalue = NIL;
-		rp->ftrace = NIL;
-		done_gc = 1;
-                FLAGS(rp) |= F_NEED_FULLSWEEP;
-		(void) erts_garbage_collect(rp, 0, rp->arg_reg, rp->arity);
-		goto rescan;
+	    if (INSIDE((BeamInstr *) funp->fe->address)) {
+		if (done_gc) {
+		    return am_true;
+		} else {
+		    /*
+		    * Try to get rid of this fun by garbage collecting.
+		    * Clear both fvalue and ftrace to make sure they
+		    * don't hold any funs.
+		    */
+		    rp->freason = EXC_NULL;
+		    rp->fvalue = NIL;
+		    rp->ftrace = NIL;
+		    done_gc = 1;
+		    FLAGS(rp) |= F_NEED_FULLSWEEP;
+		    (void) erts_garbage_collect(rp, 0, rp->arg_reg, rp->arity);
+		    goto rescan;
+		}
 	    }
 	}
     }

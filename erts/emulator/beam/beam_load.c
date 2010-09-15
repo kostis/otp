@@ -1379,8 +1379,10 @@ read_code_header(LoaderState* stp)
     stp->ci = MI_FUNCTIONS + stp->num_functions + 1;
 
     stp->code[MI_ATTR_PTR] = 0;
+    stp->code[MI_ATTR_SIZE] = 0;
     stp->code[MI_ATTR_SIZE_ON_HEAP] = 0;
     stp->code[MI_COMPILE_PTR] = 0;
+    stp->code[MI_COMPILE_SIZE] = 0;
     stp->code[MI_COMPILE_SIZE_ON_HEAP] = 0;
     stp->code[MI_NUM_BREAKPOINTS] = 0;
 
@@ -1566,7 +1568,8 @@ load_code(LoaderState* stp)
 		    case 0:	/* Floating point number */
 			{
 			    Eterm* hp;
-#if !defined(ARCH_64) || HALFWORD_HEAP /* XXX:PaN - Should use ARCH_64 variant instead */
+/* XXX:PaN - Halfword should use ARCH_64 variant instead */
+#if !defined(ARCH_64) || HALFWORD_HEAP
 			    Uint high, low;
 # endif
 			    last_op->a[arg].val = new_literal(stp, &hp,
@@ -1933,7 +1936,7 @@ load_code(LoaderState* stp)
 		}
 		code[ci++] = (BeamInstr) stp->import[i].bf;
 		break;
-	    case 'P':		/* Byte offset into tuple */ /* XXX:PaN - * sizeof(Eterm or Eterm *) ? */
+	    case 'P':		/* Byte offset into tuple */
 		VerifyTag(stp, tag, TAG_u);
 		tmp = tmp_op->a[arg].val;
 		code[ci++] = (BeamInstr) ((tmp_op->a[arg].val+1) * sizeof(Eterm));
@@ -5198,8 +5201,10 @@ erts_make_stub_module(Process* p, Eterm Mod, Eterm Beam, Eterm Info)
 
     code[MI_NUM_FUNCTIONS] = n;
     code[MI_ATTR_PTR] = 0;
+    code[MI_ATTR_SIZE] = 0;
     code[MI_ATTR_SIZE_ON_HEAP] = 0;
     code[MI_COMPILE_PTR] = 0;
+    code[MI_COMPILE_SIZE] = 0;
     code[MI_COMPILE_SIZE_ON_HEAP] = 0;
     code[MI_NUM_BREAKPOINTS] = 0;
     code[MI_ON_LOAD_FUNCTION_PTR] = 0;

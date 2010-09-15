@@ -470,7 +470,7 @@ contents(Mod, Pid) ->
 %%--------------------------------------------------------------------
 functions(Mod) ->
     [F || F <- dbg_iserver:call({functions, Mod}), functions_1(F)].
- 
+
 functions_1([module_info, _Arity]) -> false;
 functions_1(_Func) -> true.
 

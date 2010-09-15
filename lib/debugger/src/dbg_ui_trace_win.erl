@@ -240,7 +240,7 @@ configure(WinInfo, TraceWin) ->
 	RB2old =:= close, RB2new =:= open ->
 	    gs:config('RB2', [{width, W-4}, {height, 10}]),
 	    gs:config(Win, {height,gs:read(Win, height)+10});
-	RB2old =:= open, RB2new =:= close ->		
+	RB2old =:= open, RB2new =:= close ->
 	    gs:config('RB2', [{width, 0}, {height, 0}, lower]),
 	    gs:config(Win, {height, gs:read(Win, height)-10});
 	true -> ignore

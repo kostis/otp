@@ -296,6 +296,30 @@ static int test_ulong(ErlNifEnv* env, unsigned long i1)
     return 1;
 }
 
+static int test_int64(ErlNifEnv* env, ErlNifSInt64 i1)
+{
+    ErlNifSInt64 i2 = 0;
+    ERL_NIF_TERM int_term = enif_make_int64(env, i1);
+    if (!enif_get_int64(env,int_term, &i2) || i1 != i2) {
+	fprintf(stderr, "test_int64(%ld) ...FAILED i2=%ld\r\n",
+		(long)i1, (long)i2);
+	return 0;
+    }
+    return 1;
+}
+
+static int test_uint64(ErlNifEnv* env, ErlNifUInt64 i1)
+{
+    ErlNifUInt64 i2 = 0;
+    ERL_NIF_TERM int_term = enif_make_uint64(env, i1);
+    if (!enif_get_uint64(env,int_term, &i2) || i1 != i2) {
+	fprintf(stderr, "test_ulong(%lu) ...FAILED i2=%lu\r\n",
+		(unsigned long)i1, (unsigned long)i2);
+	return 0;
+    }
+    return 1;
+}
+
 static int test_double(ErlNifEnv* env, double d1)
 {
     double d2 = 0;
@@ -319,6 +343,8 @@ static ERL_NIF_TERM type_test(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     unsigned uint;
     long slong;
     unsigned long ulong;
+    ErlNifSInt64 sint64;
+    ErlNifUInt64 uint64;
     double d;
     ERL_NIF_TERM atom, ref1, ref2;
 
@@ -352,11 +378,25 @@ static ERL_NIF_TERM type_test(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
 	slong -= slong / 3 + 1;
     } while (slong >= 0);
 
+    sint64 = ((ErlNifSInt64)1 << 63); /* INT64_MIN */
+    do {
+	if (!test_int64(env,sint64)) {
+	    goto error;
+	}
+	sint64 += ~sint64 / 3 + 1;
+    } while (sint64 < 0);
+    sint64 = ((ErlNifUInt64)1 << 63) - 1; /* INT64_MAX */
+    do {
+	if (!test_int64(env,sint64)) {
+	    goto error;
+	}
+	sint64 -= sint64 / 3 + 1;
+    } while (sint64 >= 0);
 
     uint = UINT_MAX;
     for (;;) {
 	if (!test_uint(env,uint)) {
-	    
+	    goto error;
 	}
 	if (uint == 0) break;
 	uint -= uint / 3 + 1;
@@ -364,10 +404,18 @@ static ERL_NIF_TERM type_test(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     ulong = ULONG_MAX;
     for (;;) {
 	if (!test_ulong(env,ulong)) {
-	    
+	    goto error;
 	}
 	if (ulong == 0) break;
 	ulong -= ulong / 3 + 1;
+    }    
+    uint64 = (ErlNifUInt64)-1; /* UINT64_MAX */
+    for (;;) {
+	if (!test_uint64(env,uint64)) {
+	    goto error;
+	}
+	if (uint64 == 0) break;
+	uint64 -= uint64 / 3 + 1;
     }    
 
     if (MAX_SMALL < INT_MAX) { /* 32-bit */
@@ -391,11 +439,18 @@ static ERL_NIF_TERM type_test(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
 
     for (i=-10 ; i < 10; i++) {
 	if (!test_long(env,MAX_SMALL+i) || !test_ulong(env,MAX_SMALL+i) ||
-	    !test_long(env,MIN_SMALL+i)) {
+	    !test_long(env,MIN_SMALL+i) ||
+	    !test_int64(env,MAX_SMALL+i) || !test_uint64(env,MAX_SMALL+i) ||
+	    !test_int64(env,MIN_SMALL+i)) {
 	    goto error;
 	}
+	if (MAX_SMALL < INT_MAX) {
+	    if (!test_int(env,MAX_SMALL+i) || !test_uint(env,MAX_SMALL+i) ||
+		!test_int(env,MIN_SMALL+i)) {
+		goto error;
+	    }
+	}
     }
-
     for (d=3.141592e-100 ; d < 1e100 ; d *= 9.97) {
 	if (!test_double(env,d) || !test_double(env,-d)) {
 	    goto error;
@@ -974,8 +1029,11 @@ static ERL_NIF_TERM make_term_list0(struct make_term_info* mti, int n)
 static ERL_NIF_TERM make_term_resource(struct make_term_info* mti, int n)
 {
     void* resource = enif_alloc_resource(mti->resource_type, 10);
+    ERL_NIF_TERM term;
     fill(resource, 10, n); 
-    return enif_make_resource(mti->dst_env, resource);
+    term = enif_make_resource(mti->dst_env, resource);
+    enif_release_resource(resource);
+    return term;
 }
 static ERL_NIF_TERM make_term_new_binary(struct make_term_info* mti, int n)
 {
@@ -1038,36 +1096,41 @@ static ERL_NIF_TERM make_term_copy(struct make_term_info* mti, int n)
 {
     return enif_make_copy(mti->dst_env, mti->other_term);
 }
+
+typedef ERL_NIF_TERM Make_term_Func(struct make_term_info*, int);
+static Make_term_Func* make_funcs[] = {
+    make_term_binary,
+    make_term_int,
+    make_term_ulong,
+    make_term_double,
+    make_term_atom,
+    make_term_existing_atom,
+    make_term_string,
+    //make_term_ref,
+    make_term_sub_binary,
+    make_term_uint,
+    make_term_long,
+    make_term_tuple0,
+    make_term_list0,
+    make_term_resource,
+    make_term_new_binary,
+    make_term_caller_pid,
+    make_term_tuple,
+    make_term_list,
+    make_term_list_cell,
+    make_term_tuple_from_array,
+    make_term_list_from_array,
+    make_term_garbage,
+    make_term_copy
+};
+static unsigned num_of_make_funcs()
+{
+    return sizeof(make_funcs)/sizeof(*make_funcs);
+}
 static int make_term_n(struct make_term_info* mti, int n, ERL_NIF_TERM* res)
 {
-    typedef ERL_NIF_TERM Make_term_Func(struct make_term_info*, int);
-    static Make_term_Func* funcs[] = {
-	make_term_binary,
-	make_term_int,
-	make_term_ulong,
-	make_term_double,
-	make_term_atom,
-	make_term_existing_atom,
-	make_term_string,
-	//make_term_ref,
-	make_term_sub_binary,
-	make_term_uint,
-	make_term_long,
-	make_term_tuple0,
-	make_term_list0,
-	make_term_resource,
-	make_term_new_binary,
-	make_term_caller_pid,
-	make_term_tuple,
-	make_term_list,
-	make_term_list_cell,
-	make_term_tuple_from_array,
-	make_term_list_from_array,
-	make_term_garbage,
-	make_term_copy
-    };
-    if (n < sizeof(funcs)/sizeof(*funcs)) {
-	*res = funcs[n](mti, n);
+    if (n < num_of_make_funcs()) {
+	*res = make_funcs[n](mti, n);
 	push_term(mti, *res);
 	return 1;
     }
@@ -1167,14 +1230,14 @@ static ERL_NIF_TERM grow_blob(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
 {
     union { void* vp; struct make_term_info* p; }mti;
     ERL_NIF_TERM term;
-    if (!enif_get_resource(env, argv[0], msgenv_resource_type, &mti.vp)) {
+    if (!enif_get_resource(env, argv[0], msgenv_resource_type, &mti.vp)
+	|| (argc>2 && !enif_get_uint(env,argv[2], &mti.p->n))) {
 	return enif_make_badarg(env);
     }
     mti.p->caller_env = env;
     mti.p->other_term = argv[1];
-    while (!make_term_n(mti.p, mti.p->n++, &term)) {
-	mti.p->n = 0;
-    }
+    mti.p->n %= num_of_make_funcs();
+    make_term_n(mti.p, mti.p->n++, &term);
     mti.p->blob = enif_make_list_cell(mti.p->dst_env, term, mti.p->blob);
     return atom_ok;
 }
@@ -1192,6 +1255,23 @@ static ERL_NIF_TERM send_blob(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     copy = enif_make_copy(env, mti.p->blob);
     res = enif_send(env, &to, mti.p->dst_env, mti.p->blob);
     return enif_make_tuple3(env, atom_ok, enif_make_int(env,res), copy);
+}
+
+static ERL_NIF_TERM send3_blob(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    union { void* vp; struct make_term_info* p; }mti;
+    ErlNifPid to;
+    ERL_NIF_TERM copy;
+    int res;
+    if (!enif_get_resource(env, argv[0], msgenv_resource_type, &mti.vp)
+	|| !enif_get_local_pid(env, argv[1], &to)) {
+	return enif_make_badarg(env);
+    }
+    mti.p->blob = enif_make_tuple2(mti.p->dst_env, 
+				   enif_make_copy(mti.p->dst_env, argv[2]),
+				   mti.p->blob);
+    res = enif_send(env, &to, mti.p->dst_env, mti.p->blob);
+    return enif_make_int(env,res);
 }
 
 void* threaded_sender(void *arg)
@@ -1253,6 +1333,28 @@ static ERL_NIF_TERM join_send_thread(ErlNifEnv* env, int argc, const ERL_NIF_TER
     return enif_make_tuple2(env, atom_ok, enif_make_int(env, mti.p->send_res));    
 }
 
+static ERL_NIF_TERM copy_blob(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    union { void* vp; struct make_term_info* p; }mti;
+    if (!enif_get_resource(env, argv[0], msgenv_resource_type, &mti.vp)) {
+	return enif_make_badarg(env);
+    }
+    return enif_make_copy(env, mti.p->blob);
+}
+
+static ERL_NIF_TERM send_term(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    ErlNifEnv* menv;
+    ErlNifPid pid;
+    int ret;
+    if (!enif_get_local_pid(env, argv[0], &pid)) {
+	return enif_make_badarg(env);
+    }
+    menv = enif_alloc_env();
+    ret = enif_send(env, &pid, menv, enif_make_copy(menv, argv[1]));
+    enif_free_env(menv);
+    return enif_make_int(env, ret);
+}
 
 static ErlNifFunc nif_funcs[] =
 {
@@ -1291,9 +1393,13 @@ static ErlNifFunc nif_funcs[] =
     {"alloc_msgenv", 0, alloc_msgenv},
     {"clear_msgenv", 1, clear_msgenv},
     {"grow_blob", 2, grow_blob},
+    {"grow_blob", 3, grow_blob},
     {"send_blob", 2, send_blob},
+    {"send3_blob", 3, send3_blob},
     {"send_blob_thread", 3, send_blob_thread},
-    {"join_send_thread", 1, join_send_thread}
+    {"join_send_thread", 1, join_send_thread},
+    {"copy_blob", 1, copy_blob},
+    {"send_term", 2, send_term}
 };
 
 ERL_NIF_INIT(nif_SUITE,nif_funcs,load,reload,upgrade,unload)

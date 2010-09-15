@@ -1365,7 +1365,7 @@ range_bnot(Range) ->
   Minus_one = range_init({-1,-1}, false),
   range_add(range_mult(Range, Minus_one), Minus_one).
 
--spec width(range_rep() | integer()) -> 'pos_inf' | non_neg_integer().
+-spec width(range_rep() | inf_integer()) -> 'pos_inf' | non_neg_integer().
 
 width({Min, Max}) -> inf_max([width(Min), width(Max)]);
 width(pos_inf) -> pos_inf;

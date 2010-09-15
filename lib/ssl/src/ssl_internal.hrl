@@ -23,6 +23,8 @@
 -ifndef(ssl_internal).
 -define(ssl_internal, true).
 
+-include_lib("public_key/include/public_key.hrl"). 
+
 %% basic binary constructors
 -define(BOOLEAN(X),  X:8/unsigned-big-integer).
 -define(BYTE(X),     X:8/unsigned-big-integer).
@@ -61,10 +63,13 @@
 	  validate_extensions_fun, 
 	  depth,      % integer()
 	  certfile,   % file()
+	  cert,       % der_encoded()
 	  keyfile,    % file()
-	  key,	      % 
+	  key,	      % der_encoded()
 	  password,   % 
+	  cacerts,    % [der_encoded()]
 	  cacertfile, % file()
+	  dh,         % der_encoded()
 	  dhfile,     % file()
 	  ciphers,    % 
 	  %% Local policy for the server if it want's to reuse the session
@@ -87,6 +92,28 @@
 	  header = 0,
 	  active = true
 	 }).
+
+-type reason()            :: term().
+-type reply()             :: term().
+-type msg()               :: term().
+-type from()              :: term().
+-type host()		  :: string() | tuple().
+-type port_num()	  :: integer().
+-type session_id()        :: 0 | binary().
+-type tls_version()       :: {integer(), integer()}.
+-type tls_atom_version()  :: sslv3 | tlsv1.
+-type cache_ref()         :: term(). 
+-type certdb_ref()        :: term(). 
+-type key_algo()          :: null | rsa | dhe_rsa | dhe_dss.
+-type enum_algo()          :: integer().
+-type public_key()        :: #'RSAPublicKey'{} | integer().
+-type public_key_params() :: #'Dss-Parms'{} | term().
+-type public_key_info()   :: {enum_algo(), public_key(), public_key_params()}.
+-type der_cert()          :: binary().
+-type private_key()       :: #'RSAPrivateKey'{} | #'DSAPrivateKey'{}.
+-type issuer()            :: tuple().
+-type serialnumber()      :: integer().
+-type cert_key()          :: {reference(), integer(), issuer()}.
 
 -endif. % -ifdef(ssl_internal).
 

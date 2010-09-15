@@ -366,16 +366,16 @@ static int initWinSock(void)
     WORD wVersionRequested;  
     WSADATA wsaData; 
     int i; 
-    /* FIXME problem for threaded ? */ 
-    static int initialized = 0;
+
+    static LONG volatile initialized = 0;
     
     wVersionRequested = MAKEWORD(1, 1); 
-    if (!initialized) {
-	initialized = 1;
+    if (InterlockedCompareExchange((LPLONG) &initialized,1L,0L) == 0L) {
 	/* FIXME not terminate, just a message?! */
 	if ((i = WSAStartup(wVersionRequested, &wsaData))) {
 	    EI_TRACE_ERR1("ei_connect_init",
 			  "ERROR: can't initialize windows sockets: %d",i);
+	    initialized = 2L;
 	    return 0;
 	}
 	
@@ -383,10 +383,14 @@ static int initWinSock(void)
 	    EI_TRACE_ERR0("initWinSock","ERROR: this version of windows "
 			  "sockets not supported");
 	    WSACleanup(); 
+	    initialized = 2L;
 	    return 0;
 	}
+	initialized = 3L;
+    } else while (initialized < 2) {
+	SwitchToThread();
     }
-    return 1;
+    return (int) (initialized - 2);
 }
 #endif
 
@@ -502,10 +506,14 @@ int ei_connect_init(ei_cnode* ec, const char* this_node_name,
 	return ERL_ERROR;
     }
 
-    if (this_node_name == NULL)
+    if (this_node_name == NULL) {
 	sprintf(thisalivename, "c%d", (int) getpid());
-    else
+    } else if (strlen(this_node_name) >= sizeof(thisalivename)) {
+	EI_TRACE_ERR0("ei_connect_init","ERROR: this_node_name too long");
+	return ERL_ERROR;
+    } else {
 	strcpy(thisalivename, this_node_name);
+    }
     
     if ((hp = ei_gethostbyname(thishostname)) == 0) {
 	/* Looking up IP given hostname fails. We must be on a standalone
