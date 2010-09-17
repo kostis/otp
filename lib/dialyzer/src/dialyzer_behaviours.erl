@@ -214,7 +214,8 @@ extract_atom_or_tuple(Cerl, Type) ->
 	    _         -> error
 	  end;
 	false ->
-	  case erl_types:t_is_tuple(Type) of
+	  case (erl_types:t_is_tuple(Type) andalso
+		not erl_types:t_is_tuple_set(Type)) of
 	    true ->
 	      Args = erl_types:t_tuple_args(Type),
 	      process_tuple_args(Args);

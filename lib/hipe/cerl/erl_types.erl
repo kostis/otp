@@ -138,6 +138,7 @@
 	 t_is_string/1,
 	 t_is_subtype/2,
 	 t_is_tuple/1,
+	 t_is_tuple_set/1,
 	 t_is_unit/1,
 	 t_is_var/1,
 	 t_limit/2,
@@ -1447,6 +1448,11 @@ t_tuple_subtypes(?tuple_set(List)) ->
 t_is_tuple(?tuple(_, _, _)) -> true;
 t_is_tuple(?tuple_set(_)) -> true;
 t_is_tuple(_) -> false.
+
+-spec t_is_tuple_set(erl_type()) -> boolean().
+
+t_is_tuple_set(?tuple_set(_)) -> true;
+t_is_tuple_set(_) -> false.
 
 %%-----------------------------------------------------------------------------
 %% Non-primitive types, including some handy syntactic sugar types
