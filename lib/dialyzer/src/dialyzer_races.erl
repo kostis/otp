@@ -2828,7 +2828,8 @@ translate(InpFun, InpArgTypes, InpArgs, InpState, CurrFun) ->
 				SpawnArity);
 	      N when N =:= 3 ; N =:= 4 ->
 		spawn_result({mfargs, InpArgs, InpArgTypes}, InpState, CurrFun,
-			     SpawnArity)
+			     SpawnArity);
+              _ -> other
 	    end;
 	  {erlang, spawn_opt, SpawnArity} ->
 	    NewInpFun = {erlang, spawn, SpawnArity-1},
