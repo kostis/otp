@@ -1311,12 +1311,17 @@ handle_receive(Tree, Map,
         RaceListSize = dialyzer_races:get_race_list_size(Races),
         Msgs = dialyzer_callgraph:get_msgs(Callgraph),
         CurrFun = dialyzer_races:get_curr_fun(Races),
-        Ann = cerl:get_ann(Tree),
-        File = get_file(Ann),
-        Line = abs(get_line(Ann)),
-        RcvTag = dialyzer_messages:create_rcv_tag(CurrFun, {File, Line}),
-        RcvTags = dialyzer_messages:get_rcv_tags(Msgs),
-        NewMsgs = dialyzer_messages:put_rcv_tags([RcvTag|RcvTags], Msgs),
+        NewMsgs =
+          case Clauses =:= [] of
+            true -> Msgs;
+            false ->
+              Ann = cerl:get_ann(Tree),
+              File = get_file(Ann),
+              Line = abs(get_line(Ann)),
+              RcvTag = dialyzer_messages:create_rcv_tag(CurrFun, {File, Line}),
+              RcvTags = dialyzer_messages:get_rcv_tags(Msgs),
+              dialyzer_messages:put_rcv_tags([RcvTag|RcvTags], Msgs)
+          end,
         NewCallgraph = dialyzer_callgraph:put_msgs(NewMsgs, Callgraph),
         State0 = State#state{callgraph = NewCallgraph},
         state__renew_race_list(['beg_case'|RaceList],
