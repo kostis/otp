@@ -32,11 +32,12 @@
 
 %% Data structure interfaces.
 -export([state__add_warning/2, state__cleanup/1,
-         state__get_callgraph/1, state__get_pid_tags/1,
-         state__get_races/1, state__get_records/1,
-         state__put_callgraph/2, state__put_pid_tags/2,
-         state__put_races/2, state__records_only/1,
-	 state__get_behaviour_api_dict/1,
+         state__get_callgraph/1, state__get_module/1,
+         state__get_pid_tags/1, state__get_races/1,
+         state__get_records/1, state__put_callgraph/2,
+         state__put_pid_tags/2, state__put_races/2,
+         state__records_only/1,
+         state__get_behaviour_api_dict/1,
 	 state__put_behaviour_api_dict/2,
 	 state__get_callback_ref_list/1,
 	 state__put_callback_ref_list/2,
@@ -3390,6 +3391,11 @@ state__cleanup(#state{callgraph = Callgraph,
 
 state__get_callgraph(#state{callgraph = Callgraph}) ->
   Callgraph.
+
+-spec state__get_module(state()) -> module().
+
+state__get_module(#state{module = Module}) ->
+  Module.
 
 -spec state__get_pid_tags(state()) -> [dialyzer_messages:pid_fun()].
 

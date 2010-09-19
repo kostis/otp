@@ -742,7 +742,7 @@ is_below_spawn(#pid_fun{kind = 'spawn', pid_mfa = PidMFA}, ReachingTo) ->
 is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
   case dict:find(Atom, RegDict) of
     'error' -> false;
-    {ok, List} ->
+    {'ok', List} ->
       Checks = [begin
                   E =:= Pid orelse
                     dialyzer_races:are_bound_labels(Pid, E, MVM) orelse
@@ -772,8 +772,8 @@ is_call_to_self(Tree, M, VFTab) ->
               {false, lists:member('self', Ret)};
             _ ->
               case dict:find(cerl_trees:get_label(ApplyOp), VFTab) of
-                error -> {false, false};
-                {ok, FunLabel} ->
+                'error' -> {false, false};
+                {'ok', FunLabel} ->
                   Ret =
                     case ets:lookup(cfgs, FunLabel) of
                       [] -> [];
@@ -864,8 +864,8 @@ is_call_to_spawn(Tree, M, VFTab) ->
               {false, Ret};
             _ ->
               case dict:find(cerl_trees:get_label(ApplyOp), VFTab) of
-                error -> {false, false};
-                {ok, FunLabel} ->
+                'error' -> {false, false};
+                {'ok', FunLabel} ->
                   Ret =
                     case ets:lookup(cfgs, FunLabel) of
                       [] -> [];

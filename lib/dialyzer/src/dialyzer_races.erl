@@ -2887,8 +2887,16 @@ spawn_result({single, FunArg}, State, CurrFun, _SpawnArity) ->
 	  debug("FunLabel\t: ~p\n",[FunLabel]),
 	  {true, spawn_result1(FunLabel, [], [], CurrFun, State)};
 	error ->
-	  debug("Arity ~p, Var Not Found\n",[_SpawnArity]),
-	  false
+          case cerl:var_name(FunArg) of
+            {F, A} ->
+              Module = dialyzer_dataflow:state__get_module(State),
+              MFA = {Module, F, A}, 
+              debug("Fun\t: ~p\n",[MFA]),
+              {true, spawn_result1(MFA, [], [], CurrFun, State)};
+            _Other ->
+              debug("Arity ~p, Label Not Found\n",[_SpawnArity]),
+              false
+          end
       end;
     false ->
       debug("Arity ~p, No Var\n",[_SpawnArity]),
