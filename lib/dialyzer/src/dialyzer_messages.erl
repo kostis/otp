@@ -359,7 +359,16 @@ bif_msg(RcvMsg) ->
   Inf1 = erl_types:t_inf(Msg1, RcvMsg),
   case erl_types:t_is_tuple(Inf1) of
     true -> Inf1;
-    false -> erl_types:t_none()
+    false ->
+      %% {'EXIT', Pid, Reason}
+      Msg2 =
+        erl_types:t_tuple(
+          [erl_types:t_atom('EXIT')|lists:duplicate(2, erl_types:t_any())]),
+      Inf2 = erl_types:t_inf(Msg2, RcvMsg),
+      case erl_types:t_is_tuple(Inf2) of
+        true -> Inf2;
+        false -> erl_types:t_none()
+      end
   end.
 
 bind_dict_vars(Label1, Label2, Dict) ->
