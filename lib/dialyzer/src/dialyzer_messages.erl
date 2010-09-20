@@ -55,6 +55,14 @@
 
 %%% ===========================================================================
 %%%
+%%%  Definitions
+%%%
+%%% ===========================================================================
+
+-define(undef, undef).
+
+%%% ===========================================================================
+%%%
 %%%  Types and Records
 %%%
 %%% ===========================================================================
@@ -70,7 +78,7 @@
                    pid = ?no_label :: label() | ?no_label,
                    pid_mfa         :: mfa_or_funlbl(), %% fun that owns the pid
                    fun_mfa         :: mfa_or_funlbl(),
-                   indirect = 'undef' :: mfa_or_funlbl() | 'undef'}).
+                   indirect = ?undef :: mfa_or_funlbl() | ?undef}).
 
 -record(rcv_fun,  {msgs = []       :: [erl_types:erl_type()],
                    fun_mfa         :: mfa_or_funlbl(),
@@ -166,7 +174,7 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Warns, Edges,
           'spawn' ->
             {PidTag#pid_fun.pid, PidTag#pid_fun.pid_mfa,
              case PidTag#pid_fun.indirect of
-               'undef' -> PidTag#pid_fun.fun_mfa;
+               ?undef -> PidTag#pid_fun.fun_mfa;
                Other -> Other
              end}
         end,
@@ -584,7 +592,7 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA,
         case Kind =/= 'self' of
           true ->
             case Indirect of
-              'undef' ->
+              ?undef ->
                 {RetTags, RetDad, RetMVM} =
                   group_spawn_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
                                        ReachingTo, Digraph, [], true, [],
@@ -675,14 +683,14 @@ group_spawn_pid_tags(#pid_fun{pid = CurrPid, fun_mfa = CurrFunMFA,
             {OldTagsAcc, AddOldTags, IndirectTags, CurrTag, MsgVarMap};
           false ->
             case (CurrFunMFA =:= FunMFA) andalso
-              (CurrPidMFA =:= PidMFA) andalso (Indirect =/= 'undef') of
+              (CurrPidMFA =:= PidMFA) andalso (Indirect =/= ?undef) of
               true ->
                 MsgVarMap1 =
                   case Pid =:= ?no_label of
                     true -> MsgVarMap;
                     false -> bind_dict_vars(CurrPid, Pid, MsgVarMap)
                   end,
-                case CurrIndirect =/= 'undef' of
+                case CurrIndirect =/= ?undef of
                   true ->
                     Path = digraph:get_path(Digraph, Indirect,
                                             CurrIndirect),
