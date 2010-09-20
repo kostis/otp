@@ -1153,15 +1153,14 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
            false -> State
          end};
       false ->
-        Msgs = dialyzer_callgraph:get_msgs(Callgraph),
-        Msgs1 =
+        Msgs =
           case MsgAndHeisenAnal of
             true ->
-              dialyzer_messages:var_fun_assignment(Arg, Vars, Msgs);
-            false -> Msgs
+              dialyzer_messages:var_fun_assignment(Arg, Vars, Callgraph);
+            false -> dialyzer_callgraph:get_msgs(Callgraph)
           end,
-        VFTab = dialyzer_messages:get_var_fun_tab(Msgs1),
-        Callgraph1 = dialyzer_callgraph:put_msgs(Msgs1, Callgraph),
+        VFTab = dialyzer_messages:get_var_fun_tab(Msgs),
+        Callgraph1 = dialyzer_callgraph:put_msgs(Msgs, Callgraph),
         {MsgAndHeisenAnal andalso
          dialyzer_messages:is_call_to_self(Arg, Module, VFTab),
          MsgAndHeisenAnal andalso
@@ -1174,17 +1173,17 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
     case MsgAndHeisenAnal of
       true ->
         Callgraph2 = State1#state.callgraph,
-        Msgs2 = dialyzer_callgraph:get_msgs(Callgraph2),
+        Msgs1 = dialyzer_callgraph:get_msgs(Callgraph2),
         case cerl:is_c_apply(Arg) orelse cerl:is_c_call(Arg) of
           true ->
             case state__lookup_call_site(Arg, State1) of
               'error' -> State1;
               {'ok', [ArgLabel]} when is_integer(ArgLabel) ->
-                Msgs3 = dialyzer_messages:var_call_assignment(ArgLabel, Vars,
+                Msgs2 = dialyzer_messages:var_call_assignment(ArgLabel, Vars,
                                                               ArgTypes,
                                                               erl_types:t_pid(),
-                                                              Msgs2),
-                Callgraph3 = dialyzer_callgraph:put_msgs(Msgs3, Callgraph2),
+                                                              Msgs1),
+                Callgraph3 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph2),
                 State1#state{callgraph = Callgraph3};
               _Else -> State1
             end;
@@ -1196,13 +1195,13 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
     case MsgAndHeisenAnal of
       true ->
         Callgraph4 = State2#state.callgraph,
-        Msgs4 = dialyzer_callgraph:get_msgs(Callgraph4),
-        ProcReg = dialyzer_messages:get_proc_reg(Msgs4),
+        Msgs3 = dialyzer_callgraph:get_msgs(Callgraph4),
+        ProcReg = dialyzer_messages:get_proc_reg(Msgs3),
         ProcReg1 =
           case dialyzer_messages:is_call_to_whereis(Arg) of
             true ->
               [PidArg] = Vars,
-              [AtomType] = dialyzer_messages:get_whereis_argtypes(Msgs4),
+              [AtomType] = dialyzer_messages:get_whereis_argtypes(Msgs3),
               case erl_types:t_is_atom(AtomType) of
                 true ->
                   case erl_types:t_atom_vals(AtomType) of
@@ -1221,9 +1220,9 @@ handle_let(Tree, Map, #state{callgraph = Callgraph, module = Module,
               end;
             false -> ProcReg
           end,
-        Msgs5 = dialyzer_messages:put_proc_reg(ProcReg1, Msgs4),
-        Msgs6 = dialyzer_messages:put_whereis_argtypes([], Msgs5),
-        Callgraph5 = dialyzer_callgraph:put_msgs(Msgs6, Callgraph4),
+        Msgs4 = dialyzer_messages:put_proc_reg(ProcReg1, Msgs3),
+        Msgs5 = dialyzer_messages:put_whereis_argtypes([], Msgs4),
+        Callgraph5 = dialyzer_callgraph:put_msgs(Msgs5, Callgraph4),
         State2#state{callgraph = Callgraph5};
       false -> State2
     end,

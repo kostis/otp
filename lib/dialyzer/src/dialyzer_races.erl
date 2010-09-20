@@ -443,23 +443,23 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                                               (A =:= 1 orelse A =:= 2 orelse
                                                A =:= 3 orelse A =:= 4) ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
-                                   Fun, CurrFun),
-                        {[#spawn_call{caller = CurrFun, callee = Fun,
+                                   Callee, CurrFun),
+                        {[#spawn_call{caller = CurrFun, callee = Callee,
                                       vars = Args}|RaceList],
                          RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
                          ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_monitor, A} when A =:= 1 orelse A =:= 3 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
-                                   Fun, CurrFun),
-                        {[#spawn_call{caller = CurrFun, callee = Fun,
+                                   Callee, CurrFun),
+                        {[#spawn_call{caller = CurrFun, callee = Callee,
                                       vars = Args}|RaceList],
                          RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
                          ProcReg, SendTags, WhereisArgtypes};
                       {erlang, spawn_opt, A} when A =:= 2 orelse A =:= 3 orelse
                                                   A =:= 4 orelse A =:= 5 ->
                         PidFun = dialyzer_messages:create_pid_tag_for_spawn(
-                                   Fun, CurrFun),
-                        {[#spawn_call{caller = CurrFun, callee = Fun,
+                                   Callee, CurrFun),
+                        {[#spawn_call{caller = CurrFun, callee = Callee,
                                       vars = Args}|RaceList],
                          RaceListSize + 1, RaceTags, 'no_t', [PidFun|PidTags],
                          ProcReg, SendTags, WhereisArgtypes};

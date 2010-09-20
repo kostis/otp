@@ -59,6 +59,7 @@
 %%%
 %%% ===========================================================================
 
+-define(no_args, no_args).
 -define(undef, undef).
 
 %%% ===========================================================================
@@ -778,6 +779,22 @@ is_bound_reg_name(Atom, Pid, RegDict, MVM) ->
       lists:any(fun(E) -> E end, Checks)
   end.
 
+-spec is_call_to_make_fun(cerl:cerl()) -> boolean().
+
+is_call_to_make_fun(Tree) ->
+  case cerl:is_c_call(Tree) of
+    false -> false;
+    true ->
+      Mod = cerl:call_module(Tree),
+      Name = cerl:call_name(Tree),
+      Arity = cerl:call_arity(Tree),
+      cerl:is_c_atom(Mod)
+	andalso cerl:is_c_atom(Name)
+	andalso (cerl:atom_val(Name) =:= 'make_fun')
+	andalso (cerl:atom_val(Mod) =:= 'erlang')
+	andalso (Arity =:= 3)
+  end.
+
 -spec is_call_to_self(cerl:cerl(), module(), dict()) ->
       {boolean(), boolean()}.
 
@@ -843,7 +860,7 @@ is_call_to_send(Tree) ->
       cerl:is_c_atom(Mod)
 	andalso cerl:is_c_atom(Name)
 	andalso (cerl:atom_val(Name) =:= '!')
-	andalso (cerl:atom_val(Mod) =:= erlang)
+	andalso (cerl:atom_val(Mod) =:= 'erlang')
 	andalso (Arity =:= 2)
   end.
 
@@ -957,6 +974,18 @@ lists_intersection(List1, List2) ->
   Diff2 = List2 -- List1, %% elements that exist in List2 but not in List1
   (List1 ++ List2) -- (Diff1 ++ Diff2).
 
+make_fun_args(Tree) ->
+  [Mod, Fun, Arity] = cerl:call_args(Tree),
+  case cerl:is_literal(Mod) andalso cerl:is_literal(Fun) andalso
+    cerl:is_literal(Arity) of
+    true ->
+      M = cerl:concrete(Mod),
+      F = cerl:concrete(Fun),
+      A = cerl:concrete(Arity),
+      {M, F, A};
+    false -> ?no_args
+  end.
+
 renew_analyzed_pid_tags(OldPidTags, Msgs) ->
   Msgs#msgs{old_pids = OldPidTags}.
 
@@ -981,10 +1010,13 @@ var_call_assignment(ArgLabel, [Var], ArgTypes, PidType,
 var_call_assignment(_ArgLabel, _Vars, _ArgTypes, _PidType, Msgs) ->
   Msgs.
 
--spec var_fun_assignment(cerl:cerl(), [cerl:cerl()], msgs()) ->
+-spec var_fun_assignment(cerl:cerl(), [cerl:cerl()],
+                         dialyzer_callgraph:callgraph()) ->
       msgs().
 
-var_fun_assignment(Arg, [Var], #msgs{var_fun_tab = VFTab} = Msgs) ->
+var_fun_assignment(Arg, [Var], Callgraph) ->
+  Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+  VFTab = Msgs#msgs.var_fun_tab,
   case cerl:is_c_fun(Arg) of
     true ->
       case cerl:is_c_var(Var) of
@@ -995,10 +1027,29 @@ var_fun_assignment(Arg, [Var], #msgs{var_fun_tab = VFTab} = Msgs) ->
           Msgs#msgs{var_fun_tab = VFTab1};
         false -> Msgs
       end;
-    false -> Msgs
+    false ->
+      case cerl:is_c_var(Var) of
+        true ->
+          case is_call_to_make_fun(Arg) of
+            true ->
+              case make_fun_args(Arg) of
+                ?no_args -> Msgs;
+                MFA ->
+                  case dialyzer_callgraph:lookup_label(MFA, Callgraph) of
+                    'error' -> Msgs;
+                    {'ok', ArgLabel} ->
+                      VarLabel = cerl_trees:get_label(Var),
+                      VFTab1 = dict:store(VarLabel, ArgLabel, VFTab),
+                      Msgs#msgs{var_fun_tab = VFTab1}
+                  end
+              end;
+            false -> Msgs
+          end;    
+        false -> Msgs
+      end
   end;
-var_fun_assignment(_Arg, _Vars, Msgs) ->
-  Msgs.
+var_fun_assignment(_Arg, _Vars, Callgraph) ->
+  dialyzer_callgraph:get_msgs(Callgraph).
 
 %%% ===========================================================================
 %%%
