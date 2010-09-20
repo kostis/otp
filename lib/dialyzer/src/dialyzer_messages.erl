@@ -352,6 +352,16 @@ backward_msg_analysis(CurrFun, Digraph) ->
   UParents = lists:usort(Parents),
   filter_parents(UParents, Digraph).
 
+bif_msg(RcvMsg) ->
+  %% {'DOWN', Ref, Type, Obj, Info}
+  Msg1 = erl_types:t_tuple(
+           [erl_types:t_atom('DOWN')|lists:duplicate(4, erl_types:t_any())]),
+  Inf1 = erl_types:t_inf(Msg1, RcvMsg),
+  case erl_types:t_is_tuple(Inf1) of
+    true -> Inf1;
+    false -> erl_types:t_none()
+  end.
+
 bind_dict_vars(Label1, Label2, Dict) ->
   TempDict = dialyzer_races:bind_dict_vars(Label1, Label2, Dict),
   dialyzer_races:bind_dict_vars(Label2, Label1, TempDict).
@@ -1152,9 +1162,18 @@ warn_unused_send_rcv_stmts(SendTags, RcvTags) ->
 
 warn_unused_send_rcv_stmts([], [], Warns) ->
   Warns;
-warn_unused_send_rcv_stmts([], [#rcv_fun{file_line = FileLine}|T], Warns) ->
-  W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, []}},
-  warn_unused_send_rcv_stmts([], T, [W|Warns]);
+warn_unused_send_rcv_stmts([],
+                           [#rcv_fun{msgs = Msgs, file_line = FileLine} = H|T],
+                           Warns) ->
+  BifMsgs = [B || B <- [bif_msg(M) || M <- Msgs], B =/= erl_types:t_none()],
+  case BifMsgs of
+    [] ->
+      W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, []}},
+      warn_unused_send_rcv_stmts([], T, [W|Warns]);
+    _Other ->
+      {_, Ws} = check_sent_msgs(BifMsgs, [H], Warns),
+      warn_unused_send_rcv_stmts([], T, Ws ++ Warns)
+  end;
 warn_unused_send_rcv_stmts(SendTags, RcvTags, Warns) ->
   SentMsgs = [T#send_fun.msg || T <- SendTags],
   {Checks, Warns1} = check_sent_msgs(SentMsgs, RcvTags, Warns),
