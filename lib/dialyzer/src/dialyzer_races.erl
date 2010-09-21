@@ -134,7 +134,6 @@
   dialyzer_dataflow:state().
 
 store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
-
   Races = dialyzer_dataflow:state__get_races(InpState),
   CurrFun = Races#races.curr_fun,
   {Fun, ArgTypes, Args, State} =
