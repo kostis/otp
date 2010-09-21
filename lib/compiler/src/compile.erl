@@ -658,27 +658,19 @@ binary_passes() ->
 -spec core_purity(#compile{}) -> {ok, #compile{}} | {error, #compile{}}.
 core_purity(#compile{code = Core, options = Opts} = St) ->
     case proplists:get_value(all_pure, Opts) of
-        true ->
+        true -> %% Skip actual analysis to test the patch.
             {ok, St};
         _ ->
-    PltFile = proplists:get_value(plt, Opts, purity_plt:get_default_path()),
-    Plt = case purity_plt:load(PltFile) of
-        {ok, Data} ->
-            Data;
-        {error, _Reason} ->
-            %io:format("Problem loading PLT file ~s (~p)~n", [PltFile, _Reason]),
-            purity_plt:new()
-    end,
-    Table = purity:module(Core, Opts, Plt),
-    Final = purity:specialize(Table, Opts),
-    find_impure_guards(Final, St) end.
+            %% This will silenty ignore analysis errors atm.
+            find_impure_guards(purity:module(Core, Opts), St)
+    end.
 
 %% Converts warnings of user defined guards to errors, depending
 %% on their purity.
 -spec find_impure_guards(dict(), #compile{}) -> {ok, #compile{}} | {error, #compile{}}.
 find_impure_guards(Table, #compile{} = St) ->
     F = fun({File, {Line, erl_lint, {user_defined_guard, Name}}} = W, {Es, Ws}) ->
-            case purity_utils:is_pure(get_mfa(Name, St), Table) of
+            case purity:is_pure(get_mfa(Name, St), Table) of
                 true ->
                     {Es, [W|Ws]};
                 _ ->
