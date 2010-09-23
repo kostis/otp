@@ -29,10 +29,11 @@
 
 %% Message Analysis
 
--export([add_clauses_pid/2,  get_race_list_ret/2, is_call_to_self/3,
-         is_call_to_send/1, is_call_to_spawn/1, is_call_to_spawn/3,
-         is_call_to_whereis/1, msg/1, prioritize_msg_warns/1,
-         var_call_assignment/5, var_fun_assignment/3]).
+-export([add_clauses_pid/2, add_more_warnings/2, filter_msg_warns/2,
+         get_race_list_ret/2, is_call_to_self/3, is_call_to_send/1,
+         is_call_to_spawn/1, is_call_to_spawn/3, is_call_to_whereis/1,
+         msg/1, prioritize_msg_warns/1, var_call_assignment/5,
+         var_fun_assignment/3]).
 
 %% Record Interfaces
 
@@ -81,11 +82,13 @@
                    fun_mfa         :: mfa_or_funlbl(),
                    indirect = ?undef :: mfa_or_funlbl() | ?undef}).
 
--record(rcv_fun,  {msgs = []       :: [erl_types:erl_type()],
+-record(rcv_fun,  {is_used = false :: boolean(),
+                   msgs = []       :: [erl_types:erl_type()],
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
 
 -record(send_fun, {pid             :: dest(),
+                   is_used = false :: boolean(),
                    msg             :: erl_types:erl_type(),
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
@@ -141,29 +144,34 @@ msg(State) ->
   SortedRcvTags = lists:usort(Msgs#msgs.rcv_tags),
   ProcReg = Msgs#msgs.proc_reg,
   VCTab = Msgs#msgs.var_call_tab,
-  State1 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, ProcReg,
-                VCTab, ExtraEdges, State),
-  Callgraph1 = dialyzer_dataflow:state__get_callgraph(State1),
-  Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
-  Msgs2 = renew_analyzed_pid_tags(OldPidTags1, Msgs1),
-  Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
+  Msgs1 = Msgs#msgs{send_tags = SortedSendTags, rcv_tags = SortedRcvTags},
+  Callgraph1 = dialyzer_callgraph:put_msgs(Msgs1, Callgraph),
+  State1 = dialyzer_dataflow:state__put_callgraph(Callgraph1, State),
+  State2 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, ProcReg,
+                VCTab, ExtraEdges, State1),
+  Callgraph2 = dialyzer_dataflow:state__get_callgraph(State2),
+  Msgs2 = dialyzer_callgraph:get_msgs(Callgraph2),
+  Msgs3 = renew_analyzed_pid_tags(OldPidTags1, Msgs2),
+  Callgraph3 = dialyzer_callgraph:put_msgs(Msgs3, Callgraph2),
   digraph:del_edges(Digraph, ExtraEdges),
-  dialyzer_dataflow:state__put_callgraph(Callgraph2, State1).
+  dialyzer_dataflow:state__put_callgraph(Callgraph3, State2).
 
 msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Edges, State) ->
   Callgraph1 = dialyzer_dataflow:state__get_callgraph(State),
-  Warns = msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, [],
-               Edges, Callgraph1),
+  {UsedSendTags, UsedRcvTags, Warns} =
+    msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, [], Edges,
+         [], [], Callgraph1),
   Msgs1 = dialyzer_callgraph:get_msgs(Callgraph1),
-  Msgs2 = add_warnings(Warns, Msgs1),
-  Callgraph2 = dialyzer_callgraph:put_msgs(Msgs2, Callgraph1),
+  Msgs2 = mark_used_send_rcv_tags(UsedSendTags, UsedRcvTags, Msgs1),
+  Msgs3 = add_warnings(Warns, Msgs2),
+  Callgraph2 = dialyzer_callgraph:put_msgs(Msgs3, Callgraph1),
   State1 = dialyzer_dataflow:state__put_callgraph(Callgraph2, State),
   dialyzer_dataflow:state__put_pid_tags([], State1).
 
 msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Warns, Edges,
-     Callgraph) ->
+     SendAcc, RcvAcc, Callgraph) ->
   case PidTagGroups of
-    [] -> Warns;
+    [] -> {SendAcc, RcvAcc, Warns};
     [H|T] ->
       {PidTag, MsgVarMap} = H,
       Kind = PidTag#pid_fun.kind,
@@ -194,7 +202,7 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Warns, Edges,
       dialyzer_callgraph:add_edges(Edges, Callgraph),
       Warns1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags),
       msg1(T, SendTags, RcvTags, ProcReg, VCTab, Warns1 ++ Warns, Edges,
-           Callgraph)
+           PidSendTags ++ SendAcc, CFRcvTags ++ RcvAcc, Callgraph)
   end.
 
 go_from_pid_tag(MFA, Pid, SendTags, ProcReg, VCTab, MsgVarMap, Callgraph) ->
@@ -986,6 +994,16 @@ make_fun_args(Tree) ->
     false -> ?no_args
   end.
 
+mark_used_send_rcv_tags(UsedSendTags, UsedRcvTags,
+                        #msgs{send_tags = SendTags,
+                              rcv_tags = RcvTags} = Msgs) ->
+  SendTags1 = SendTags -- UsedSendTags,
+  UsedSendTags1 = [U#send_fun{is_used = true}|| U <- UsedSendTags],
+  RcvTags1 = RcvTags -- UsedRcvTags,
+  UsedRcvTags1 = [U#rcv_fun{is_used = true}|| U <- UsedRcvTags],
+  Msgs#msgs{send_tags = UsedSendTags1 ++ SendTags1,
+            rcv_tags = UsedRcvTags1 ++ RcvTags1}.
+
 renew_analyzed_pid_tags(OldPidTags, Msgs) ->
   Msgs#msgs{old_pids = OldPidTags}.
 
@@ -1057,18 +1075,28 @@ var_fun_assignment(_Arg, _Vars, Callgraph) ->
 %%%
 %%% ===========================================================================
 
+-spec add_more_warnings([dial_warning()], msgs()) ->
+      [dial_warning()].
+
+add_more_warnings(Warns, #msgs{send_tags = SendTags, rcv_tags = RcvTags}) ->
+  UnusedSendTags = [T || T <- SendTags, not T#send_fun.is_used],
+  Checks = lists:duplicate(length(UnusedSendTags), true),
+  NewWarns = warn_unused_send_stmts(Checks, UnusedSendTags, Warns),
+  UnusedRcvTags = [T || T <- RcvTags, not T#rcv_fun.is_used],
+  warn_unused_send_rcv_stmts([], UnusedRcvTags, NewWarns).
+
 add_warnings(Warns, #msgs{warnings = OldWarns} = Msgs) ->
   Msgs#msgs{warnings = Warns ++ OldWarns}.
 
-check_rcv_pats([], _FileLine, Warns) ->
+check_rcv_pats([], _FileLine, _RcvTag, Warns) ->
   Warns;
-check_rcv_pats([Check], FileLine, Warns) ->
-  warn_unused_rcv_pats(Check, FileLine, Warns);
-check_rcv_pats([H|T], FileLine, Warns) ->
+check_rcv_pats([Check], FileLine, RcvTag, Warns) ->
+  warn_unused_rcv_pats(Check, FileLine, RcvTag, Warns);
+check_rcv_pats([H|T], FileLine, RcvTag, Warns) ->
   Check = lists:foldl(fun(X, Acc) ->
                           lists:zipwith(fun(Y, Z) -> Y orelse Z end, Acc, X)
                       end, H, T),
-  warn_unused_rcv_pats(Check, FileLine, Warns).
+  warn_unused_rcv_pats(Check, FileLine, RcvTag, Warns).
 
 check_sent_msgs(SentMsgs, RcvTags, Warns) ->
   NoSends = length(SentMsgs),
@@ -1076,21 +1104,87 @@ check_sent_msgs(SentMsgs, RcvTags, Warns) ->
 
 check_sent_msgs(_SentMsgs, [], Checks, Warns) ->
   {Checks, Warns};
-check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine}|T],
+check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine} = H|T],
                 PrevChecks, Warns) ->
   Checks = [[erl_types:t_is_subtype(SentMsg, Msg) || Msg <- Msgs]
             || SentMsg <- SentMsgs],
   Checks1 = [lists:any(fun(E) -> E end, Check) || Check <- Checks],
   Warns1 =
     case lists:any(fun(E) -> E end, lists:flatten(Checks1)) of
-      true -> check_rcv_pats(Checks, FileLine, Warns);
+      true -> check_rcv_pats(Checks, FileLine, H, Warns);
       false ->
-        W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_msg, []}},
+        W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_msg, [H]}},
         [W|Warns]
     end,
   Checks2 = [lists:all(fun(E) -> not E end, Check) || Check <- Checks],
   NewChecks = lists:zipwith(fun(X, Y) -> X andalso Y end, PrevChecks, Checks2),
   check_sent_msgs(SentMsgs, T, NewChecks, Warns1).
+
+-spec filter_msg_warns([dial_warning()], msgs()) -> [dial_warning()].
+
+filter_msg_warns(Warns, #msgs{send_tags = SendTags, rcv_tags = RcvTags}) ->
+  UnusedSendMsgs = [T#send_fun.msg || T <- SendTags, not T#send_fun.is_used],
+  filter_msg_warns(Warns, UnusedSendMsgs, RcvTags, []).
+
+filter_msg_warns([], _UnusedSendMsgs, _RcvTags, Acc) ->
+  Acc;
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_send, [R]}}|T],
+                 UnusedSendMsgs, RcvTags, Acc) ->
+  NewAcc =
+    case UnusedSendMsgs of
+      [] -> [{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_send, []}}|Acc];
+      _Other ->
+        W = {?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_msg, [R]}},
+        filter_msg_warns([W], UnusedSendMsgs, RcvTags, Acc)
+    end,
+  filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc);
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_msg, [R]}}|T],
+                 UnusedSendMsgs, RcvTags, Acc) ->
+  RcvMsgs = R#rcv_fun.msgs,
+  NewAcc =
+    case is_no_msg_rcv(RcvMsgs, UnusedSendMsgs) of
+      true ->
+        [{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_msg, []}}|Acc];
+      false ->
+        UP = lists:seq(1, length(RcvMsgs)),
+        W = {?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, [R|UP]}},
+        filter_msg_warns([W], UnusedSendMsgs, RcvTags, Acc)
+    end,
+  filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc);
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, [R|UP]}}|T],
+                 UnusedSendMsgs, RcvTags, Acc) ->
+  RcvMsgs = lists:reverse(R#rcv_fun.msgs),
+  NewAcc =
+    case filter_unused_pats(UP, UnusedSendMsgs, RcvMsgs) of
+      [] -> Acc;
+      NewUP ->
+        [{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, NewUP}}|Acc]
+    end,
+  filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc);
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_unused_send_stmt, [S]}}|T],
+                 UnusedSendMsgs, RcvTags, Acc) ->
+  RcvMsgs = lists:flatten([RT#rcv_fun.msgs || RT <- RcvTags]),
+  SM = S#send_fun.msg,
+  NewAcc =
+    case lists:any(fun(RM) -> erl_types:t_is_subtype(SM, RM) end, RcvMsgs) of
+      true -> Acc;
+      false -> [{?WARN_MESSAGE, FL, {message_unused_send_stmt, []}}|Acc]
+    end,
+  filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc).
+
+filter_unused_pats(UP, UnusedSendMsgs, RcvMsgs) ->
+  filter_unused_pats(UP, UnusedSendMsgs, RcvMsgs, []).
+
+filter_unused_pats([], _USendMsgs, _RcvTags, Acc) ->
+  Acc;
+filter_unused_pats([P|Ps], USendMsgs, RcvMsgs, Acc) ->
+  RM = lists:nth(P, RcvMsgs),
+  NewAcc =
+    case lists:any(fun(SM) -> erl_types:t_is_subtype(SM, RM) end, USendMsgs) of
+      true -> Acc;
+      false -> [P|Acc]
+    end,
+  filter_unused_pats(Ps, USendMsgs, RcvMsgs, NewAcc).
 
 format_suffix(Num) ->
   Rem = Num rem 10,
@@ -1112,6 +1206,14 @@ format_unused_pats([Num1, Num2], Acc) ->
 format_unused_pats([Num|Nums], Acc) ->
   NewAcc = Acc ++ format_suffix(Num) ++ ", ",
   format_unused_pats(Nums, NewAcc).
+
+is_no_msg_rcv([], _USendMsgs) ->
+  true;
+is_no_msg_rcv([RM|RcvMsgs], USendMsgs) ->
+  case lists:any(fun(SM) -> erl_types:t_is_subtype(SM, RM) end, USendMsgs) of
+    true -> false;
+    false -> is_no_msg_rcv(RcvMsgs, USendMsgs)
+  end.
 
 -spec prioritize_msg_warns([dial_warning()]) -> [dial_warning()].
 
@@ -1197,13 +1299,13 @@ sort_warns1([{?WARN_MESSAGE, FileLine, _} = W|Ws], FileLine, Acc) ->
 sort_warns1([{?WARN_MESSAGE, FL, _}|_Ws] = Warns, _FileLine, Acc) ->
   {Warns, FL, Acc}.
 
-warn_unused_rcv_pats(Bools, FileLine, Warns) ->
+warn_unused_rcv_pats(Bools, FileLine, RcvTag, Warns) ->
   UnusedPats = warn_unused_rcv_pats1(Bools, length(Bools), []),
   case UnusedPats of
     [] -> Warns;
     _Else ->
       W = {?WARN_MESSAGE, FileLine,
-           {message_rcv_stmt_unused_pats, UnusedPats}},
+           {message_rcv_stmt_unused_pats, [RcvTag|UnusedPats]}},
       [W|Warns]
   end.
 
@@ -1228,7 +1330,7 @@ warn_unused_send_rcv_stmts([],
   BifMsgs = [B || B <- [bif_msg(M) || M <- Msgs], B =/= erl_types:t_none()],
   case BifMsgs of
     [] ->
-      W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, []}},
+      W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, [H]}},
       warn_unused_send_rcv_stmts([], T, [W|Warns]);
     _Other ->
       {_, Ws} = check_sent_msgs(BifMsgs, [H], Warns),
@@ -1241,12 +1343,13 @@ warn_unused_send_rcv_stmts(SendTags, RcvTags, Warns) ->
 
 warn_unused_send_stmts([], [], Warns) ->
   Warns;
-warn_unused_send_stmts([Check|Checks], [#send_fun{file_line = FileLine}|Tags],
+warn_unused_send_stmts([Check|Checks],
+                       [#send_fun{file_line = FileLine} = T|Tags],
                        Warns) ->
   Warns1 =
     case Check of
       true ->
-        W = {?WARN_MESSAGE, FileLine, {message_unused_send_stmt, []}},
+        W = {?WARN_MESSAGE, FileLine, {message_unused_send_stmt, [T]}},
         [W|Warns];
       false -> Warns
     end,

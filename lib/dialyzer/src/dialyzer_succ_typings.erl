@@ -172,8 +172,10 @@ get_warnings_from_modules([], #st{callgraph = Callgraph, plt = Plt},
                           DocPlt, Acc) ->
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
   MsgWarns1 = dialyzer_messages:get_warnings(Msgs),
-  MsgWarns2 = dialyzer_messages:prioritize_msg_warns(MsgWarns1),
-  {MsgWarns2 ++ lists:flatten(Acc), Plt, DocPlt}.
+  MsgWarns2 = dialyzer_messages:add_more_warnings(MsgWarns1, Msgs),
+  MsgWarns3 = dialyzer_messages:filter_msg_warns(MsgWarns2, Msgs),
+  MsgWarns4 = dialyzer_messages:prioritize_msg_warns(MsgWarns3),
+  {MsgWarns4 ++ lists:flatten(Acc), Plt, DocPlt}.
 
 refine_succ_typings(ModulePostorder, State) ->
   refine_succ_typings(ModulePostorder, State, []).
