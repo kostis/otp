@@ -41,11 +41,11 @@
          create_indirect_pid_tag_for_self/2,
          create_indirect_pid_tags_for_spawn/3,
          create_pid_tag_for_self/1, create_pid_tag_for_spawn/2,
-         create_rcv_tag/2, create_send_tag/4, get_proc_reg/1,
-         get_rcv_tags/1, get_send_tags/1, get_var_fun_tab/1,
-         get_warnings/1, get_whereis_argtypes/1, new/0,
-         put_proc_reg/2, put_rcv_tags/2, put_send_tags/2,
-         put_whereis_argtypes/2, update_proc_reg/4]).
+         create_rcv_tag/2, create_send_tag/4, get_cg_edges/1,
+         get_proc_reg/1, get_rcv_tags/1, get_send_tags/1,
+         get_var_fun_tab/1, get_warnings/1, get_whereis_argtypes/1,
+         new/0, put_cg_edges/2, put_proc_reg/2, put_rcv_tags/2,
+         put_send_tags/2, put_whereis_argtypes/2, update_proc_reg/4]).
 
 %% Exported Types
 
@@ -93,7 +93,9 @@
                    fun_mfa         :: mfa_or_funlbl(),
                    file_line       :: file_line()}).
 
--record(msgs,     {edges     = []  :: [dialyzer_callgraph:callgraph_edge()],
+-record(msgs,     {cg        = ?undef :: digraph() | ?undef,
+                   cg_edges  = []  :: [dialyzer_callgraph:callgraph_edge()],
+                   edges     = []  :: [dialyzer_callgraph:callgraph_edge()],
                    old_pids  = []  :: [#pid_fun{}], %% already analyzed pid tags
                    pid_tags  = []  :: [#pid_fun{}],
                    rcv_tags  = []  :: [#rcv_fun{}],
@@ -124,8 +126,12 @@
 msg(State) ->
   PidTags = dialyzer_dataflow:state__get_pid_tags(State),
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
-  Digraph = dialyzer_callgraph:get_digraph(Callgraph),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+  Digraph =
+    case Msgs#msgs.cg of
+      ?undef -> digraph_add_edges(Msgs#msgs.cg_edges, digraph:new());
+      DG -> DG
+    end,
   Edges = Msgs#msgs.edges,
   Filter = fun(E) ->
                case digraph:edge(Digraph, E) of
@@ -134,7 +140,7 @@ msg(State) ->
                end
            end,
   ExtraEdges = [E || E <- Edges, Filter(E)],
-  dialyzer_callgraph:add_edges(ExtraEdges, Callgraph),
+  digraph_add_edges(ExtraEdges, Digraph),
   AllPidTags = Msgs#msgs.pid_tags,
   OldPidTags = Msgs#msgs.old_pids,
   PidTags1 = PidTags -- OldPidTags,
@@ -144,7 +150,8 @@ msg(State) ->
   SortedRcvTags = lists:usort(Msgs#msgs.rcv_tags),
   ProcReg = Msgs#msgs.proc_reg,
   VCTab = Msgs#msgs.var_call_tab,
-  Msgs1 = Msgs#msgs{send_tags = SortedSendTags, rcv_tags = SortedRcvTags},
+  Msgs1 = Msgs#msgs{cg = Digraph, send_tags = SortedSendTags,
+                    rcv_tags = SortedRcvTags},
   Callgraph1 = dialyzer_callgraph:put_msgs(Msgs1, Callgraph),
   State1 = dialyzer_dataflow:state__put_callgraph(Callgraph1, State),
   State2 = msg1(PidTagGroups, SortedSendTags, SortedRcvTags, ProcReg,
@@ -187,7 +194,8 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Warns, Edges,
                Other -> Other
              end}
         end,
-      Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+      Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+      Digraph = Msgs#msgs.cg,
       CFSendTags = find_control_flow_send_tags(CurrFun, PidMFA, SendTags,
                                                Digraph),
       PidSendTags = go_from_pid_tag(CurrFun, Pid, CFSendTags, ProcReg,
@@ -199,7 +207,7 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Warns, Edges,
           false -> [PidMFA]
         end,
       CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
-      dialyzer_callgraph:add_edges(Edges, Callgraph),
+      digraph_add_edges(Edges, Digraph),
       Warns1 = warn_unused_send_rcv_stmts(PidSendTags, CFRcvTags),
       msg1(T, SendTags, RcvTags, ProcReg, VCTab, Warns1 ++ Warns, Edges,
            PidSendTags ++ SendAcc, CFRcvTags ++ RcvAcc, Callgraph)
@@ -245,7 +253,8 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, VCTab, Calls,
           #warn_call{} -> {[], MsgVarMap};
           #fun_call{caller = Caller, callee = Callee, arg_types = ArgTypes,
                     vars = CallVars} ->
-            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+            Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+            Digraph = Msgs#msgs.cg,
             PidSendTags =
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
@@ -282,7 +291,8 @@ forward_msg_analysis(Pid, Code, SendTags, MFAs, RegDict, VCTab, Calls,
               end,
             {PidSendTags, MsgVarMap2};
           #spawn_call{caller = Caller, callee = Callee, vars = CallVars} ->
-            Digraph = dialyzer_callgraph:get_digraph(Callgraph),
+            Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+            Digraph = Msgs#msgs.cg,
             PidSendTags =
               case follow_call(Callee, MFAs, Digraph) of
                 true ->
@@ -394,6 +404,23 @@ bind_reg_labels([K|Keys], RegDict, MsgVarMap) ->
   {ok, [L|Labels]} = dict:find(K, RegDict),
   MsgVarMap1 = dialyzer_races:bind_dict_vars_list(L, Labels, MsgVarMap),
   bind_reg_labels(Keys, RegDict, MsgVarMap1).
+
+digraph_add_edge(From, To, DG) ->
+  case digraph:vertex(DG, From) of
+    false -> digraph:add_vertex(DG, From);
+    {From, _} -> ok
+  end,
+  case digraph:vertex(DG, To) of
+    false -> digraph:add_vertex(DG, To);
+    {To, _} -> ok
+  end,
+  digraph:add_edge(DG, {From, To}, From, To, []),
+  DG.
+
+digraph_add_edges([{From, To}|Left], DG) ->
+  digraph_add_edges(Left, digraph_add_edge(From, To, DG));
+digraph_add_edges([], DG) ->
+  DG.
 
 filter_parents(UParents, Digraph) ->
   dialyzer_races:filter_parents(UParents, UParents, Digraph).
@@ -1466,6 +1493,11 @@ create_send_tag(Pid, Msg, FunMFA, FileLine) ->
   #send_fun{pid = Pid, msg = Msg, fun_mfa = FunMFA,
             file_line = FileLine}.
 
+-spec get_cg_edges(msgs()) -> [dialyzer_callgraph:callgraph_edge()].
+
+get_cg_edges(#msgs{cg_edges = Edges}) ->
+  Edges.
+
 -spec get_proc_reg(msgs()) -> proc_reg().
 
 get_proc_reg(#msgs{proc_reg = ProcReg}) ->
@@ -1499,6 +1531,12 @@ get_whereis_argtypes(#msgs{whereis_argtypes = WhereisArgtypes}) ->
 -spec new() -> msgs().
 
 new() -> #msgs{}.
+
+-spec put_cg_edges([dialyzer_callgraph:callgraph_edge()], msgs()) ->
+      msgs().
+
+put_cg_edges(Edges, Msgs) ->
+  Msgs#msgs{cg_edges = lists:usort(Edges)}.
 
 -spec put_proc_reg(proc_reg(), msgs()) -> msgs().
 
