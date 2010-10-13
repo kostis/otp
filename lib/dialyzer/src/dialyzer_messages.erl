@@ -38,7 +38,7 @@
 %% Record Interfaces
 
 -export([add_edge/2, add_msg/2, add_pid/3, add_pid_tags/2,
-         create_indirect_pid_tag_for_self/2,
+         close_rcv_tag/1, create_indirect_pid_tag_for_self/2,
          create_indirect_pid_tags_for_spawn/3,
          create_pid_tag_for_self/1, create_pid_tag_for_spawn/2,
          create_rcv_tag/2, create_send_tag/4, get_cg_edges/1,
@@ -85,7 +85,8 @@
 -record(rcv_fun,  {is_used = false :: boolean(),
                    msgs = []       :: [erl_types:erl_type()],
                    fun_mfa         :: mfa_or_funlbl(),
-                   file_line       :: file_line()}).
+                   file_line       :: file_line(),
+                   status = 'open' :: 'open' | 'closed'}).
 
 -record(send_fun, {pid             :: dest(),
                    is_used = false :: boolean(),
@@ -1411,9 +1412,11 @@ add_msg(RcvMsg, State) ->
   Callgraph = dialyzer_dataflow:state__get_callgraph(State),
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
   RcvTags = Msgs#msgs.rcv_tags,
-  [H|T] = RcvTags,
-  RcvMsgs = H#rcv_fun.msgs,
-  NewMsgs = Msgs#msgs{rcv_tags = [H#rcv_fun{msgs = [RcvMsg|RcvMsgs]}|T]},
+  OpenRcvTag = lists:keyfind('open', 6, RcvTags),
+  RcvMsgs = OpenRcvTag#rcv_fun.msgs,
+  NewOpenRcvTag = OpenRcvTag#rcv_fun{msgs = [RcvMsg|RcvMsgs]},
+  NewRcvTags = lists:keyreplace('open', 6, RcvTags, NewOpenRcvTag),
+  NewMsgs = Msgs#msgs{rcv_tags = NewRcvTags},
   NewCallgraph = dialyzer_callgraph:put_msgs(NewMsgs, Callgraph),
   dialyzer_dataflow:state__put_callgraph(NewCallgraph, State).
 
@@ -1437,6 +1440,19 @@ add_pid(Kind, Label, State) ->
 
 add_pid_tags(PidTags, #msgs{pid_tags = PT} = Msgs) ->
   Msgs#msgs{pid_tags = lists:usort(PidTags ++ PT)}.
+
+-spec close_rcv_tag(dialyzer_dataflow:state()) -> dialyzer_dataflow:state().
+
+close_rcv_tag(State) ->
+  Callgraph = dialyzer_dataflow:state__get_callgraph(State),
+  Msgs = dialyzer_callgraph:get_msgs(Callgraph),
+  RcvTags = Msgs#msgs.rcv_tags,
+  OpenRcvTag = lists:keyfind('open', 6, RcvTags),
+  ClosedRcvTag = OpenRcvTag#rcv_fun{status = 'closed'},
+  NewRcvTags = lists:keyreplace('open', 6, RcvTags, ClosedRcvTag),
+  NewMsgs = Msgs#msgs{rcv_tags = NewRcvTags},
+  NewCallgraph = dialyzer_callgraph:put_msgs(NewMsgs, Callgraph),
+  dialyzer_dataflow:state__put_callgraph(NewCallgraph, State).
 
 -spec create_indirect_pid_tag_for_self(non_neg_integer(),
                                        dialyzer_dataflow:state()) ->

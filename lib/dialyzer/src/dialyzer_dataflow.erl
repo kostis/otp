@@ -1301,10 +1301,11 @@ handle_receive(Tree, Map,
                #state{callgraph = Callgraph, races = Races} = State) ->
   Clauses = filter_match_fail(cerl:receive_clauses(Tree)),
   Timeout = cerl:receive_timeout(Tree),
+  RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
+  MsgAnalysis = dialyzer_callgraph:get_msg_analysis(Callgraph),
+  HeisenAnal = dialyzer_races:get_heisen_anal(Races),
   State1 =
-    case (dialyzer_callgraph:get_race_detection(Callgraph) orelse
-          dialyzer_callgraph:get_msg_analysis(Callgraph)) andalso
-         dialyzer_races:get_heisen_anal(Races) of
+    case (RaceDetection orelse MsgAnalysis) andalso HeisenAnal of
       true ->
 	RaceList = dialyzer_races:get_race_list(Races),
         RaceListSize = dialyzer_races:get_race_list_size(Races),
@@ -1331,17 +1332,26 @@ handle_receive(Tree, Map,
     handle_clauses(Clauses, ?no_arg, t_any(), t_any(), State1, [], Map,
                    [], [], []),
   Map1 = join_maps(MapList, Map),
-  {State3, Map2, TimeoutType} = traverse(Timeout, Map1, State2),
+  State3 =
+    case MsgAnalysis andalso HeisenAnal of
+      true ->
+        case Clauses =:= [] of
+          true -> State2;
+          false -> dialyzer_messages:close_rcv_tag(State2)
+        end;
+      false -> State2
+    end,
+  {State4, Map2, TimeoutType} = traverse(Timeout, Map1, State3),
   case (t_is_atom(TimeoutType) andalso
 	(t_atom_vals(TimeoutType) =:= ['infinity'])) of
     true ->
-      {State3, Map2, ReceiveType};
+      {State4, Map2, ReceiveType};
     false ->
       Action = cerl:receive_action(Tree),
-      {State4, Map3, ActionType} = traverse(Action, Map, State3),
+      {State5, Map3, ActionType} = traverse(Action, Map, State4),
       Map4 = join_maps([Map3, Map1], Map),
       Type = t_sup(ReceiveType, ActionType),
-      {State4, Map4, Type}
+      {State5, Map4, Type}
   end.
 
 %%----------------------------------------
