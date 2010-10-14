@@ -1361,13 +1361,17 @@ warn_unused_send_rcv_stmts([],
       W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, [H]}},
       warn_unused_send_rcv_stmts([], T, [W|Warns]);
     _Other ->
-      {_, Ws} = check_sent_msgs(BifMsgs, [H], Warns),
-      warn_unused_send_rcv_stmts([], T, Ws ++ Warns)
+      {_, Warns1} = check_sent_msgs(BifMsgs, [H], Warns),
+      warn_unused_send_rcv_stmts([], T, Warns1)
   end;
 warn_unused_send_rcv_stmts(SendTags, RcvTags, Warns) ->
   SentMsgs = [T#send_fun.msg || T <- SendTags],
-  {Checks, Warns1} = check_sent_msgs(SentMsgs, RcvTags, Warns),
-  warn_unused_send_stmts(Checks, SendTags, Warns1).
+  BifMsgs = lists:flatten(
+              [[B || B <- [bif_msg(M) || M <- Msgs], B =/= erl_types:t_none()]
+               || #rcv_fun{msgs = Msgs} <- RcvTags]),
+  {Checks, Warns1} = check_sent_msgs(BifMsgs ++ SentMsgs, RcvTags, Warns),
+  Checks1 = lists:nthtail(length(BifMsgs), Checks),
+  warn_unused_send_stmts(Checks1, SendTags, Warns1).
 
 warn_unused_send_stmts([], [], Warns) ->
   Warns;
