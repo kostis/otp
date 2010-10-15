@@ -370,7 +370,10 @@ backward_msg_analysis(CurrFun, Digraph) ->
   Parents = dialyzer_races:fixup_race_backward(CurrFun, Calls, Calls, [],
                                                ?local),
   UParents = lists:usort(Parents),
-  filter_parents(UParents, Digraph).
+  case UParents of
+    [] -> [CurrFun];
+    _Else -> filter_parents(UParents, Digraph)
+  end.
 
 bif_msg(RcvMsg) ->
   %% {'DOWN', Ref, Type, Obj, Info}
