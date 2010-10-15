@@ -1116,6 +1116,9 @@ add_more_warnings(Warns, #msgs{send_tags = SendTags, rcv_tags = RcvTags}) ->
 add_warnings(Warns, #msgs{warnings = OldWarns} = Msgs) ->
   Msgs#msgs{warnings = Warns ++ OldWarns}.
 
+can_match(S, R) ->
+  erl_types:t_is_subtype(S, R) orelse erl_types:t_is_subtype(R, S).
+
 check_rcv_pats([], _FileLine, _RcvTag, Warns) ->
   Warns;
 check_rcv_pats([Check], FileLine, RcvTag, Warns) ->
@@ -1134,8 +1137,7 @@ check_sent_msgs(_SentMsgs, [], Checks, Warns) ->
   {Checks, Warns};
 check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine} = H|T],
                 PrevChecks, Warns) ->
-  Checks = [[erl_types:t_is_subtype(SentMsg, Msg) || Msg <- Msgs]
-            || SentMsg <- SentMsgs],
+  Checks = [[can_match(SentMsg, Msg) || Msg <- Msgs] || SentMsg <- SentMsgs],
   Checks1 = [lists:any(fun(E) -> E end, Check) || Check <- Checks],
   Warns1 =
     case lists:any(fun(E) -> E end, lists:flatten(Checks1)) of
@@ -1194,7 +1196,7 @@ filter_msg_warns([{?WARN_MESSAGE, FL, {message_unused_send_stmt, [S]}}|T],
   RcvMsgs = lists:flatten([RT#rcv_fun.msgs || RT <- RcvTags]),
   SM = S#send_fun.msg,
   NewAcc =
-    case lists:any(fun(RM) -> erl_types:t_is_subtype(SM, RM) end, RcvMsgs) of
+    case lists:any(fun(RM) -> can_match(SM, RM) end, RcvMsgs) of
       true -> Acc;
       false -> [{?WARN_MESSAGE, FL, {message_unused_send_stmt, []}}|Acc]
     end,
@@ -1208,7 +1210,7 @@ filter_unused_pats([], _USendMsgs, _RcvTags, Acc) ->
 filter_unused_pats([P|Ps], USendMsgs, RcvMsgs, Acc) ->
   RM = lists:nth(P, RcvMsgs),
   NewAcc =
-    case lists:any(fun(SM) -> erl_types:t_is_subtype(SM, RM) end, USendMsgs) of
+    case lists:any(fun(SM) -> can_match(SM, RM) end, USendMsgs) of
       true -> Acc;
       false -> [P|Acc]
     end,
@@ -1238,7 +1240,7 @@ format_unused_pats([Num|Nums], Acc) ->
 is_no_msg_rcv([], _USendMsgs) ->
   true;
 is_no_msg_rcv([RM|RcvMsgs], USendMsgs) ->
-  case lists:any(fun(SM) -> erl_types:t_is_subtype(SM, RM) end, USendMsgs) of
+  case lists:any(fun(SM) -> can_match(SM, RM) end, USendMsgs) of
     true -> false;
     false -> is_no_msg_rcv(RcvMsgs, USendMsgs)
   end.
