@@ -474,6 +474,39 @@ find_control_flow_send_tags(PidFun1, PidFun2,
     end,
   find_control_flow_send_tags(PidFun1, PidFun2, T, NewAcc, ReachableFrom).
 
+find_dad_self_pid_tag(_CurrTag, [], _OldTags, _ReachableFrom, _ReachingTo,
+                      _Digraph, Dad) ->
+  Dad;
+find_dad_self_pid_tag(#pid_fun{pid_mfa = CurrPidMFA} = CurrTag,
+                      [#pid_fun{kind = Kind, pid = Pid,
+                                pid_mfa = PidMFA} = H|T],
+                      OldTags, ReachableFrom, ReachingTo, Digraph,
+                      #pid_fun{pid_mfa = DadPidMFA} = Dad) ->
+  NewDad =
+    case Kind =/= 'self' orelse Pid =:= ?no_label orelse CurrTag =:= H orelse
+      lists:member(H, OldTags) of
+      true -> Dad;
+      false ->
+        case CurrPidMFA =:= PidMFA of
+          true -> Dad;
+          false ->
+            case lists:member(PidMFA, ReachableFrom) of
+              true -> Dad;
+              false ->
+                case lists:member(PidMFA, ReachingTo) of
+                  true ->
+                    case digraph:get_path(Digraph, PidMFA, DadPidMFA) of
+                      false -> Dad;
+                      _Vertices -> H
+                    end;
+                  false -> Dad
+                end
+            end
+        end
+    end,
+  find_dad_self_pid_tag(CurrTag, T, OldTags, ReachableFrom, ReachingTo,
+                        Digraph, NewDad).
+
 find_pid_call_vars(ArgTypes, Vars, PidType, Pid, MVM) ->
   find_pid_call_vars(ArgTypes, Vars, PidType, Pid, MVM, []).
 
@@ -666,11 +699,17 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA,
             case Pid =:= ?no_label of
               true -> {OldTags, []};
               false ->
-                {RetTags, RetDad, RetMVM} =
-                  group_self_pid_tags(H, Tags, [H|OldTags], ReachableFrom,
-                                      ReachingTo, Digraph, H, dict:new()),
+                RetDad =
+                  find_dad_self_pid_tag(H, Tags, OldTags, ReachableFrom,
+                                        ReachingTo, Digraph, H),
                 DadPidMFA = RetDad#pid_fun.pid_mfa,
+                ReachableFromDad =
+                  digraph_utils:reachable([DadPidMFA], Digraph),
                 ReachingToDad = digraph_utils:reaching([DadPidMFA], Digraph),
+                {RetTags, RetDad, RetMVM} =
+                  group_self_pid_tags(H, Tags, [H|OldTags],
+                                      ReachableFromDad, ReachingToDad,
+                                      Digraph, RetDad, dict:new()),
                 case lists:any(fun(ETag) ->
                                    is_below_spawn(ETag, ReachingToDad)
                                end, Tags) of
