@@ -1159,7 +1159,13 @@ add_warnings(Warns, #msgs{warnings = OldWarns} = Msgs) ->
   Msgs#msgs{warnings = Warns ++ OldWarns}.
 
 can_match(S, R) ->
-  erl_types:t_is_subtype(S, R) orelse erl_types:t_is_subtype(R, S).
+  None = erl_types:t_none(),
+  not (erl_types:t_is_equal(S, None) orelse erl_types:t_is_equal(R, None))
+    andalso
+    case erl_types:t_inf(S, R) of
+      None -> false;
+      Inf -> erl_types:t_is_subtype(Inf, R)
+    end.
 
 check_rcv_pats([], _FileLine, _RcvTag, Warns) ->
   Warns;
