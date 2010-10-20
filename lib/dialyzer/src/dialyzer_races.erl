@@ -405,7 +405,8 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags, WhereisArgtypes, Edges}
             end;
-          {timer, send_after, 2} ->
+          {timer, Send, 2} when Send =:= send_after orelse
+                                Send =:= send_interval ->
             case MsgAnalysis of
               true ->
                 [_TimeType, MsgType] = ArgTypes,
@@ -418,8 +419,11 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags, WhereisArgtypes, Edges}
             end;
-          {Module, send_after, 3} when Module =:= erlang orelse
-                                       Module =:= timer ->
+          {Module, Send, 3} when (Module =:= erlang andalso Send =:= send_after)
+                                 orelse
+                                 (Module =:= timer andalso
+                                  (Send =:= send_after orelse
+                                   Send =:= send_interval))->
             case MsgAnalysis of
               true ->
                 [_TimeArg, PidArg, _MsgArg] = Args,
