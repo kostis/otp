@@ -52,6 +52,14 @@
 -define(ldebug(X__, Y__), ok).
 -endif.
 
+%%-define(MESSAGES, true).
+
+-ifdef(MESSAGES).
+-define(messages(X__), []).
+-else.
+-define(messages(X__), X__).
+-endif.
+
 -define(TYPE_LIMIT, 4).
 
 %%--------------------------------------------------------------------
@@ -140,7 +148,7 @@ get_warnings(Callgraph, Plt, DocPlt, Codeserver,
 							    NewState#st.plt),
   get_warnings_from_modules(Mods, NewState, DocPlt, CWarns).
 
-get_warnings_from_modules([M|Ms], State, DocPlt, Acc) when is_atom(M) ->
+get_warnings_from_modules([M|Ms], State, DocPlt, _Acc) when is_atom(M) ->
   send_log(State#st.parent, io_lib:format("Getting warnings for ~w\n", [M])),
   #st{callgraph = Callgraph, codeserver = Codeserver,
       no_warn_unused = NoWarnUnused, plt = Plt} = State,
@@ -149,15 +157,15 @@ get_warnings_from_modules([M|Ms], State, DocPlt, Acc) when is_atom(M) ->
   Contracts = dialyzer_codeserver:lookup_mod_contracts(M, Codeserver),
   AllFuns = collect_fun_info([ModCode]),
   %% Check if there are contracts for functions that do not exist
-  Warnings1 =
+  _Warnings1 =
     dialyzer_contracts:contracts_without_fun(Contracts, AllFuns, Callgraph),
   Attrs = cerl:module_attrs(ModCode),
-  Warnings2  =
+  _Warnings2  =
     case dialyzer_callgraph:get_behaviour_translation(Callgraph) of
       true  -> dialyzer_behaviours:check_callbacks(M, Attrs, Plt, Codeserver);
       false -> []
     end,
-  {Warnings3, FunTypes, PublicTables, NamedTables, DLs, Msgs, Translations} =
+  {_Warnings3, FunTypes, PublicTables, NamedTables, DLs, Msgs, Translations} =
     dialyzer_dataflow:get_warnings(ModCode, Plt, Callgraph, Records,
                                    NoWarnUnused),
   NewDocPlt = insert_into_doc_plt(FunTypes, Callgraph, DocPlt),
@@ -167,7 +175,8 @@ get_warnings_from_modules([M|Ms], State, DocPlt, Acc) when is_atom(M) ->
 					 Translations),
   State1 = st__renew_state_calls(NewCallgraph, State),
   get_warnings_from_modules(Ms, State1, NewDocPlt,
-			    [Warnings1, Warnings2, Warnings3|Acc]);
+                            ?messages([_Warnings1, _Warnings2, _Warnings3|
+                                       _Acc]));
 get_warnings_from_modules([], #st{callgraph = Callgraph, plt = Plt},
                           DocPlt, Acc) ->
   Msgs = dialyzer_callgraph:get_msgs(Callgraph),
