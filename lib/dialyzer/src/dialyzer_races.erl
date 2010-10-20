@@ -405,7 +405,21 @@ store_call(InpFun, InpArgTypes, InpArgs, FileLine, InpState) ->
                 {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
                  SendTags, WhereisArgtypes, Edges}
             end;
-          {erlang, send_after, 3} ->
+          {timer, send_after, 2} ->
+            case MsgAnalysis of
+              true ->
+                [_TimeType, MsgType] = ArgTypes,
+                SendFun =
+                  dialyzer_messages:create_send_tag(?no_label, MsgType, CurrFun,
+                                                    FileLine),
+                {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
+                 [SendFun|SendTags], WhereisArgtypes, Edges};
+              false ->
+                {RaceList, RaceListSize, RaceTags, 'no_t', PidTags, ProcReg,
+                 SendTags, WhereisArgtypes, Edges}
+            end;
+          {Module, send_after, 3} when Module =:= erlang orelse
+                                       Module =:= timer ->
             case MsgAnalysis of
               true ->
                 [_TimeArg, PidArg, _MsgArg] = Args,
