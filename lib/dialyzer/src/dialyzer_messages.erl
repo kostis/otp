@@ -146,7 +146,8 @@ msg(State) ->
   OldPidTags = Msgs#msgs.old_pids,
   PidTags1 = PidTags -- OldPidTags,
   {OldPidTags1, PidTagGroups} = group_pid_tags(PidTags1, AllPidTags,
-                                               OldPidTags, Digraph),
+                                               OldPidTags, ExtraEdges,
+                                               Digraph),
   SortedSendTags = lists:usort(Msgs#msgs.send_tags),
   SortedRcvTags = lists:usort(Msgs#msgs.rcv_tags),
   ProcReg = Msgs#msgs.proc_reg,
@@ -670,11 +671,11 @@ get_ret_paths(RaceList) ->
 
 %% Groups pid tags that refer to the same process
 %% in the form of the highest ancestor
-group_pid_tags([], _Tags, OldTags, _Digraph) ->
+group_pid_tags([], _Tags, OldTags, _ExtraEdges, _Digraph) ->
   {OldTags, []};
 group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA,
                          indirect = Indirect} = H|T],
-               Tags, OldTags, Digraph) ->
+               Tags, OldTags, ExtraEdges, Digraph) ->
   {NewOldTags, Group} =
     case lists:member(H, OldTags) of
       true -> {OldTags, []};
@@ -699,29 +700,35 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA,
             case Pid =:= ?no_label of
               true -> {OldTags, []};
               false ->
+                digraph:del_edges(Digraph, ExtraEdges),
                 RetDad =
                   find_dad_self_pid_tag(H, Tags, OldTags, ReachableFrom,
                                         ReachingTo, Digraph, H),
                 DadPidMFA = RetDad#pid_fun.pid_mfa,
-                GranDadPidMFAs =
-                  backward_msg_analysis(DadPidMFA, Digraph, ?infinity),
-                ReachableFromDad =
-                  digraph_utils:reachable(GranDadPidMFAs, Digraph),
                 ReachingToDad = digraph_utils:reaching([DadPidMFA], Digraph),
-                {RetTags, RetDad, RetMVM} =
-                  group_self_pid_tags(H, Tags, [H|OldTags],
-                                      ReachableFromDad, ReachingToDad,
-                                      Digraph, RetDad, dict:new()),
                 case lists:any(fun(ETag) ->
                                    is_below_spawn(ETag, ReachingToDad)
                                end, Tags) of
-                  true -> {OldTags, []};
-                  false -> {RetTags, [{RetDad, RetMVM}]}
+                  true ->
+                    digraph_add_edges(ExtraEdges, Digraph),
+                    {OldTags, []};
+                  false ->
+                    GranDadPidMFAs =
+                      backward_msg_analysis(DadPidMFA, Digraph, ?infinity),
+                    ReachableFromDad =
+                      digraph_utils:reachable(GranDadPidMFAs, Digraph),
+                    {RetTags, RetDad, RetMVM} =
+                      group_self_pid_tags(H, Tags, [H|OldTags],
+                                          ReachableFromDad, ReachingToDad,
+                                          Digraph, RetDad, dict:new()),
+                    digraph_add_edges(ExtraEdges, Digraph),
+                    {RetTags, [{RetDad, RetMVM}]}
                 end
             end
         end
     end,
-  {RetOldTags, RetGroups} = group_pid_tags(T, Tags, NewOldTags, Digraph),
+  {RetOldTags, RetGroups} = group_pid_tags(T, Tags, NewOldTags, ExtraEdges,
+                                           Digraph),
   {RetOldTags, Group ++ RetGroups}.
 
 group_self_pid_tags(_CurrTag, [], OldTags, _ReachableFrom, _ReachingTo,
