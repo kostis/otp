@@ -204,7 +204,7 @@ msg1(PidTagGroups, SendTags, RcvTags, ProcReg, VCTab, Warns, Edges,
       digraph:del_edges(Digraph, Edges),
       PidMFAs =
         case Kind =:= 'self' of
-          true -> backward_msg_analysis(PidMFA, Digraph);
+          true -> backward_msg_analysis(PidMFA, Digraph, ?local);
           false -> [PidMFA]
         end,
       CFRcvTags = find_control_flow_rcv_tags(PidMFAs, RcvTags, Digraph),
@@ -365,10 +365,10 @@ add_clauses_pid([C|Cs], State) ->
     false -> add_clauses_pid(Cs, State)
   end.
 
-backward_msg_analysis(CurrFun, Digraph) ->
+backward_msg_analysis(CurrFun, Digraph, Depth) ->
   Calls = digraph:edges(Digraph),
   Parents = dialyzer_races:fixup_race_backward(CurrFun, Calls, Calls, [],
-                                               ?local),
+                                               Depth),
   UParents = lists:usort(Parents),
   case UParents of
     [] -> [CurrFun];
@@ -703,8 +703,10 @@ group_pid_tags([#pid_fun{kind = Kind, pid = Pid, pid_mfa = PidMFA,
                   find_dad_self_pid_tag(H, Tags, OldTags, ReachableFrom,
                                         ReachingTo, Digraph, H),
                 DadPidMFA = RetDad#pid_fun.pid_mfa,
+                GranDadPidMFAs =
+                  backward_msg_analysis(DadPidMFA, Digraph, ?infinity),
                 ReachableFromDad =
-                  digraph_utils:reachable([DadPidMFA], Digraph),
+                  digraph_utils:reachable(GranDadPidMFAs, Digraph),
                 ReachingToDad = digraph_utils:reaching([DadPidMFA], Digraph),
                 {RetTags, RetDad, RetMVM} =
                   group_self_pid_tags(H, Tags, [H|OldTags],

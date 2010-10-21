@@ -1341,7 +1341,7 @@ fixup_race_forward_helper(CurrFun, CurrFunLabel, Fun, FunLabel,
 
 -spec fixup_race_backward(mfa_or_funlbl(), [{mfa_or_funlbl(), mfa_or_funlbl()}],
                          [{mfa_or_funlbl(), mfa_or_funlbl()}], [mfa()],
-                          0..?local) ->
+                          0..?local | ?infinity) ->
       [mfa()].
 
 fixup_race_backward(CurrFun, Calls, CallsToAnalyze, Parents, Height) ->
@@ -1363,9 +1363,14 @@ fixup_race_backward(CurrFun, Calls, CallsToAnalyze, Parents, Height) ->
           case MorePaths of
             true ->
               NewCallsToAnalyze = lists:delete(Head, CallsToAnalyze),
+              NewHeight =
+                case Height of
+                  ?infinity -> Height;
+                  _Else -> Height - 1
+                end,
               NewParents =
                 fixup_race_backward(Parent, NewCallsToAnalyze,
-				    NewCallsToAnalyze, Parents, Height - 1),
+				    NewCallsToAnalyze, Parents, NewHeight),
               fixup_race_backward(CurrFun, Tail, NewCallsToAnalyze, NewParents,
 				  Height);
             false ->

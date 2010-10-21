@@ -33,6 +33,7 @@
 %%% ===========================================================================
 
 -define(local, 5).
+-define(infinity, infinity).
 
 -define(no_arg, no_arg).
 -define(no_label, no_label).
