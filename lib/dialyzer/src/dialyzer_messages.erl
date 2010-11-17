@@ -1186,31 +1186,24 @@ check_rcv_pats([H|T], FileLine, RcvTag, Warns) ->
                       end, H, T),
   warn_unused_rcv_pats(Check, FileLine, RcvTag, Warns).
 
-check_sent_msgs(SentMsgs, RcvTags, Warns, Mode) ->
+check_sent_msgs(SentMsgs, RcvTags, Warns) ->
   NoSends = length(SentMsgs),
-  check_sent_msgs(SentMsgs, RcvTags, lists:duplicate(NoSends, true), Warns,
-                  Mode).
+  check_sent_msgs(SentMsgs, RcvTags, lists:duplicate(NoSends, true), Warns).
 
-check_sent_msgs(_SentMsgs, [], Checks, Warns, _Mode) ->
+check_sent_msgs(_SentMsgs, [], Checks, Warns) ->
   {Checks, Warns};
 check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine} = H|T],
-                PrevChecks, Warns, Mode) ->
+                PrevChecks, Warns) ->
   Checks = [[can_match(SentMsg, Msg) || Msg <- Msgs] || SentMsg <- SentMsgs],
   Checks1 = [lists:any(fun(E) -> E end, Check) || Check <- Checks],
   Warns1 =
     case lists:any(fun(E) -> E end, lists:flatten(Checks1)) of
       true -> check_rcv_pats(Checks, FileLine, H, Warns);
-      false ->
-        W =
-          case Mode of
-            only_bifs -> {?WARN_MESSAGE, FileLine, {message_rn, [H]}};
-            all -> {?WARN_MESSAGE, FileLine, {message_rw, [H]}}
-          end,
-        [W|Warns]
+      false -> [{?WARN_MESSAGE, FileLine, {message_rw, [H]}}|Warns]
     end,
   Checks2 = [lists:all(fun(E) -> not E end, Check) || Check <- Checks],
   NewChecks = lists:zipwith(fun(X, Y) -> X andalso Y end, PrevChecks, Checks2),
-  check_sent_msgs(SentMsgs, T, NewChecks, Warns1, Mode).
+  check_sent_msgs(SentMsgs, T, NewChecks, Warns1).
 
 -spec filter_msg_warns([dial_warning()], msgs()) -> [dial_warning()].
 
@@ -1415,7 +1408,7 @@ warn_unused_send_rcv_stmts([],
       W = {?WARN_MESSAGE, FileLine, {message_rn, [H]}},
       warn_unused_send_rcv_stmts([], T, [W|Warns]);
     _Other ->
-      {_, Warns1} = check_sent_msgs(BifMsgs, [H], Warns, only_bifs),
+      {_, Warns1} = check_sent_msgs(BifMsgs, [H], Warns),
       warn_unused_send_rcv_stmts([], T, Warns1)
   end;
 warn_unused_send_rcv_stmts(SendTags, RcvTags, Warns) ->
@@ -1423,7 +1416,7 @@ warn_unused_send_rcv_stmts(SendTags, RcvTags, Warns) ->
   BifMsgs = lists:flatten(
               [[B || B <- [bif_msg(M) || M <- Msgs], B =/= erl_types:t_none()]
                || #rcv_fun{msgs = Msgs} <- RcvTags]),
-  {Checks, Warns1} = check_sent_msgs(BifMsgs ++ SentMsgs, RcvTags, Warns, all),
+  {Checks, Warns1} = check_sent_msgs(BifMsgs ++ SentMsgs, RcvTags, Warns),
   Checks1 = lists:nthtail(length(BifMsgs), Checks),
   warn_unused_send_stmts(Checks1, SendTags, Warns1).
 
