@@ -1203,10 +1203,8 @@ check_sent_msgs(SentMsgs, [#rcv_fun{msgs = Msgs, file_line = FileLine} = H|T],
       false ->
         W =
           case Mode of
-            only_bifs ->
-              {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, [H]}};
-            all ->
-              {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_msg, [H]}}
+            only_bifs -> {?WARN_MESSAGE, FileLine, {message_rn, [H]}};
+            all -> {?WARN_MESSAGE, FileLine, {message_rw, [H]}}
           end,
         [W|Warns]
     end,
@@ -1222,47 +1220,45 @@ filter_msg_warns(Warns, #msgs{send_tags = SendTags, rcv_tags = RcvTags}) ->
 
 filter_msg_warns([], _UnusedSendMsgs, _RcvTags, Acc) ->
   Acc;
-filter_msg_warns([{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_send, [R]}}|T],
-                 UnusedSendMsgs, RcvTags, Acc) ->
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_rn, [R]}}|T], UnusedSendMsgs,
+                 RcvTags, Acc) ->
   NewAcc =
     case UnusedSendMsgs of
-      [] -> [{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_send, []}}|Acc];
+      [] -> [{?WARN_MESSAGE, FL, {message_rn, []}}|Acc];
       _Other ->
-        W = {?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_msg, [R]}},
+        W = {?WARN_MESSAGE, FL, {message_rw, [R]}},
         filter_msg_warns([W], UnusedSendMsgs, RcvTags, Acc)
     end,
   filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc);
-filter_msg_warns([{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_msg, [R]}}|T],
-                 UnusedSendMsgs, RcvTags, Acc) ->
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_rw, [R]}}|T], UnusedSendMsgs,
+                 RcvTags, Acc) ->
   RcvMsgs = R#rcv_fun.msgs,
   NewAcc =
     case is_no_msg_rcv(RcvMsgs, UnusedSendMsgs) of
-      true ->
-        [{?WARN_MESSAGE, FL, {message_unused_rcv_stmt_no_msg, []}}|Acc];
+      true -> [{?WARN_MESSAGE, FL, {message_rw, []}}|Acc];
       false ->
         UP = lists:seq(1, length(RcvMsgs)),
-        W = {?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, [R|UP]}},
+        W = {?WARN_MESSAGE, FL, {message_ru, [R|UP]}},
         filter_msg_warns([W], UnusedSendMsgs, RcvTags, Acc)
     end,
   filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc);
-filter_msg_warns([{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, [R|UP]}}|T],
-                 UnusedSendMsgs, RcvTags, Acc) ->
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_ru, [R|UP]}}|T], UnusedSendMsgs,
+                 RcvTags, Acc) ->
   RcvMsgs = lists:reverse(R#rcv_fun.msgs),
   NewAcc =
     case filter_unused_pats(UP, UnusedSendMsgs, RcvMsgs) of
       [] -> Acc;
-      NewUP ->
-        [{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, NewUP}}|Acc]
+      NewUP -> [{?WARN_MESSAGE, FL, {message_ru, NewUP}}|Acc]
     end,
   filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc);
-filter_msg_warns([{?WARN_MESSAGE, FL, {message_unused_send_stmt, [S]}}|T],
+filter_msg_warns([{?WARN_MESSAGE, FL, {message_sr, [S]}}|T],
                  UnusedSendMsgs, RcvTags, Acc) ->
   RcvMsgs = lists:flatten([RT#rcv_fun.msgs || RT <- RcvTags]),
   SM = S#send_fun.msg,
   NewAcc =
     case lists:any(fun(RM) -> can_match(SM, RM) end, RcvMsgs) of
       true -> Acc;
-      false -> [{?WARN_MESSAGE, FL, {message_unused_send_stmt, []}}|Acc]
+      false -> [{?WARN_MESSAGE, FL, {message_sr, []}}|Acc]
     end,
   filter_msg_warns(T, UnusedSendMsgs, RcvTags, NewAcc).
 
@@ -1328,26 +1324,24 @@ prioritize_warns1([Ws|Warns], Acc) ->
 
 prioritize_warns2([], PrioWarn) ->
   PrioWarn;
-prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL,
-                           {message_unused_rcv_stmt_no_send, _}} = PrioWarn) ->
+prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL, {message_rn, _}} = PrioWarn) ->
   PrioWarn;
-prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL,
-                           {message_unused_send_stmt, _ }} = PrioWarn) ->
+prioritize_warns2(_Warns, {?WARN_MESSAGE, _FL, {message_sr, _ }} = PrioWarn) ->
   PrioWarn;
 prioritize_warns2([{?WARN_MESSAGE, FL, {Type, Pats}} = H|T],
                   {?WARN_MESSAGE, FL, {PrioType, PrioPats}} = PrioWarn) ->
   NewPrioWarn =
     case PrioType of
-      message_unused_rcv_stmt_no_msg ->
+      message_rw ->
         case Type of
-          message_unused_rcv_stmt_no_send -> H;
+          message_rn -> H;
           _Other -> PrioWarn
         end;
-      message_rcv_stmt_unused_pats ->
+      message_ru ->
         case Type of
-          message_unused_rcv_stmt_no_send -> H;
-          message_unused_rcv_stmt_no_msg -> H;
-          message_rcv_stmt_unused_pats ->
+          message_rn -> H;
+          message_rw -> H;
+          message_ru ->
             {?WARN_MESSAGE, FL, {PrioType, lists_intersection(PrioPats, Pats)}}
         end
     end,
@@ -1355,19 +1349,15 @@ prioritize_warns2([{?WARN_MESSAGE, FL, {Type, Pats}} = H|T],
 
 prioritize_warns3([], Acc) ->
   Acc;
-prioritize_warns3([{?WARN_MESSAGE, _FL, {message_rcv_stmt_unused_pats, []}}|
-                   Warns], Acc) ->
+prioritize_warns3([{?WARN_MESSAGE, _FL, {message_ru, []}}|Warns], Acc) ->
   prioritize_warns3(Warns, Acc);
-prioritize_warns3([{?WARN_MESSAGE, FL, {message_rcv_stmt_unused_pats, Pats}}|
-                   Warns], Acc) ->
+prioritize_warns3([{?WARN_MESSAGE, FL, {message_ru, Pats}}|Warns], Acc) ->
   W =
     case lists:usort(Pats) of
       [_] = Pat ->
-        {?WARN_MESSAGE, FL,
-         {message_rcv_stmt_unused_pats, [{one, format_unused_pats(Pat)}]}};
+        {?WARN_MESSAGE, FL, {message_ru, [{one, format_unused_pats(Pat)}]}};
       Sorted ->
-        {?WARN_MESSAGE, FL,
-         {message_rcv_stmt_unused_pats, [{more, format_unused_pats(Sorted)}]}}
+        {?WARN_MESSAGE, FL, {message_ru, [{more, format_unused_pats(Sorted)}]}}
     end,
   prioritize_warns3(Warns, [W|Acc]);
 prioritize_warns3([W|Warns], Acc) ->
@@ -1398,9 +1388,7 @@ warn_unused_rcv_pats(Bools, FileLine, RcvTag, Warns) ->
   case UnusedPats of
     [] -> Warns;
     _Else ->
-      W = {?WARN_MESSAGE, FileLine,
-           {message_rcv_stmt_unused_pats, [RcvTag|UnusedPats]}},
-      [W|Warns]
+      [{?WARN_MESSAGE, FileLine, {message_ru, [RcvTag|UnusedPats]}}|Warns]
   end.
 
 warn_unused_rcv_pats1([], _Counter, Acc) ->
@@ -1424,7 +1412,7 @@ warn_unused_send_rcv_stmts([],
   BifMsgs = [B || B <- [bif_msg(M) || M <- Msgs], B =/= erl_types:t_none()],
   case BifMsgs of
     [] ->
-      W = {?WARN_MESSAGE, FileLine, {message_unused_rcv_stmt_no_send, [H]}},
+      W = {?WARN_MESSAGE, FileLine, {message_rn, [H]}},
       warn_unused_send_rcv_stmts([], T, [W|Warns]);
     _Other ->
       {_, Warns1} = check_sent_msgs(BifMsgs, [H], Warns, only_bifs),
@@ -1446,9 +1434,7 @@ warn_unused_send_stmts([Check|Checks],
                        Warns) ->
   Warns1 =
     case Check of
-      true ->
-        W = {?WARN_MESSAGE, FileLine, {message_unused_send_stmt, [T]}},
-        [W|Warns];
+      true -> [{?WARN_MESSAGE, FileLine, {message_sr, [T]}}|Warns];
       false -> Warns
     end,
   warn_unused_send_stmts(Checks, Tags, Warns1).

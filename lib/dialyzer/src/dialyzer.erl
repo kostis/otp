@@ -406,24 +406,21 @@ message_to_string({race_condition, [M, F, Args, Reason]}) ->
   io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
 message_to_string({deadlock, [M, F, Args, Reason]}) ->
   io_lib:format("The call ~w:~w~s ~s\n", [M, F, Args, Reason]);
-message_to_string({message_rcv_stmt_unused_pats, [{one, Pat}]}) ->
-  io_lib:format("The ~s pattern of the receive statement is unused\n",
+message_to_string({message_rn, []}) ->
+  io_lib:format("No messages are sent to the process\n", []);
+message_to_string({message_ru, [{one, Pat}]}) ->
+  io_lib:format("The ~s pattern will never match"
+                " messages sent to the process\n",
                 [Pat]);
-message_to_string({message_rcv_stmt_unused_pats, [{more, Pats}]}) ->
-  io_lib:format("The ~s patterns of the receive statement are unused\n",
+message_to_string({message_ru, [{more, Pats}]}) ->
+  io_lib:format("The ~s patterns will never match"
+                " messages sent to the process\n",
                 [Pats]);
-message_to_string({message_unused_rcv_stmt_no_send, []}) ->
-  io_lib:format("The receive statement will block"
-                " because no messages are sent to"
-                " the process\n", []);
-message_to_string({message_unused_rcv_stmt_no_msg, []}) ->
-  io_lib:format("The receive statement will block"
-                " because no messages sent to the"
-                " process can match the expected"
-                " patterns\n", []);
-message_to_string({message_unused_send_stmt, []}) ->
-  io_lib:format("The message sent by the send statement"
-                " will never be received\n", []);
+message_to_string({message_rw, []}) ->
+  io_lib:format("Messages sent to the process will never match"
+                " the expected patterns\n", []);
+message_to_string({message_sr, []}) ->
+  io_lib:format("The message will never be received\n", []);
 %%----- Warnings for behaviour errors --------------------
 message_to_string({callback_type_mismatch, [B, F, A, O]}) ->
   io_lib:format("The inferred return type of the ~w/~w callback includes the"
