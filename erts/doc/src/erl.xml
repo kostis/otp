@@ -686,7 +686,7 @@
 	      </p></item>
 	    </taglist>
 	    <p>Binding of schedulers is currently only supported on newer
-	       Linux, Solaris, and Windows systems.</p>
+	       Linux, Solaris, FreeBSD, and Windows systems.</p>
 	    <p>If no CPU topology is available when the <c>+sbt</c> flag
 	       is processed and <c>BindType</c> is any other type than
 	       <c>u</c>, the runtime system will fail to start. CPU
@@ -914,7 +914,7 @@
           <item>
             <p>Set the distribution buffer busy limit
 	    (<seealso marker="erlang#system_info_dist_buf_busy_limit">dist_buf_busy_limit</seealso>)
-	    in kilobytes. Valid range is 1-2097151. Default is 128.</p>
+	    in kilobytes. Valid range is 1-2097151. Default is 1024.</p>
             <p>A larger buffer limit will allow processes to buffer
             more outgoing messages over the distribution. When the
             buffer limit has been reached, sending processes will be
