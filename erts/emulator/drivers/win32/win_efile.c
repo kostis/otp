@@ -862,6 +862,7 @@ efile_fileinfo(Efile_error* errInfo, Efile_info* pInfo,
         findbuf.nFileSizeLow = 0;
         findbuf.cFileName[0] = '\0';
 
+	pInfo->links = 1;
 	pInfo->modifyTime.year = 1980;
 	pInfo->modifyTime.month = 1;
 	pInfo->modifyTime.day = 1;
@@ -873,6 +874,33 @@ efile_fileinfo(Efile_error* errInfo, Efile_info* pInfo,
     } else {
 	SYSTEMTIME SystemTime;
         FILETIME LocalFTime;
+
+	/*first check if we are a symlink */
+	if (!info_for_link && (findbuf.dwFileAttributes &
+			       FILE_ATTRIBUTE_REPARSE_POINT)){
+	    /*
+	     * given that we know this is a symlink,
+	     we should be able to find its target */
+	    char target_name[256];
+	    if (efile_readlink(errInfo, name, target_name,256) == 1) {
+		return efile_fileinfo(errInfo, pInfo,
+				      target_name, info_for_link);
+	    }
+	}
+
+#if 0
+	/* number of links: */
+	{
+	    HANDLE handle;	/* Handle returned by CreateFile() */
+	    BY_HANDLE_FILE_INFORMATION fileInfo; /* from  CreateFile() */
+	    if (handle = CreateFile(name, GENERIC_READ, 0,NULL,
+				    OPEN_EXISTING, 0, NULL)) {
+		GetFileInformationByHandle(handle, &fileInfo);
+		pInfo->links = fileInfo.nNumberOfLinks;
+		CloseHandle(handle);
+	    }
+	}
+#endif
 
 #define GET_TIME(dst, src) \
 if (!FileTimeToLocalFileTime(&findbuf.src, &LocalFTime) || \
@@ -908,7 +936,10 @@ if (!FileTimeToLocalFileTime(&findbuf.src, &LocalFTime) || \
     pInfo->size_low = findbuf.nFileSizeLow;
     pInfo->size_high = findbuf.nFileSizeHigh;
 	
-    if (findbuf.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    if (info_for_link && (findbuf.dwFileAttributes &
+			  FILE_ATTRIBUTE_REPARSE_POINT))
+	pInfo->type = FT_SYMLINK;
+    else if (findbuf.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 	pInfo->type = FT_DIRECTORY;
     else
 	pInfo->type = FT_REGULAR;
@@ -919,7 +950,6 @@ if (!FileTimeToLocalFileTime(&findbuf.src, &LocalFTime) || \
 	pInfo->access = FA_READ|FA_WRITE;
 
     pInfo->mode = dos_to_posix_mode(findbuf.dwFileAttributes, name);
-    pInfo->links = 1;
     pInfo->major_device = drive;
     pInfo->minor_device = 0;
     pInfo->inode = 0;
@@ -1082,12 +1112,17 @@ char* buf;			/* Buffer to write. */
 size_t count;			/* Number of bytes to write. */
 {
     DWORD written;		/* Bytes written in last operation. */
+    OVERLAPPED overlapped;
+    OVERLAPPED* pOverlapped = NULL;
 
     if (flags & EFILE_MODE_APPEND) {
-	(void) SetFilePointer((HANDLE) fd, 0, NULL, FILE_END);
+	memset(&overlapped, 0, sizeof(overlapped));
+	overlapped.Offset = 0xffffffff;
+	overlapped.OffsetHigh = 0xffffffff;
+	pOverlapped = &overlapped;
     }
     while (count > 0) {
-	if (!WriteFile((HANDLE) fd, buf, count, &written, NULL))
+	if (!WriteFile((HANDLE) fd, buf, count, &written, pOverlapped))
 	    return set_error(errInfo);
 	buf += written;
 	count -= written;
@@ -1107,11 +1142,16 @@ efile_writev(Efile_error* errInfo,   /* Where to return error codes */
 	     size_t size)            /* Number of bytes to write */
 {
     int cnt;                         /* Buffers so far written */
+    OVERLAPPED overlapped;
+    OVERLAPPED* pOverlapped = NULL;
 
     ASSERT(iovcnt >= 0);
     
     if (flags & EFILE_MODE_APPEND) {
-	(void) SetFilePointer((HANDLE) fd, 0, NULL, FILE_END);
+	memset(&overlapped, 0, sizeof(overlapped));
+	overlapped.Offset = 0xffffffff;
+	overlapped.OffsetHigh = 0xffffffff;
+	pOverlapped = &overlapped;
     }
     for (cnt = 0; cnt < iovcnt; cnt++) {
 	if (iov[cnt].iov_base && iov[cnt].iov_len > 0) {
@@ -1123,7 +1163,7 @@ efile_writev(Efile_error* errInfo,   /* Where to return error codes */
 			       iov[cnt].iov_base + p, 
 			       iov[cnt].iov_len - p, 
 			       &w, 
-			       NULL))
+			       pOverlapped))
 		    return set_error(errInfo);
 	    }
 	}
@@ -1343,6 +1383,48 @@ dos_to_posix_mode(int attr, const char *name)
 int
 efile_readlink(Efile_error* errInfo, char* name, char* buffer, size_t size)
 {
+    /*
+     * load dll and see if we have CreateSymbolicLink at runtime:
+     * (Vista only)
+     */
+    HINSTANCE hModule = NULL;
+    if ((hModule = LoadLibrary("kernel32.dll")) != NULL) {
+	typedef DWORD (WINAPI * GETFINALPATHNAMEBYHANDLEPTR)(
+							     HANDLE hFile,
+							     LPCSTR lpFilePath,
+							     DWORD cchFilePath,
+							     DWORD dwFlags);
+
+	GETFINALPATHNAMEBYHANDLEPTR pGetFinalPathNameByHandle =
+	    (GETFINALPATHNAMEBYHANDLEPTR)GetProcAddress(hModule, "GetFinalPathNameByHandleA");
+
+	if (pGetFinalPathNameByHandle == NULL) {
+	    FreeLibrary(hModule);
+	} else {
+	    /* first check if file is a symlink; {error, einval} otherwise */
+	    DWORD fileAttributes =  GetFileAttributes(name);
+	    if ((fileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+		BOOLEAN success = 0;
+		HANDLE h = CreateFile(name, GENERIC_READ, 0,NULL, OPEN_EXISTING, 0, NULL);
+		if(h != INVALID_HANDLE_VALUE) {
+		    success = pGetFinalPathNameByHandle(h, buffer, size,0);
+		    /* GetFinalPathNameByHandle prepends path with "\\?\": */
+		    sprintf(buffer, buffer+4);
+		    CloseHandle(h);
+		}
+		FreeLibrary(hModule);
+		if (success) {
+		    return 1;
+		} else {
+		    return set_error(errInfo);
+		}
+	    } else {
+		FreeLibrary(hModule);
+		errno = EINVAL;
+		return check_error(-1, errInfo);
+	    }
+	}
+    }
     errno = ENOTSUP;
     return check_error(-1, errInfo);
 }
@@ -1427,13 +1509,46 @@ efile_altname(Efile_error* errInfo, char* orig_name, char* buffer, size_t size)
 int
 efile_link(Efile_error* errInfo, char* old, char* new)
 {
-    errno = ENOTSUP;
-    return check_error(-1, errInfo);
+    if(!CreateHardLink(new, old, NULL)) {
+	return set_error(errInfo);
+    }
+    return 1;
 }
 
 int
 efile_symlink(Efile_error* errInfo, char* old, char* new)
 {
+    /*
+     * Load dll and see if we have CreateSymbolicLink at runtime:
+     * (Vista only)
+     */
+    HINSTANCE hModule = NULL;
+    if ((hModule = LoadLibrary("kernel32.dll")) != NULL) {
+	typedef BOOLEAN (WINAPI  * CREATESYMBOLICLINKFUNCPTR) (
+	     LPCSTR lpSymlinkFileName,
+	     LPCSTR lpTargetFileName,
+	     DWORD dwFlags);
+
+	CREATESYMBOLICLINKFUNCPTR pCreateSymbolicLink =
+	    (CREATESYMBOLICLINKFUNCPTR) GetProcAddress(hModule,
+						       "CreateSymbolicLinkA");
+	/* A for MBCS, W for UNICODE... char* above implies 'A'! */
+	if (pCreateSymbolicLink != NULL) {
+	    DWORD attr = GetFileAttributes(old);
+	    int flag = (attr != INVALID_FILE_ATTRIBUTES &&
+			attr & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
+	    /*  SYMBOLIC_LINK_FLAG_DIRECTORY = 1 */
+	    BOOLEAN success = pCreateSymbolicLink(new, old, flag);
+	    FreeLibrary(hModule);
+
+	    if (success) {
+		return 1;
+	    } else {
+		return set_error(errInfo);
+	    }
+	} else
+	    FreeLibrary(hModule);
+    }
     errno = ENOTSUP;
     return check_error(-1, errInfo);
 }
