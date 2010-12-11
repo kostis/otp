@@ -1991,6 +1991,19 @@ type(ets, update_counter, 3, Xs) ->
 	 end);
 type(ets, update_element, 3, Xs) ->
   strict(arg_types(ets, update_element, 3), Xs, fun (_) -> t_boolean() end);
+%%-- file ---------------------------------------------------------------------
+type(file, native_name_encoding, 0, _) ->
+  t_file_encoding();
+%%-- prim_file ----------------------------------------------------------------
+type(prim_file, internal_name2native, 1, Xs) ->
+  strict(arg_types(prim_file, internal_name2native, 1), Xs,  
+	 fun (_) -> t_binary() end);
+type(prim_file, internal_native2name, 1, Xs) ->
+  strict(arg_types(prim_file, internal_native2name, 1), Xs,  
+	 fun (_) -> t_prim_file_name() end);
+type(prim_file, internal_normalize_utf8, 1, Xs) ->
+  strict(arg_types(prim_file, internal_normalize_utf8, 1), Xs,  
+	 fun (_) -> t_binary() end);
 %%-- gen_tcp ------------------------------------------------------------------
 %% NOTE: All type information for this module added to avoid loss of precision
 type(gen_tcp, accept, 1, Xs) ->
@@ -4176,6 +4189,16 @@ arg_types(ets, update_counter, 3) ->
 arg_types(ets, update_element, 3) ->
   PosValue = t_tuple([t_integer(), t_any()]),
   [t_tab(), t_any(), t_sup(PosValue, t_list(PosValue))];
+%%------- file ----------------------------------------------------------------
+arg_types(file, native_name_encoding, 0) ->
+  [];
+%%-- prim_file ----------------------------------------------------------------
+arg_types(prim_file, internal_name2native, 1) ->
+  [t_prim_file_name()];
+arg_types(prim_file, internal_native2name, 1) ->
+  [t_binary()];
+arg_types(prim_file, internal_normalize_utf8, 1) ->
+  [t_binary()];
 %%------- gen_tcp -------------------------------------------------------------
 arg_types(gen_tcp, accept, 1) ->
   [t_socket()];
@@ -4951,6 +4974,14 @@ t_ets_info_items() ->
 	 t_atom('type')]).
 
 %% =====================================================================
+%% These are used for the built-in functions of 'prim_file'
+%% =====================================================================
+
+t_prim_file_name() ->
+   t_sup([t_string(),
+	  t_binary()]).
+
+%% =====================================================================
 %% These are used for the built-in functions of 'gen_tcp'
 %% =====================================================================
 
@@ -5153,6 +5184,9 @@ t_encoding() ->
   t_sup([t_atoms(['latin1', 'unicode', 'utf8', 'utf16', 'utf32']),
 	 t_tuple([t_atom('utf16'), t_endian()]),
 	 t_tuple([t_atom('utf32'), t_endian()])]).
+
+t_file_encoding() ->
+  t_atoms(['latin1', 'utf8']).
 
 t_encoding_a2b() -> % for the 2nd arg of atom_to_binary/2 and binary_to_atom/2
   t_atoms(['latin1', 'unicode', 'utf8']).

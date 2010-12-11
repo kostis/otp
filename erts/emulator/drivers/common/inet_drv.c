@@ -88,9 +88,21 @@
 #include <winsock2.h>
 #endif
 #include <windows.h>
+#include <Ws2tcpip.h>   /* NEED VC 6.0 or higher */
+
+/* Visual studio 2008+: NTDDI_VERSION needs to be set for iphlpapi.h
+   to define the right structures. It needs to be set to WINXP (or LONGHORN)
+   for IPV6 to work and it's set lower by default, so we need to change it. */
+#ifdef HAVE_SDKDDKVER_H
+#  include <sdkddkver.h>
+#  ifdef NTDDI_VERSION 
+#    undef NTDDI_VERSION
+#  endif
+#  define NTDDI_VERSION NTDDI_WINXP
+#endif
+
 #include <iphlpapi.h>
 
-#include <Ws2tcpip.h>   /* NEED VC 6.0 !!! */
 
 #undef WANT_NONBLOCKING
 #include "sys.h"
@@ -5811,8 +5823,11 @@ static int sctp_set_opts(inet_descriptor* desc, char* ptr, int len)
 	    char *after;
 #	    ifdef HAVE_STRUCT_SCTP_PADDRPARAMS_SPP_FLAGS
 	    int eflags, cflags, hb_enable, hb_disable,
-		pmtud_enable, pmtud_disable,
+		pmtud_enable, pmtud_disable;
+#	    ifdef HAVE_STRUCT_SCTP_PADDRPARAMS_SPP_SACKDELAY
+	    int
 		sackdelay_enable, sackdelay_disable;
+#           endif
 #           endif
 	    
 	    CHKLEN(curr, ASSOC_ID_LEN);
