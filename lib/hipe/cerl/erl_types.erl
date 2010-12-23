@@ -196,6 +196,7 @@
 	 t_tuple_size/1,
 	 t_tuple_sizes/1,
 	 t_tuple_subtypes/1,
+	 t_unicode_string/0,
 	 t_unify/2,
 	 t_unify/3,
 	 t_unit/0,
@@ -1575,6 +1576,11 @@ t_unicode_binary() ->
 t_unicode_char() ->
   t_integer(). % representing a valid unicode codepoint
 
+-spec t_unicode_string() -> erl_type().
+
+t_unicode_string() ->
+  t_list(t_unicode_char()).
+  
 %%-----------------------------------------------------------------------------
 %% Some built-in opaque types
 %%
