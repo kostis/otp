@@ -55,7 +55,7 @@ static __inline__ int hipe_word64_address_ok(void *address)
 
 #if defined(__powerpc64__)
 #define hipe_arch_name	am_ppc64
-#define AEXTERN(RET,NAME,PROTO)	extern const int NAME
+#define AEXTERN(RET,NAME,PROTO)	extern const int NAME[]
 AEXTERN(void,hipe_ppc_inc_stack,(void));
 #else
 #define hipe_arch_name	am_powerpc
