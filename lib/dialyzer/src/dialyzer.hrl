@@ -2,7 +2,7 @@
 %%%
 %%% %CopyrightBegin%
 %%%
-%%% Copyright Ericsson AB 2006-2010. All Rights Reserved.
+%%% Copyright Ericsson AB 2006-2011. All Rights Reserved.
 %%%
 %%% The contents of this file are subject to the Erlang Public License,
 %%% Version 1.1, (the "License"); you may not use this file except in
@@ -125,6 +125,8 @@
 -type dial_define()   :: {atom(), term()}.
 -type dial_option()   :: {atom(), term()}.
 -type dial_options()  :: [dial_option()].
+-type fopt()          :: 'basename' | 'fullpath'.
+-type format()        :: 'formatted' | 'raw'.
 -type label()	      :: non_neg_integer().
 -type rep_mode()      :: 'quiet' | 'normal' | 'verbose'.
 -type start_from()    :: 'byte_code' | 'src_code'.
@@ -163,7 +165,8 @@
 		  erlang_mode     = false	   :: boolean(),
 		  use_contracts   = true           :: boolean(),
 		  output_file     = none	   :: 'none' | file:filename(),
-		  output_format   = formatted      :: 'raw' | 'formatted',
+		  output_format   = formatted      :: format(),
+		  filename_opt	  = basename       :: fopt(),
 		  callgraph_file  = ""             :: file:filename(),
 		  check_plt       = true           :: boolean(),
 		  fast_plt        = true           :: boolean(),
