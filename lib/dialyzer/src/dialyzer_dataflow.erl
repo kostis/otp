@@ -559,34 +559,10 @@ handle_apply_or_call([{local, external}|Left], Args, ArgTypes, Map, Tree, State,
   handle_apply_or_call(Left, Args, ArgTypes, Map, Tree, State,
 		       ArgTypes, t_any());
 handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
-		     Args, ArgTypes0, Map, Tree,
+		     Args, ArgTypes, Map, Tree,
                      #state{callgraph = Callgraph, opaques = Opaques,
-                            plt = Plt, races = Races} = State,
+			    races = Races} = State,
                      AccArgTypes, AccRet) ->
-  ContractArgTypes =
-    case dialyzer_callgraph:lookup_label(Fun, Callgraph) of
-      error -> ArgTypes0;
-      {ok, Label} ->
-        case not dialyzer_callgraph:is_escaping(Label, Callgraph) of
-          true ->
-            case dialyzer_callgraph:lookup_name(Label, Callgraph) of
-              error -> ArgTypes0;
-              {ok, MFA} ->
-                case dialyzer_plt:lookup_contract(Plt, MFA) of
-                  none -> ArgTypes0;
-                  {value, #contract{args = Arguments}} ->
-                    [begin
-                       case erl_types:t_unopaque(A, Opaques) of
-                         A -> A;
-                         UnopaqueA -> t_sup(A, UnopaqueA)
-                       end
-                     end || A <- Arguments]
-                end
-            end;
-          false -> ArgTypes0
-        end
-    end,
-  ArgTypes = keep_stricter(ArgTypes0, ContractArgTypes),
   Any = t_any(),
   AnyArgs = [Any || _ <- Args],
   GenSig = {AnyArgs, fun(_) -> t_any() end},
@@ -639,10 +615,11 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	  none -> {AnyArgs, t_any()}
 	end
     end,
-  ArgModeMask = [case lists:member(Arg, Opaques) of
+  ArgModeMask = [case lists:member(Arg, Opaques) orelse
+		   lists:member(CArg, Opaques) of
                    true -> opaque;
                    false -> structured
-                 end || Arg <- ArgTypes],
+                 end || {Arg, CArg} <- lists:zip(ArgTypes, CArgs)],
   NewArgsSig = t_inf_lists_masked(SigArgs, ArgTypes, ArgModeMask),
   NewArgsContract = t_inf_lists_masked(CArgs, ArgTypes, ArgModeMask),
   NewArgsBif = t_inf_lists_masked(BifArgs, ArgTypes, ArgModeMask),
@@ -821,19 +798,6 @@ get_apply_fail_msg(Fun, Args, ArgTypes, NewArgTypes,
 	       format_type(t_fun_range(Sig), State),
 	       ContractInfo]}
   end.
-
-keep_stricter(Ts1, Ts2) ->
-  keep_stricter(Ts1, Ts2, []).
-
-keep_stricter([], [], Acc) ->
-  lists:reverse(Acc);
-keep_stricter([T1|Ts1], [T2|Ts2], Acc) ->
-  T =
-    case erl_types:t_is_subtype(T1, T2) of
-      true -> T1;
-      false -> T2
-    end,
-  keep_stricter(Ts1, Ts2, [T|Acc]).
 
 %% returns 'true' if we are running with opaque on (not checked yet),
 %% and there is either a contract or hard-coded type information with
@@ -3026,12 +2990,7 @@ init_fun_tab([Fun|Left], Dict, TreeMap, Callgraph, Plt, Opaques, Parallel) ->
               case dialyzer_plt:lookup_contract(Plt, MFA, Parallel) of
                 none -> lists:duplicate(Arity, t_any());
                 {value, #contract{args = Arguments}} ->
-                  [begin
-                     case erl_types:t_unopaque(A, Opaques) of
-                       A -> A;
-                       UnopaqueA -> t_sup(A, UnopaqueA)
-                     end
-                   end || A <- Arguments]
+		  [erl_types:t_unopaque(A, Opaques) || A <- Arguments]
               end
           end,
 	case lookup_fun_sig(Fun, Callgraph, Plt, Parallel) of
