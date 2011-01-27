@@ -2956,7 +2956,16 @@ init_fun_tab([Fun|Left], Dict, TreeMap, Callgraph, Plt, Opaques) ->
   FunEntry =
     case dialyzer_callgraph:is_escaping(Fun, Callgraph) of
       true ->
-        Args = lists:duplicate(Arity, t_any()),
+        Args =
+          case dialyzer_callgraph:lookup_name(Fun, Callgraph) of
+            error -> lists:duplicate(Arity, t_any());
+            {ok, MFA} ->
+              case dialyzer_plt:lookup_contract(Plt, MFA) of
+                none -> lists:duplicate(Arity, t_any());
+                {value, #contract{args = Arguments}} ->
+		  Arguments
+              end
+          end,
 	case lookup_fun_sig(Fun, Callgraph, Plt) of
 	  none -> {Args, t_unit()};
 	  {value, {RetType, _}} ->
