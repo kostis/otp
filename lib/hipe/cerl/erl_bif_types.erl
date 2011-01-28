@@ -66,9 +66,10 @@
 		    t_fun_range/1,
 		    t_identifier/0,
 		    t_inf/2,
+		    t_inf_lists/2,
+		    t_inf_lists/3,
 		    t_integer/0,
 		    t_integer/1,
-		    t_non_neg_fixnum/0,
 		    t_non_neg_integer/0,
 		    t_pos_integer/0,
 		    t_integers/1,
@@ -119,7 +120,8 @@
 		    t_subtract/2,
 		    t_sup/1,
 		    t_sup/2,
-		    t_tid/0,
+		    t_ets_tid/0,
+		    t_re_mp/0,
 		    t_timeout/0,
 		    t_tuple/0,
 		    t_tuple/1,
@@ -2805,13 +2807,13 @@ type(os, timestamp, 0, _) ->
 type(re, compile, 1, Xs) ->
   strict(arg_types(re, compile, 1), Xs,
 	 fun (_) ->
-	     t_sup(t_tuple([t_atom('ok'), t_re_MP()]),
+	     t_sup(t_tuple([t_atom('ok'), t_re_mp()]),
 		   t_tuple([t_atom('error'), t_re_ErrorSpec()]))
 	 end);
 type(re, compile, 2, Xs) ->
   strict(arg_types(re, compile, 2), Xs,
 	 fun (_) ->
-	     t_sup(t_tuple([t_atom('ok'), t_re_MP()]),
+	     t_sup(t_tuple([t_atom('ok'), t_re_mp()]),
 		   t_tuple([t_atom('error'), t_re_ErrorSpec()]))
 	 end);
 type(re, run, 2, Xs) ->
@@ -2895,7 +2897,7 @@ type(M, F, A, Xs) when is_atom(M), is_atom(F),
 
 strict(Xs, Ts, F) ->
   %% io:format("inf lists arg~n1:~p~n2:~p ~n", [Xs, Ts]),
-  Xs1 = inf_lists(Xs, Ts),
+  Xs1 = t_inf_lists(Xs, Ts, opaque),
   %% io:format("inf lists return ~p ~n", [Xs1]),
   case any_is_none_or_unit(Xs1) of
     true -> t_none();
@@ -2907,11 +2909,6 @@ strict(Xs, X) ->
     true -> t_none();
     false -> X
   end.
-
-inf_lists([X | Xs], [T | Ts]) ->
-  [t_inf(X, T) | inf_lists(Xs, Ts)];
-inf_lists([], []) ->
-  [].
 
 any_list(N) -> any_list(N, t_any()).
 
@@ -4525,9 +4522,9 @@ arg_types(re, compile, 1) ->
 arg_types(re, compile, 2) ->
   [t_sup(t_iodata(), t_charlist()), t_list(t_re_compile_option())];
 arg_types(re, run, 2) ->
-  [t_sup(t_iodata(), t_charlist()), t_re_RE()];
+  [t_sup(t_iodata(), t_charlist()), t_re_re()];
 arg_types(re, run, 3) ->
-  [t_sup(t_iodata(), t_charlist()), t_re_RE(), t_list(t_re_run_option())];
+  [t_sup(t_iodata(), t_charlist()), t_re_re(), t_list(t_re_run_option())];
 %%------- string --------------------------------------------------------------
 arg_types(string, chars, 2) ->
   [t_char(), t_non_neg_integer()];
@@ -4591,7 +4588,7 @@ check_fun_application(Fun, Args) ->
 	    false -> ok
 	  end;
 	FunDom when length(FunDom) =:= length(Args) ->
-	  case any_is_none_or_unit(inf_lists(FunDom, Args)) of
+	  case any_is_none_or_unit(t_inf_lists(FunDom, Args)) of
 	    true -> error;
 	    false ->
 	      case t_is_none_or_unit(t_fun_range(Fun)) of
@@ -4932,7 +4929,7 @@ t_system_profile_return() ->
 %% =====================================================================
 
 t_tab() ->
-  t_sup(t_tid(), t_atom()).
+  t_sup(t_ets_tid(), t_atom()).
 
 t_match_pattern() ->
   t_sup(t_atom(), t_tuple()).
@@ -5140,11 +5137,8 @@ t_io_format_string() ->
 %% whose last name component starts with a capital letter are types
 %% =====================================================================
 
-t_re_MP() ->  %% it's supposed to be an opaque data type
-  t_tuple([t_atom('re_pattern'), t_integer(), t_integer(), t_binary()]).
-
-t_re_RE() ->
-  t_sup([t_re_MP(), t_iodata(), t_charlist()]).
+t_re_re() ->
+  t_sup([t_re_mp(), t_iodata(), t_charlist()]).
 
 t_re_compile_option() ->
   t_sup([t_atoms(['unicode', 'anchored', 'caseless', 'dollar_endonly',

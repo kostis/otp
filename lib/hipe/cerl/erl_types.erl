@@ -138,6 +138,7 @@
 	 t_is_remote/1,
 	 t_is_string/1,
 	 t_is_subtype/2,
+	 t_is_subtype/3,
 	 t_is_tuple/1,
 	 t_is_unit/1,
 	 t_is_var/1,
@@ -185,7 +186,8 @@
 	 t_subtract_list/2,
 	 t_sup/1,
 	 t_sup/2,
-	 t_tid/0,
+	 t_ets_tid/0,
+	 t_re_mp/0,
 	 t_timeout/0,
 	 t_to_string/1,
 	 t_to_string/2,
@@ -587,8 +589,9 @@ t_opaque_atom_vals(OpaqueStruct) ->
 -spec t_opaque_match_record(erl_type(), [erl_type()]) -> [erl_type()].
 
 t_opaque_match_record(?tuple([?atom(_) = Tag|_Fields], _, _) = Rec, Opaques) ->
-  [O || O <- Opaques, t_inf(Rec, O, opaque) =/= ?none,
-	lists:member(Tag, t_opaque_tuple_tags(t_opaque_structure(O)))];
+  Os = [O || O <- Opaques, t_inf(Rec, O, opaque) =/= ?none,
+	      lists:member(Tag, t_opaque_tuple_tags(t_opaque_structure(O)))],
+  lists:usort(Os);
 t_opaque_match_record(_, _) -> [].
 
 -spec t_opaque_tuple_tags(erl_type()) -> [erl_type()].
@@ -1608,9 +1611,9 @@ t_dict() ->
 t_digraph() ->
   t_opaque(digraph, digraph, [],
 	   t_tuple([t_atom('digraph'),
-		    t_sup(t_atom(), t_tid()),
-		    t_sup(t_atom(), t_tid()),
-		    t_sup(t_atom(), t_tid()),
+		    t_sup(t_atom(), t_ets_tid()),
+		    t_sup(t_atom(), t_ets_tid()),
+		    t_sup(t_atom(), t_ets_tid()),
 		    t_boolean()])).
 
 -spec t_gb_set() -> erl_type().
@@ -1638,16 +1641,22 @@ t_set() ->
 		    t_pos_integer(), t_non_neg_integer(), t_non_neg_integer(),
 		    t_non_neg_integer(), t_tuple(), t_tuple()])).
 
--spec t_tid() -> erl_type().
+-spec t_ets_tid() -> erl_type().
 
-t_tid() ->
+t_ets_tid() ->
   t_opaque(ets, tid, [], t_integer()).
+
+-spec t_re_mp() -> erl_type().
+
+t_re_mp() ->
+  MP = t_tuple([t_atom('re_pattern'), t_integer(), t_integer(), t_binary()]),
+  t_opaque(re, mp, [], MP).
 
 -spec all_opaque_builtins() -> [erl_type(),...].
 
 all_opaque_builtins() ->
   [t_array(), t_dict(), t_digraph(), t_gb_set(),
-   t_gb_tree(), t_queue(), t_set(), t_tid()].
+   t_gb_tree(), t_queue(), t_set(), t_ets_tid(), t_re_mp()].
 
 -spec is_opaque_builtin(atom(), atom()) -> boolean().
 
@@ -2460,24 +2469,20 @@ inf_tuples_in_sets([], _, Acc, _Mode) -> lists:reverse(Acc);
 inf_tuples_in_sets(_, [], Acc, _Mode) -> lists:reverse(Acc).
 
 inf_union(U1, U2, opaque) ->
-%%---------------------------------------------------------------------
-%%                          Under Testing
-%%----------------------------------------------------------------------
-%%   OpaqueFun = 
-%%     fun(Union1, Union2) ->
-%% 	[_,_,_,_,_,_,_,_,Opaque,_] = Union1,
-%% 	[A,B,F,I,L,N,T,M,_,_R] = Union2,
-%% 	List = [A,B,F,I,L,N,T,M],
-%%         case [T || T <- List, t_inf(T, Opaque, opaque) =/= ?none] of
-%% 	  [] -> ?none;
-%% 	  _  -> Opaque
-%% 	end
-%%     end,
-%%   O1 = OpaqueFun(U1, U2),
-%%   O2 = OpaqueFun(U2, U1),
-%%   Union = inf_union(U1, U2, 0, [], opaque),
-%%   t_sup([O1, O2, Union]);
-  inf_union(U1, U2, 0, [], opaque);
+  OpaqueFun = 
+    fun(Union1, Union2) ->
+	[_,_,_,_,_,_,_,_,Opaque,_] = Union1,
+	[A,B,F,I,L,N,Tu,M,_,_R] = Union2,
+	List = [A,B,F,I,L,N,Tu,M],
+        case [T || T <- List, t_inf(T, Opaque, opaque) =/= ?none] of
+	  [] -> ?none;
+	  _  -> Opaque
+	end
+    end,
+  O1 = OpaqueFun(U1, U2),
+  O2 = OpaqueFun(U2, U1),
+  Union = inf_union(U1, U2, 0, [], opaque),
+  t_sup([O1, O2, Union]);
 inf_union(U1, U2, OtherMode) ->
   inf_union(U1, U2, 0, [], OtherMode).
 
@@ -3039,7 +3044,12 @@ t_is_equal(_, _) -> false.
 -spec t_is_subtype(erl_type(), erl_type()) -> boolean().
 
 t_is_subtype(T1, T2) ->
-  Inf = t_inf(T1, T2),
+  t_is_subtype(T1, T2, structured).
+
+-spec t_is_subtype(erl_type(), erl_type(), t_inf_mode()) -> boolean().
+
+t_is_subtype(T1, T2, Mode) ->
+  Inf = t_inf(T1, T2, Mode),
   t_is_equal(T1, Inf).
 
 -spec t_is_instance(erl_type(), erl_type()) -> boolean().
@@ -3648,9 +3658,6 @@ t_from_form({type, _L, string, []}, _TypeNames, _InOpaque, _RecDict,
 t_from_form({type, _L, term, []}, _TypeNames, _InOpaque, _RecDict,
             _VarDict) ->
   {t_any(), []};
-t_from_form({type, _L, tid, []}, _TypeNames, _InOpaque, _RecDict,
-            _VarDict) ->
-  {t_tid(), []};
 t_from_form({type, _L, timeout, []}, _TypeNames, _InOpaque, _RecDict,
             _VarDict) ->
   {t_timeout(), []};

@@ -1853,9 +1853,10 @@ handle_guard_call(Guard, Map, Env, Eval, State) ->
       handle_guard_type_test(Guard, F, Map, Env, Eval, State);
     {erlang, is_function, 2} ->
       handle_guard_is_function(Guard, Map, Env, Eval, State);
-    MFA when (MFA =:= {erlang, internal_is_record, 3}) or
-	     (MFA =:= {erlang, is_record, 3}) ->
+    {erlang, F, 3} when F =:= internal_is_record; F =:= is_record ->
       handle_guard_is_record(Guard, Map, Env, Eval, State);
+    {erlang, F, 1} when F =:= length; F =:= tuple_size ->
+      handle_guard_size_test(MFA, Guard, Map, Env, Eval, State);
     {erlang, '=:=', 2} ->
       handle_guard_eqeq(Guard, Map, Env, Eval, State);
     {erlang, '==', 2} ->
@@ -1972,6 +1973,22 @@ bind_type_test(Eval, TypeTest, ArgType, State) ->
     dont_know ->
       {ok, ArgType, t_boolean()}
   end.
+
+handle_guard_size_test({_M, F, _A} = MFA, Guard, Map, Env, Eval, State) ->
+  [Arg] = cerl:call_args(Guard),
+  {_Map1, ArgType} = bind_guard(Arg, Map, Env, dont_know, State),
+  ImplicitTypeTest =
+    case F of
+      length -> is_list;
+      tuple_size -> is_tuple
+    end,
+  case bind_type_test(pos, ImplicitTypeTest, ArgType, State) of
+    error ->
+      ?debug("Implicit type test: ~w failed\n", [F]),
+      signal_guard_fail(Eval, Guard, [ArgType], State);
+    {ok, _NewArgType, _Ret} -> ok
+  end,
+  handle_guard_gen_fun(MFA, Guard, Map, Env, Eval, State).
 
 handle_guard_comp(Guard, Comp, Map, Env, Eval, State) ->
   Args = cerl:call_args(Guard),
