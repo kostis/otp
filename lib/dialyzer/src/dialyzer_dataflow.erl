@@ -63,7 +63,7 @@
 	 t_pid/0, t_port/0, t_product/1, t_reference/0,
 	 t_sup/1, t_sup/2, t_subtract/2, t_to_string/2, t_to_tlist/1,
 	 t_tuple/0, t_tuple/1, t_tuple_args/1, t_tuple_subtypes/1,
-	 t_unit/0, t_unopaque/1]).
+	 t_unit/0, t_unopaque/1, t_unopaque/2]).
 
 %%-define(DEBUG, true).
 %%-define(DEBUG_PP, true).
@@ -1048,11 +1048,13 @@ handle_case(Tree, Map, #state{callgraph = Callgraph} = State) ->
 
 %%----------------------------------------
 
-handle_cons(Tree, Map, State) ->
+handle_cons(Tree, Map, #state{opaques = Opaques} = State) ->
   Hd = cerl:cons_hd(Tree),
   Tl = cerl:cons_tl(Tree),
-  {State1, Map1, HdType} = traverse(Hd, Map, State),
-  {State2, Map2, TlType} = traverse(Tl, Map1, State1),
+  {State1, Map1, TempHdType} = traverse(Hd, Map, State),
+  {State2, Map2, TempTlType} = traverse(Tl, Map1, State1),
+  HdType = t_unopaque(TempHdType, Opaques),
+  TlType = t_unopaque(TempTlType, Opaques),
   State3 =
     case t_is_none(t_inf(TlType, t_list())) of
       true ->
@@ -1560,15 +1562,10 @@ bind_pat_vars([Pat|PatLeft], [Type|TypeLeft], Acc, Map, State, Rev) ->
 	end;
       literal ->
 	Literal = literal_type(Pat),
-	LiteralOrOpaque =
-	  case t_opaque_match_atom(Literal, State#state.opaques) of
-	    [Opaque] -> Opaque;
-	    _ -> Literal
-	  end,
-	case t_is_none(t_inf(LiteralOrOpaque, Type)) of
+	case t_is_none(t_inf(Literal, Type)) of
 	  true ->
 	    bind_opaque_pats(Literal, Type, Pat, Map, State, Rev);
-	  false -> {Map, LiteralOrOpaque}
+	  false -> {Map, Literal}
 	end;
       tuple ->
 	Es = cerl:tuple_es(Pat),
@@ -1639,7 +1636,7 @@ bind_pat_vars([Pat|PatLeft], [Type|TypeLeft], Acc, Map, State, Rev) ->
 	    {ok, RecType} -> RecType
 	  end,
 	%% Must do inf when binding args to pats. Vars in pats are fresh.
-	VarType2 = t_inf(VarType1, Type),
+	VarType2 = t_inf(VarType1, Type, opaque),
 	VarType3 =
 	  case Opaques =/= [] of
 	    true ->
