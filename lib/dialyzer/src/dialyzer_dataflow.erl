@@ -578,6 +578,10 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
                      #state{callgraph = Callgraph, races = Races,
 			    opaques = Opaques} = State,
                      AccArgTypes, AccRet) ->
+  ?debug("--------------------------------------------------------\n", []),
+  ?debug("Fun: ~p\n", [Fun]),
+  ?debug("Args: ~s\n", [erl_types:t_to_string(t_product(ArgTypes))]),
+  ?debug("ArgTypes: ~s\n", [erl_types:t_to_string(t_product(ArgTypes))]),
   Any = t_any(),
   AnyArgs = [Any || _ <- Args],
   GenSig = {AnyArgs, fun(_) -> t_any() end},
@@ -589,6 +593,7 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	     end};
       none -> GenSig
     end,
+  ?debug("CArgs: ~s\n", [erl_types:t_to_string(t_product(CArgs))]),
   {BifArgs, BifRange} =
     case TypeOfApply of
       remote ->
@@ -630,17 +635,26 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	  none -> {AnyArgs, t_any()}
 	end
     end,
+  ?debug("SigRet: ~s\n", [erl_types:t_to_string(SigRange)]),
+  ?debug("Opaques: ~s\n",[erl_types:t_to_string(t_product(Opaques))]),
   ArgModeMask = [case lists:member(Arg, Opaques) orelse
 		   lists:member(CArg, Opaques) of
                    true -> opaque;
                    false -> structured
                  end || {Arg, CArg} <- lists:zip(ArgTypes, CArgs)],
+  ?debug("Mask: ~w\n",[ArgModeMask]),
   NewArgsSig = t_inf_lists_masked(SigArgs, ArgTypes, ArgModeMask),
+  ?debug("NewArgsSig: ~s\n", [erl_types:t_to_string(t_product(NewArgsSig))]),
   NewArgsContract = t_inf_lists_masked(CArgs, ArgTypes, ArgModeMask),
+  ?debug("NewArgsContract: ~s\n",
+	 [erl_types:t_to_string(t_product(NewArgsContract))]),
   NewArgsBif = t_inf_lists_masked(BifArgs, ArgTypes, ArgModeMask),
+  ?debug("NewArgsBif: ~s\n", [erl_types:t_to_string(t_product(NewArgsBif))]),
   NewArgTypes0 = t_inf_lists_masked(NewArgsSig, NewArgsContract, ArgModeMask),
   NewArgTypes = t_inf_lists_masked(NewArgTypes0, NewArgsBif, ArgModeMask),
+  ?debug("NewArgTypes: ~s\n", [erl_types:t_to_string(t_product(NewArgTypes))]),
   BifRet = BifRange(NewArgTypes),
+  ?debug("BifRet: ~s\n", [erl_types:t_to_string(BifRange(NewArgTypes))]),
   {TmpArgTypes, TmpArgsContract} =
     case (TypeOfApply =:= remote) andalso (not IsBIF) of
       true ->
@@ -653,24 +667,14 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
       false  -> {NewArgTypes, NewArgsContract}
     end,
   ContrRet = CRange(TmpArgTypes),
+  ?debug("ContrRet: ~s\n", [erl_types:t_to_string(CRange(TmpArgTypes))]),
   RetMode =
     case t_contains_opaque(ContrRet) orelse t_contains_opaque(BifRet) of
       true  -> opaque;
       false -> structured
     end,
   RetWithoutLocal = t_inf(t_inf(ContrRet, BifRet, RetMode), SigRange, RetMode),
-  ?debug("--------------------------------------------------------\n", []),
-  ?debug("Fun: ~p\n", [Fun]),
-  ?debug("Args: ~s\n", [erl_types:t_to_string(t_product(ArgTypes))]),
-  ?debug("NewArgsSig: ~s\n", [erl_types:t_to_string(t_product(NewArgsSig))]),
-  ?debug("NewArgsContract: ~s\n",
-	 [erl_types:t_to_string(t_product(NewArgsContract))]),
-  ?debug("NewArgsBif: ~s\n", [erl_types:t_to_string(t_product(NewArgsBif))]),
-  ?debug("NewArgTypes: ~s\n", [erl_types:t_to_string(t_product(NewArgTypes))]),
   ?debug("RetWithoutLocal: ~s\n", [erl_types:t_to_string(RetWithoutLocal)]),
-  ?debug("BifRet: ~s\n", [erl_types:t_to_string(BifRange(NewArgTypes))]),
-  ?debug("ContrRet: ~s\n", [erl_types:t_to_string(CRange(TmpArgTypes))]),
-  ?debug("SigRet: ~s\n", [erl_types:t_to_string(SigRange)]),
   State1 =
     case dialyzer_callgraph:get_race_detection(Callgraph) andalso
          dialyzer_races:get_race_analysis(Races) of
