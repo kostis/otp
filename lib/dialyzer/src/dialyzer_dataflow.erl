@@ -378,7 +378,7 @@ analyze_loop(#state{callgraph = Callgraph, races = Races} = State) ->
       end
   end.
 
-traverse(Tree, Map, State) ->
+traverse(Tree, Map, #state{opaques = Opaques} = State) ->
   ?debug("Handling ~p\n", [cerl:type(Tree)]),
   %%debug_pp_map(Map),
   case cerl:type(Tree) of
@@ -433,7 +433,7 @@ traverse(Tree, Map, State) ->
 	Tree ->
 	  Type = literal_type(Tree),
 	  NewType =
-	    case erl_types:t_opaque_match_atom(Type, State#state.opaques) of
+	    case erl_types:t_opaque_match_atom(Type, Opaques) of
 	      [Opaque] -> Opaque;
 	      _ -> Type
 	    end,
@@ -487,7 +487,6 @@ traverse(Tree, Map, State) ->
       case state__lookup_type_for_rec_var(Tree, State) of
 	error ->
 	  LType = lookup_type(Tree, Map),
-	  Opaques = State#state.opaques,
 	  case t_opaque_match_record(LType, Opaques) of
 	    [Opaque] -> {State, Map, Opaque};
 	    _ ->
@@ -847,10 +846,11 @@ expected_arg_triples(ArgNs, ArgTypes, State) ->
      {N, Arg, format_type(Arg, State)}
    end || N <- ArgNs].
 
-add_bif_warnings({erlang, Op, 2}, [T1, T2] = Ts, Tree, State)
+add_bif_warnings({erlang, Op, 2}, [T1, T2] = Ts, Tree,
+		 #state{opaques = Opaques} = State)
   when Op =:= '=:='; Op =:= '==' ->
-  Type1 = erl_types:t_unopaque(T1, State#state.opaques),
-  Type2 = erl_types:t_unopaque(T2, State#state.opaques),
+  Type1 = t_unopaque(T1, Opaques),
+  Type2 = t_unopaque(T2, Opaques),
   Inf = t_inf(T1, T2),
   Inf1 = t_inf(Type1, Type2),
   case t_is_none(Inf) andalso t_is_none(Inf1) andalso(not any_none(Ts))
