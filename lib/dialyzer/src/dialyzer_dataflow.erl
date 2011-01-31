@@ -603,18 +603,8 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	    BArgs = erl_bif_types:arg_types(M, F, A),
 	    BRange =
 	      fun(FunArgs) ->
-		  ArgPos = erl_bif_types:structure_inspecting_args(M, F, A),
-		  NewFunArgs =
-		    case ArgPos =:= [] of
-		      true -> FunArgs;
-		      false -> % some positions need to be un-opaqued
-			N = length(FunArgs),
-			PFs = lists:zip(lists:seq(1, N), FunArgs),
-			[case ordsets:is_element(P, ArgPos) of
-			   true  -> erl_types:t_unopaque(FArg, Opaques);
-			   false -> FArg
-			 end || {P, FArg} <- PFs]
-		    end,
+		  NewFunArgs = [t_unopaque(FunArg, Opaques) ||
+				 FunArg <- FunArgs],
 		  erl_bif_types:type(M, F, A, NewFunArgs)
 	      end,
 	    {BArgs, BRange};
