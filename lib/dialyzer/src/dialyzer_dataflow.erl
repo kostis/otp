@@ -637,8 +637,8 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
     end,
   ?debug("SigRet: ~s\n", [erl_types:t_to_string(SigRange)]),
   ?debug("Opaques: ~s\n",[erl_types:t_to_string(t_product(Opaques))]),
-  ArgModeMask = [case lists:member(Arg, Opaques) orelse
-		   lists:member(CArg, Opaques) of
+  ArgModeMask = [case t_unopaque(Arg, Opaques) =/= Arg orelse
+		   t_unopaque(CArg, Opaques) =/= CArg of
                    true -> opaque;
                    false -> structured
                  end || {Arg, CArg} <- lists:zip(ArgTypes, CArgs)],
