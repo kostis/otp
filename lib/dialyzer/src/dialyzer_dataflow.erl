@@ -1565,7 +1565,9 @@ bind_pat_vars([Pat|PatLeft], [Type|TypeLeft], Acc, Map, State, Rev) ->
 	    bind_opaque_pats(Prototype, Type, Pat, Map, State, Rev);
 	  false ->
 	    OTuple = t_inf(Prototype, Type, opaque),
-	    SubTuples = t_tuple_subtypes(OTuple),
+	    Structured = t_unopaque(OTuple, State#state.opaques),
+	    FinalTuple = t_inf(Structured, t_tuple()),
+	    SubTuples = t_tuple_subtypes(FinalTuple),
 	    %% Need to call the top function to get the try-catch wrapper
 	    Results =
 	      case Rev of
