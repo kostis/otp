@@ -64,7 +64,7 @@
 	 t_pid/0, t_port/0, t_product/1, t_reference/0,
 	 t_sup/1, t_sup/2, t_subtract/2, t_to_string/2, t_to_tlist/1,
 	 t_tuple/0, t_tuple/1, t_tuple_args/1, t_tuple_subtypes/1,
-	 t_unit/0, t_unopaque/1]).
+	 t_unit/0, t_unopaque/1, t_unopaque/2]).
 
 %%-define(DEBUG, true).
 %%-define(DEBUG_PP, true).
@@ -363,7 +363,7 @@ analyze_loop(#state{callgraph = Callgraph, races = Races} = State) ->
       end
   end.
 
-traverse(Tree, Map, State) ->
+traverse(Tree, Map, #state{opaques = Opaques} = State) ->
   ?debug("Handling ~p\n", [cerl:type(Tree)]),
   %%debug_pp_map(Map),
   case cerl:type(Tree) of
@@ -418,7 +418,7 @@ traverse(Tree, Map, State) ->
 	Tree ->
 	  Type = literal_type(Tree),
 	  NewType =
-	    case erl_types:t_opaque_match_atom(Type, State#state.opaques) of
+	    case erl_types:t_opaque_match_atom(Type, Opaques) of
 	      [Opaque] -> Opaque;
 	      _ -> Type
 	    end,
@@ -472,7 +472,6 @@ traverse(Tree, Map, State) ->
       case state__lookup_type_for_rec_var(Tree, State) of
 	error ->
 	  LType = lookup_type(Tree, Map),
-	  Opaques = State#state.opaques,
 	  case t_opaque_match_record(LType, Opaques) of
 	    [Opaque] -> {State, Map, Opaque};
 	    _ ->
@@ -563,6 +562,10 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
                      #state{callgraph = Callgraph, opaques = Opaques,
 			    races = Races} = State,
                      AccArgTypes, AccRet) ->
+  ?debug("--------------------------------------------------------\n", []),
+  ?debug("Fun: ~p\n", [Fun]),
+  ?debug("Args: ~s\n", [erl_types:t_to_string(t_product(ArgTypes))]),
+  ?debug("ArgTypes: ~s\n", [erl_types:t_to_string(t_product(ArgTypes))]),
   Any = t_any(),
   AnyArgs = [Any || _ <- Args],
   GenSig = {AnyArgs, fun(_) -> t_any() end},
@@ -574,6 +577,7 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	     end};
       none -> GenSig
     end,
+  ?debug("CArgs: ~s\n", [erl_types:t_to_string(t_product(CArgs))]),
   {BifArgs, BifRange} =
     case TypeOfApply of
       remote ->
@@ -584,18 +588,8 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	    BArgs = erl_bif_types:arg_types(M, F, A),
 	    BRange =
 	      fun(FunArgs) ->
-		  ArgPos = erl_bif_types:structure_inspecting_args(M, F, A),
-		  NewFunArgs =
-		    case ArgPos =:= [] of
-		      true -> FunArgs;
-		      false -> % some positions need to be un-opaqued
-			N = length(FunArgs),
-			PFs = lists:zip(lists:seq(1, N), FunArgs),
-			[case ordsets:is_element(P, ArgPos) of
-			   true  -> erl_types:t_unopaque(FArg, Opaques);
-			   false -> FArg
-			 end || {P, FArg} <- PFs]
-		    end,
+		  NewFunArgs = [t_unopaque(FunArg, Opaques) ||
+				 FunArg <- FunArgs],
 		  erl_bif_types:type(M, F, A, NewFunArgs)
 	      end,
 	    {BArgs, BRange};
@@ -615,17 +609,26 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
 	  none -> {AnyArgs, t_any()}
 	end
     end,
-  ArgModeMask = [case lists:member(Arg, Opaques) orelse
-		   lists:member(CArg, Opaques) of
+  ?debug("SigRet: ~s\n", [erl_types:t_to_string(SigRange)]),
+  ?debug("Opaques: ~s\n",[erl_types:t_to_string(t_product(Opaques))]),
+  ArgModeMask = [case t_unopaque(Arg, Opaques) =/= Arg orelse
+		   t_unopaque(CArg, Opaques) =/= CArg of
                    true -> opaque;
                    false -> structured
                  end || {Arg, CArg} <- lists:zip(ArgTypes, CArgs)],
+  ?debug("Mask: ~w\n",[ArgModeMask]),
   NewArgsSig = t_inf_lists_masked(SigArgs, ArgTypes, ArgModeMask),
+  ?debug("NewArgsSig: ~s\n", [erl_types:t_to_string(t_product(NewArgsSig))]),
   NewArgsContract = t_inf_lists_masked(CArgs, ArgTypes, ArgModeMask),
+  ?debug("NewArgsContract: ~s\n",
+	 [erl_types:t_to_string(t_product(NewArgsContract))]),
   NewArgsBif = t_inf_lists_masked(BifArgs, ArgTypes, ArgModeMask),
+  ?debug("NewArgsBif: ~s\n", [erl_types:t_to_string(t_product(NewArgsBif))]),
   NewArgTypes0 = t_inf_lists_masked(NewArgsSig, NewArgsContract, ArgModeMask),
   NewArgTypes = t_inf_lists_masked(NewArgTypes0, NewArgsBif, ArgModeMask),
+  ?debug("NewArgTypes: ~s\n", [erl_types:t_to_string(t_product(NewArgTypes))]),
   BifRet = BifRange(NewArgTypes),
+  ?debug("BifRet: ~s\n", [erl_types:t_to_string(BifRange(NewArgTypes))]),
   {TmpArgTypes, TmpArgsContract} =
     case (TypeOfApply =:= remote) andalso (not IsBIF) of
       true ->
@@ -638,24 +641,14 @@ handle_apply_or_call([{TypeOfApply, {Fun, Sig, Contr, LocalRet}}|Left],
       false  -> {NewArgTypes, NewArgsContract}
     end,
   ContrRet = CRange(TmpArgTypes),
+  ?debug("ContrRet: ~s\n", [erl_types:t_to_string(CRange(TmpArgTypes))]),
   RetMode =
     case t_contains_opaque(ContrRet) orelse t_contains_opaque(BifRet) of
       true  -> opaque;
       false -> structured
     end,
   RetWithoutLocal = t_inf(t_inf(ContrRet, BifRet, RetMode), SigRange, RetMode),
-  ?debug("--------------------------------------------------------\n", []),
-  ?debug("Fun: ~p\n", [Fun]),
-  ?debug("Args: ~s\n", [erl_types:t_to_string(t_product(ArgTypes))]),
-  ?debug("NewArgsSig: ~s\n", [erl_types:t_to_string(t_product(NewArgsSig))]),
-  ?debug("NewArgsContract: ~s\n",
-	 [erl_types:t_to_string(t_product(NewArgsContract))]),
-  ?debug("NewArgsBif: ~s\n", [erl_types:t_to_string(t_product(NewArgsBif))]),
-  ?debug("NewArgTypes: ~s\n", [erl_types:t_to_string(t_product(NewArgTypes))]),
   ?debug("RetWithoutLocal: ~s\n", [erl_types:t_to_string(RetWithoutLocal)]),
-  ?debug("BifRet: ~s\n", [erl_types:t_to_string(BifRange(NewArgTypes))]),
-  ?debug("ContrRet: ~s\n", [erl_types:t_to_string(CRange(TmpArgTypes))]),
-  ?debug("SigRet: ~s\n", [erl_types:t_to_string(SigRange)]),
   RaceDetection = dialyzer_callgraph:get_race_detection(Callgraph),
   State1 =
     case RaceDetection andalso dialyzer_races:get_race_analysis(Races) of
@@ -832,10 +825,11 @@ expected_arg_triples(ArgNs, ArgTypes, State) ->
      {N, Arg, format_type(Arg, State)}
    end || N <- ArgNs].
 
-add_bif_warnings({erlang, Op, 2}, [T1, T2] = Ts, Tree, State)
+add_bif_warnings({erlang, Op, 2}, [T1, T2] = Ts, Tree,
+		 #state{opaques = Opaques} = State)
   when Op =:= '=:='; Op =:= '==' ->
-  Type1 = erl_types:t_unopaque(T1, State#state.opaques),
-  Type2 = erl_types:t_unopaque(T2, State#state.opaques),
+  Type1 = t_unopaque(T1, Opaques),
+  Type2 = t_unopaque(T2, Opaques),
   Inf = t_inf(T1, T2),
   Inf1 = t_inf(Type1, Type2),
   case t_is_none(Inf) andalso t_is_none(Inf1) andalso(not any_none(Ts))
@@ -1033,11 +1027,13 @@ handle_case(Tree, Map, #state{callgraph = Callgraph} = State) ->
 
 %%----------------------------------------
 
-handle_cons(Tree, Map, State) ->
+handle_cons(Tree, Map, #state{opaques = Opaques} = State) ->
   Hd = cerl:cons_hd(Tree),
   Tl = cerl:cons_tl(Tree),
-  {State1, Map1, HdType} = traverse(Hd, Map, State),
-  {State2, Map2, TlType} = traverse(Tl, Map1, State1),
+  {State1, Map1, TempHdType} = traverse(Hd, Map, State),
+  {State2, Map2, TempTlType} = traverse(Tl, Map1, State1),
+  HdType = t_unopaque(TempHdType, Opaques),
+  TlType = t_unopaque(TempTlType, Opaques),
   State3 =
     case t_is_none(t_inf(TlType, t_list())) of
       true ->
@@ -1542,15 +1538,10 @@ bind_pat_vars([Pat|PatLeft], [Type|TypeLeft], Acc, Map, State, Rev) ->
 	end;
       literal ->
 	Literal = literal_type(Pat),
-	LiteralOrOpaque =
-	  case t_opaque_match_atom(Literal, State#state.opaques) of
-	    [Opaque] -> Opaque;
-	    _ -> Literal
-	  end,
-	case t_is_none(t_inf(LiteralOrOpaque, Type)) of
+	case t_is_none(t_inf(Literal, Type)) of
 	  true ->
 	    bind_opaque_pats(Literal, Type, Pat, Map, State, Rev);
-	  false -> {Map, LiteralOrOpaque}
+	  false -> {Map, Literal}
 	end;
       tuple ->
 	Es = cerl:tuple_es(Pat),
@@ -1622,7 +1613,7 @@ bind_pat_vars([Pat|PatLeft], [Type|TypeLeft], Acc, Map, State, Rev) ->
 	    {ok, RecType} -> RecType
 	  end,
 	%% Must do inf when binding args to pats. Vars in pats are fresh.
-	VarType2 = t_inf(VarType1, Type),
+	VarType2 = t_inf(VarType1, Type, opaque),
 	VarType3 =
 	  case Opaques =/= [] of
 	    true ->
@@ -2991,7 +2982,7 @@ init_fun_tab([Fun|Left], Dict, TreeMap, Callgraph, Plt, Opaques, Parallel) ->
               case dialyzer_plt:lookup_contract(Plt, MFA, Parallel) of
                 none -> lists:duplicate(Arity, t_any());
                 {value, #contract{args = Arguments}} ->
-		  [erl_types:t_unopaque(A, Opaques) || A <- Arguments]
+		  Arguments
               end
           end,
 	case lookup_fun_sig(Fun, Callgraph, Plt, Parallel) of

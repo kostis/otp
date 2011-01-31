@@ -32,8 +32,7 @@
 -define(BITS, 128). %This is only in bsl to convert answer to pos_inf/neg_inf.
 -define(TAG_IMMED1_SIZE, 4).
 
--export([type/3, type/4, arg_types/3, 
-	 is_known/3, structure_inspecting_args/3, infinity_add/2]).
+-export([type/3, type/4, arg_types/3, is_known/3, infinity_add/2]).
 
 -import(erl_types, [number_max/1,
 		    number_min/1,
@@ -4555,27 +4554,6 @@ arg_types(M, F, A) when is_atom(M), is_atom(F),
 
 is_known(M, F, A) ->
   arg_types(M, F, A) =/= unknown.
-
-
--spec structure_inspecting_args(atom(), atom(), arity()) -> [1..255].
-
-structure_inspecting_args(erlang, element, 2) -> [2];
-structure_inspecting_args(erlang, is_atom, 1) -> [1];
-structure_inspecting_args(erlang, is_boolean, 1) -> [1];
-structure_inspecting_args(erlang, is_binary, 1) -> [1];
-structure_inspecting_args(erlang, is_bitstring, 1) -> [1];
-structure_inspecting_args(erlang, is_float, 1) -> [1];
-structure_inspecting_args(erlang, is_function, 1) -> [1];
-structure_inspecting_args(erlang, is_integer, 1) -> [1];
-structure_inspecting_args(erlang, is_list, 1) -> [1];
-structure_inspecting_args(erlang, is_number, 1) -> [1];
-structure_inspecting_args(erlang, is_pid, 1) -> [1];
-structure_inspecting_args(erlang, is_port, 1) -> [1];
-structure_inspecting_args(erlang, is_reference, 1) -> [1];
-structure_inspecting_args(erlang, is_tuple, 1) -> [1];
-structure_inspecting_args(erlang, length, 1) -> [1];
-%%structure_inspecting_args(erlang, setelement, 3) -> [2].
-structure_inspecting_args(_, _, _) -> []. % XXX: assume no arg needs inspection
 
 
 check_fun_application(Fun, Args) ->
