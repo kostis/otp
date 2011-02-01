@@ -2,7 +2,7 @@
 %%-----------------------------------------------------------------------
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2006-2010. All Rights Reserved.
+%% Copyright Ericsson AB 2006-2011. All Rights Reserved.
 %%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
@@ -2196,8 +2196,8 @@ state__scc(#state{scc = SCC}) ->
 state__add_fun_to_scc(Fun, #state{scc = SCC} = State) ->
   State#state{scc = ordsets:add_element(Fun, SCC)}.
 
-state__plt(#state{plt = PLT}) ->
-  PLT.
+%% state__plt(#state{plt = PLT}) ->
+%%   PLT.
 
 state__new_constraint_context(State) ->
   State#state{cs = []}.
