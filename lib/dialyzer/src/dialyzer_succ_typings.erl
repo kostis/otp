@@ -2,7 +2,7 @@
 %%-----------------------------------------------------------------------
 %% %CopyrightBegin%
 %%
-%% Copyright Ericsson AB 2006-2010. All Rights Reserved.
+%% Copyright Ericsson AB 2006-2011. All Rights Reserved.
 %%
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
@@ -31,16 +31,14 @@
 	 analyze_callgraph/6,
 	 analyze_scc_parallel/3,
 	 check_fixpoint/4,
-	 insert_into_plt/3,
+	 insert_into_plt_parallel/1,
 	 get_warnings/8,
 	 get_warnings_from_module_parallel/4,
 	 refine_one_module_parallel/3,
-	 refine_one_scc_parallel/3,
-	 report_elapsed_time/3]).
+	 refine_one_scc_parallel/3]).
 
 %% These are only intended as debug functions.
--export([doit/1,
-	 get_top_level_signatures/3]).
+-export([doit/1, get_top_level_signatures/3]).
 
 %%-define(DEBUG, true).
 %%-define(DEBUG_PP, true).
@@ -59,13 +57,27 @@
 -define(ldebug(X__, Y__), ok).
 -endif.
 
--define(REPORT_MODE, false).
 %%-define(REPORT, true).
 
 -ifdef(REPORT).
 -define(report(X__, Y__), io:format(X__, Y__)).
 -else.
 -define(report(X__, Y__), ok).
+-endif.
+
+%%-define(REPORT_TIME, true).
+
+-ifdef(REPORT_TIME).
+-define(report_elapsed_time(T1__, T2__, What__),
+	begin
+	  ElapsedTime = T2__ - T1__,
+	  Mins = ElapsedTime div 60000,
+	  Secs = (ElapsedTime rem 60000) / 1000,
+	  io:format("Completed: ~p  Time: in secs: ~p in mins: ~wm~.2fs\n", 
+		    [What__, ElapsedTime / 1000, Mins, Secs])
+	end).
+-else.
+-define(report_elapsed_time(T1__, T2__, What__), ok).
 -endif.
 
 -define(TYPE_LIMIT, 4).
@@ -79,7 +91,7 @@
 
 -type parent() :: 'none' | pid().
 
--record(st, {callgraph      :: dialyzer_callgraph:callgraph(),
+-record(st, {callgraph          :: dialyzer_callgraph:callgraph(),
 	     codeserver         :: dialyzer_codeserver:codeserver(),
 	     no_warn_unused     :: set(),
 	     parallel           :: boolean(),
@@ -158,7 +170,7 @@ get_refined_success_typings(State) ->
 
 get_warnings(Callgraph, Plt, DocPlt, Codeserver,
 	     NoWarnUnused, Parent, BehavioursChk, Parallel) ->
-  {_T1,_}=statistics(wall_clock),
+  %% {_T1,_} = statistics(wall_clock),
   InitState = #st{callgraph = Callgraph, codeserver = Codeserver,
 		  no_warn_unused = NoWarnUnused, parallel = Parallel, 
 		  parent = Parent, plt = Plt, old_plt = dialyzer_plt:new(),
@@ -170,30 +182,29 @@ get_warnings(Callgraph, Plt, DocPlt, Codeserver,
   CWarns = dialyzer_contracts:get_invalid_contract_warnings(Mods, Codeserver,
 							    NewState#st.plt, 
 							    Parallel),
-  ?report("Get Warnings from Modules starting......\n",[]),
-  {T1, _} = statistics(wall_clock),
+  ?report("Get Warnings from Modules starting......\n", []),
+  {_T2, _} = statistics(wall_clock),
   Warnings = get_warnings_from_modules(Mods, NewState, BehavioursChk, 
 				       CWarns, Parallel),
-  {T2, _} = statistics(wall_clock),
-  report_elapsed_time(T1,T2,"GetWarnings"),
-  Plt1 = 
+  {_T3, _} = statistics(wall_clock),
+  ?report_elapsed_time(_T2, _T3, "GetWarnings"),
+  Plt1 =
     case Parallel of
-      true->
+      true ->
 	dialyzer_coordinator:delete_global_st(Plt);
-      false->
+      false ->
 	NewState#st.plt
     end,
   NewDocPlt = insert_into_doc_plt(Mods, Plt1, DocPlt),  
-  {_T2,_}=statistics(wall_clock),
-  %%io:format("\nAnalyze callgraph in total ~w\n", [(T2-T1)/1000]),
+  %% {_T4, _} = statistics(wall_clock),
+  %% io:format("\nAnalyze callgraph in total ~w\n", [(_T4-_T1)/1000]),
   {Warnings, Plt1, NewDocPlt}.
-
 
 get_warnings_from_modules([M|Ms], State, BehavioursChk, Acc, false) 
   when is_atom(M) ->
-  {Warnings1, Warnings2, Warnings3} = get_warnings_from_module(M, State, 
-							       BehavioursChk),
-   get_warnings_from_modules(Ms, State, BehavioursChk,
+  {Warnings1, Warnings2, Warnings3} = 
+    get_warnings_from_module(M, State, BehavioursChk),
+  get_warnings_from_modules(Ms, State, BehavioursChk,
 			    [Warnings1, Warnings2, Warnings3|Acc], false);
 get_warnings_from_modules([], _State, _, Acc, false) ->
   lists:flatten(Acc);
@@ -208,16 +219,15 @@ get_warnings_from_modules(Mods, #st{callgraph = Callgraph,
   dialyzer_coordinator:coordinate_warnings(Mods, NewState, 
 					   BehavioursChk, CWarns).
 
--spec get_warnings_from_module_parallel(module(), st() , boolean(), pid()) ->
-					   {'warnings', [[dial_warning()]]}.
+-spec get_warnings_from_module_parallel(module(), st(), boolean(), pid()) -> 'ok'.
 
 get_warnings_from_module_parallel(M, State, BehavioursChk, ServerPid) ->
-  {Warnings1, Warnings2, Warnings3} = get_warnings_from_module(M, State, 
-							       BehavioursChk),
-  ServerPid ! {warnings, [Warnings1, Warnings2, Warnings3]}.
+  {Warnings1, Warnings2, Warnings3} =
+    get_warnings_from_module(M, State, BehavioursChk),
+  ServerPid ! {warnings, [Warnings1, Warnings2, Warnings3]},
+  ok.
 
-get_warnings_from_module(M, State, BehavioursChk) 
-  when is_atom(M) ->
+get_warnings_from_module(M, State, BehavioursChk) when is_atom(M) ->
   #st{callgraph = Callgraph, codeserver = Codeserver,
       no_warn_unused = NoWarnUnused, plt = Plt, parallel = Parallel,
       parent = Parent} = State,
@@ -245,20 +255,23 @@ refine_succ_typings(ModulePostorder, ModuleDigraph,
 		    #st{parallel = Parallel, parent = Parent, 
 			callgraph = Callgraph} = State) ->
   ?report("Refine Success Typings starting......\n", []),
-  {T1, _} = statistics(wall_clock),
-  A = 
+  {_T1, _} = statistics(wall_clock),
+  A =
     case Parallel of
       true ->
 	LightCallgraph = dialyzer_callgraph:shrink(Callgraph),
-	Q = dialyzer_coordinator:coordinate_refine(ModuleDigraph, LightCallgraph, 
-						   Parent),
-	erlang:append_element(Q, State);
+	case dialyzer_coordinator:coordinate_refine(ModuleDigraph,
+						    LightCallgraph,
+						    Parent) of
+	  fixpoint -> {fixpoint, State};
+	  {not_fixpoint, NotFixpoint} -> {not_fixpoint, NotFixpoint, State}
+	end;
       false->
 	?debug("Module postorder: ~p\n", [ModulePostorder]),
 	refine_succ_typings_serial(ModulePostorder, State, [])
     end,
-  {T2, _} = statistics(wall_clock),
-  report_elapsed_time(T1,T2,"Refine success typings"),
+  {_T2, _} = statistics(wall_clock),
+  ?report_elapsed_time(_T1, _T2, "Refine success typings"),
   A.
 
 refine_succ_typings_serial([SCC|SCCs], State, Fixpoint) ->
@@ -288,36 +301,33 @@ refine_succ_typings_serial([], State, Fixpoint) ->
     false -> {not_fixpoint, Fixpoint, State}
   end.
 
- -spec refine_one_module_parallel(module(), dialyzer_callgraph:callgraph(), 
-				  pid()) ->
-				     {true, [ module()], ordset(label())}|
-				     {false, [ module()], [{label(),term()}], 
-				      ordset(label())}.
+-spec refine_one_module_parallel(module(), dialyzer_callgraph:callgraph(), 
+				 pid()) -> 'ok'.
 
 refine_one_module_parallel(M, Callgraph, ServerPid) ->
   State = #st{callgraph = Callgraph, parallel = true},
-  case refine_one_module(M, State) of
-    {true, []} ->
-      ServerPid ! {true, [M],  
-		ordsets:new()};
-    {false, NotFixpoint} ->
-      ServerPid ! {false, [M], NotFixpoint, 
-		ordsets:from_list([FunLbl || {FunLbl,_Type} <- NotFixpoint])}
-  end.
+  Msg = case refine_one_module(M, State) of
+	  {true, []} ->
+	    {true, [M], ordsets:new()};
+	  {false, NotFixpoint} ->
+	    Lbls = [FunLbl || {FunLbl,_Type} <- NotFixpoint],
+	    {false, [M], NotFixpoint, ordsets:from_list(Lbls)}
+	end,
+  ServerPid ! Msg,
+  ok.
 
 -spec refine_one_scc_parallel(dialyzer_callgraph:scc(), 
-			      dialyzer_callgraph:callgraph(), pid()) ->
-				 {true, dialyzer_callgraph:scc(), 
-				  ordset(label())}.
+			      dialyzer_callgraph:callgraph(), pid()) -> 'ok'.
 			     
 refine_one_scc_parallel(SCC, Callgraph, ServerPid) ->
   State = #st{callgraph = Callgraph, parallel = true},
   {_NewState, FixpointFromScc} = refine_one_scc(SCC, State),
-  ServerPid ! {true, SCC, FixpointFromScc}.
+  ServerPid ! {true, SCC, FixpointFromScc},
+  ok.
 
 refine_one_module(M, State) ->
-  #st{callgraph = Callgraph, codeserver = CodeServer, parallel = Parallel, 
-	  plt = PLT} = State,
+  #st{callgraph = Callgraph, codeserver = CodeServer,
+      parallel = Parallel, plt = PLT} = State,
   ModCode = dialyzer_codeserver:lookup_mod_code(M, CodeServer, Parallel),
   AllFuns = collect_fun_info([ModCode]),
   FunTypes = get_fun_types_from_plt(AllFuns, State),
@@ -353,8 +363,8 @@ refine_mods_in_scc([Mod|Mods], State, Fixpoint) ->
       true ->
 	State
     end,
-  FixpointFromModule =  ordsets:from_list([FunLbl || 
-					    {FunLbl,_Type} <- NewFixpoint]),
+  FixpointFromModule = ordsets:from_list([FunLbl || 
+					   {FunLbl,_Type} <- NewFixpoint]),
   NewFixpoint2 = ordsets:union(FixpointFromModule, Fixpoint),
   refine_mods_in_scc(Mods, NewState, NewFixpoint2);
 refine_mods_in_scc([], State, Fixpoint) ->
@@ -414,18 +424,20 @@ compare_types_1([], [], _Strict, NotFixpoint) ->
 
 find_succ_typings(#st{callgraph = Callgraph, parallel = Parallel, 
 		      parent = Parent} = State) ->
-  ?report("Find Success Typings starting......\n",[]),
-  {T1, _} = statistics(wall_clock),
+  ?report("Find Success Typings starting...\n", []),
+  {_T1, _} = statistics(wall_clock),
   Q =
     case Parallel of
       true ->
-	R = dialyzer_coordinator:coordinate_find(Callgraph, Parent),
-	erlang:append_element(R,State);
+	case dialyzer_coordinator:coordinate_find(Callgraph, Parent) of
+	  fixpoint -> {fixpoint, State};
+	  {not_fixpoint, NotFixpoint} -> {not_fixpoint, NotFixpoint, State}
+	end;
       false ->
 	find_succ_typings(State, [])
     end,
-  {T2, _} = statistics(wall_clock),
-  report_elapsed_time(T1,T2,"Find success typings"),
+  {_T2, _} = statistics(wall_clock),
+  ?report_elapsed_time(_T1, _T2, "Find success typings"),
   Q.
 
 find_succ_typings(#st{callgraph = Callgraph, parent = Parent, 
@@ -451,7 +463,7 @@ find_succ_typings(#st{callgraph = Callgraph, parent = Parent,
   end.
  
 -spec check_fixpoint(ordset(_), dialyzer_callgraph:callgraph() | 'undefined',
-					 boolean(), boolean()) -> boolean().
+		     boolean(), boolean()) -> boolean().
 
 check_fixpoint(Fixpoint, Callgraph, Fast, Parallel) ->
   case Fast of
@@ -467,22 +479,19 @@ has_escaping([Label|Rest], Callgraph, Parallel) ->
 has_escaping([], _Callgraph, _Parallel) ->
   false.
 
--spec analyze_scc_parallel(dialyzer_callgraph:scc(), pid(), boolean()) -> 
-		 {results, dialyzer_callgraph:scc(), 
-		  [{label(),erl_types:erl_type()}], 
-		  dialyzer_contracts:plt_contracts(), ordset(label())}. 
+-spec analyze_scc_parallel(dialyzer_callgraph:scc(), pid(), boolean()) -> 'ok'. 
 
 analyze_scc_parallel(SCC, ServerPid, Fast) ->
   {_T1, _} = statistics(wall_clock),
-  State = #st{parallel = true},  
   {SuccTypes, PltContracts, NotFixpoint, _NewState} = 
-    analyze_scc(SCC, State, Fast),
+    analyze_scc(SCC, #st{parallel = true}, Fast),
   {_T2, _} = statistics(wall_clock),
-  %% report_elapsed_time(T1,T2,SCC),
-  ServerPid ! {results, SCC, SuccTypes, PltContracts, NotFixpoint}.
-  
-analyze_scc(SCC, #st{callgraph = Callgraph, parallel = Parallel} 
-				  = State, true) ->
+  %% ?report_elapsed_time(_T1, _T2, SCC),
+  ServerPid ! {results, SCC, SuccTypes, PltContracts, NotFixpoint},
+  ok.
+
+analyze_scc(SCC, #st{callgraph = Callgraph,
+		     parallel = Parallel} = State, true) ->
   NeedAnalysis = dialyzer_callgraph:need_analysis(SCC, Callgraph, Parallel),
   fast_analyze_scc(SCC, State, NeedAnalysis);
 analyze_scc(SCC, State, false) ->
@@ -514,11 +523,12 @@ fast_analyze_scc(SCC, #st{callgraph= Callgraph, parallel = Parallel} = State,
     slow_analyze_scc(SCC, State),
   {NewCallgraph, NotFixpoint} =
     case differ_from_old_plt(AllFuns, State, SuccTypes) of
-      true  -> ?ldebug("changed",[]),
-	       {dialyzer_callgraph:changed(SCC, Callgraph, Parallel), 
-		NotFixpoint2};
-      false -> ?ldebug("unchanged",[]),
-	       {Callgraph,[]}
+      true  ->
+	?ldebug("changed",[]),
+	{dialyzer_callgraph:changed(SCC, Callgraph, Parallel), NotFixpoint2};
+      false ->
+	?ldebug("unchanged",[]),
+	{Callgraph, []}
     end,
   NewState = State#st{callgraph = NewCallgraph},
   {dict:to_list(SuccTypes), PltContracts, NotFixpoint, NewState}; 
@@ -588,7 +598,7 @@ find_succ_types_for_scc(SCC_Info, Contracts, #st{codeserver = Codeserver,
   case (ContractFixpoint andalso
 	reached_fixpoint_strict(PropTypes, FilteredFunTypes)) of
     true ->
-      {FilteredFunTypes, PltContracts, [], AllFuns};
+      {FilteredFunTypes, PltContracts, ordsets:new(), AllFuns};
     false ->
       {FilteredFunTypes, PltContracts,
        ordsets:from_list([Fun || {Fun, _Arity} <- AllFuns]), AllFuns}
@@ -654,27 +664,20 @@ insert_into_doc_plt([M|Ms], Plt, DocPlt) ->
   case dialyzer_plt:lookup_module(Plt, M) of
     {value, List} ->
       SuccTypes = [{MFA, {Ret, Args}} || {{_M,F,_A} = MFA, Ret, Args} <- List,
-                         F =/= 'module_info'],
+					 F =/= 'module_info'],
       NewDocPlt = dialyzer_plt:insert_list(DocPlt, SuccTypes),
       insert_into_doc_plt(Ms, Plt, NewDocPlt);
     none ->
       insert_into_doc_plt(Ms, Plt, DocPlt)
   end.
 
--spec insert_into_plt([{label(),erl_types:erl_type()}], st() | 'undefined', 
-		      boolean()) -> st().
+-spec insert_into_plt_parallel([{label(), erl_types:erl_type()}]) -> 'ok'.
 			 
-insert_into_plt(SuccTypes, State, Parallel) ->
-  State1 = 
-    case Parallel of
-      true ->
-	#st{parallel = Parallel};
-      false ->
-	State
-    end,
-  insert_into_plt(SuccTypes, State1).
+insert_into_plt_parallel(SuccTypes) ->
+  _ = insert_into_plt(SuccTypes, #st{parallel = true}),
+  ok.
       
-insert_into_plt(SuccTypes0, #st{parallel= Parallel, plt = Plt} = State) ->
+insert_into_plt(SuccTypes0, #st{parallel = Parallel, plt = Plt} = State) ->
   SuccTypes = format_succ_types(SuccTypes0, State),
   debug_pp_succ_typings(SuccTypes),
   State#st{plt = dialyzer_plt:insert_list(Plt, SuccTypes, Parallel)}.
@@ -721,20 +724,6 @@ send_log(Parent, Msg) ->
 
 format_scc(SCC) ->
   [MFA || {_M, _F, _A} = MFA <- SCC].
-
--spec report_elapsed_time(non_neg_integer(), non_neg_integer(), string()) -> ok.
-			     
-report_elapsed_time(T1, T2, Job) ->
-  case ?REPORT_MODE of
-    false -> ok;
-    _ ->
-      ElapsedTime = T2 - T1,
-      Mins = ElapsedTime div 60000,
-      Secs = (ElapsedTime rem 60000) / 1000,
-      io:format("Completed: ~p  Time: in secs: ~p in mins: ~wm~.2fs\n", 
-		[Job, ElapsedTime/1000, Mins, Secs]),
-      ok
-  end.
 
 %% ============================================================================
 %%

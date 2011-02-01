@@ -177,9 +177,9 @@ analysis_start(Parent, #analysis{race_detection = RaceDetection} = Analysis) ->
   NewCallgraph =
     case RaceDetection of
       true ->
-	ets:new(cfgs, [named_table, public]),
- 	public_tables = ets:new(public_tables,[public, named_table]),
-	named_tables = ets:new(named_tables,[public, named_table]),
+	cfgs = ets:new(cfgs, [named_table, public]),
+ 	public_tables = ets:new(public_tables, [public, named_table]),
+	named_tables = ets:new(named_tables, [public, named_table]),
 	dialyzer_callgraph:put_race_detection(true, Callgraph);
       false -> Callgraph
     end,
